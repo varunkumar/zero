@@ -5,5 +5,8 @@
   "dependencies": {
     "@zero/protocol": "workspace:*",
     "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14"
   }
 }
