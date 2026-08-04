@@ -1,0 +1,25 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "zero",
+    },
+    "packages/core": {
+      "name": "@zero/core",
+    },
+    "packages/daemon": {
+      "name": "@zero/daemon",
+    },
+    "packages/protocol": {
+      "name": "@zero/protocol",
+    },
+  },
+  "packages": {
+    "@zero/core": ["@zero/core@workspace:packages/core"],
+
+    "@zero/daemon": ["@zero/daemon@workspace:packages/daemon"],
+
+    "@zero/protocol": ["@zero/protocol@workspace:packages/protocol"],
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "@zero/core",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" }
+}
