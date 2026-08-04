@@ -1,0 +1,7 @@
+# tsc -b (see the `typecheck` script) emits compiled *.test.js copies into
+# each package's dist/ (gitignored, per Finding 6). Without this, `bun
+# test`'s default recursive discovery picks those up alongside the real
+# *.test.ts sources whenever dist/ happens to exist locally, silently
+# running every test twice.
+[test]
+pathIgnorePatterns = ["**/dist/**"]

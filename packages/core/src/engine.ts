@@ -28,9 +28,13 @@ export class CompletionEngine {
   async #pick(): Promise<ModelProvider | null> {
     for (const p of this.#providers) {
       const cached = this.#availCache.get(p.id);
-      const ok = cached && Date.now() - cached.at < 30_000
-        ? cached.ok : await p.available().catch(() => false);
-      this.#availCache.set(p.id, { ok, at: Date.now() });
+      let ok: boolean;
+      if (cached && Date.now() - cached.at < 30_000) {
+        ok = cached.ok;
+      } else {
+        ok = await p.available().catch(() => false);
+        this.#availCache.set(p.id, { ok, at: Date.now() });
+      }
       if (ok) return p;
     }
     return null;

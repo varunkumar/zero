@@ -17,6 +17,14 @@ export function App() {
   const openPathRef = useRef<string | null>(null);
   openPathRef.current = openPath;
   const viewRef = useRef<EditorView | undefined>(undefined);
+  // Every file opened this session, keyed by path — used both as context for
+  // completions (Finding 3) and, combined with lastWriteRef below, to avoid
+  // re-reading a file right after we wrote it ourselves (Finding 1).
+  const buffersRef = useRef(new Map<string, string>());
+  // The most recent successful fs/write we issued, not yet confirmed as
+  // "seen" via its own fs/changed echo. Cleared after that echo is consumed
+  // once, so a genuine subsequent external change still triggers a re-read.
+  const lastWriteRef = useRef<{ path: string; content: string } | null>(null);
   const completionRef = useRef(
     createCompletion(
       () => viewRef.current,
@@ -56,7 +64,10 @@ export function App() {
           setOpenPath(path);
           setContent(res.content);
           setStatus("");
-          completionRef.current.buffers.setBuffers([{ path, content: res.content }]);
+          buffersRef.current.set(path, res.content);
+          completionRef.current.buffers.setBuffers(
+            [...buffersRef.current].map(([p, content]) => ({ path: p, content })),
+          );
         })
         .catch((e: unknown) => {
           setStatus(`error: ${e instanceof Error ? e.message : String(e)}`);
@@ -68,7 +79,10 @@ export function App() {
   const onEditorChange = useCallback((text: string) => {
     const path = openPathRef.current;
     if (!path) return;
-    completionRef.current.buffers.setBuffers([{ path, content: text }]);
+    buffersRef.current.set(path, text);
+    completionRef.current.buffers.setBuffers(
+      [...buffersRef.current].map(([p, content]) => ({ path: p, content })),
+    );
   }, []);
 
   useEffect(() => {
@@ -76,7 +90,19 @@ export function App() {
     client.onNotification((method, params) => {
       if (method !== "fs/changed") return;
       const { path } = params as FsChangedEvent;
-      if (path === openPathRef.current) openFile(path, client);
+      if (path !== openPathRef.current) return;
+      const lastWrite = lastWriteRef.current;
+      if (lastWrite && lastWrite.path === path) {
+        // This is (almost certainly) the fs/changed echo of our own write:
+        // the daemon's fs.watch doesn't distinguish self-writes from
+        // external ones, but the content it now holds is exactly what's
+        // already in the editor, so re-reading (and destroying editor
+        // state) would be pure loss. Consume the suppression once; a
+        // genuine external change after this still gets picked up below.
+        lastWriteRef.current = null;
+        return;
+      }
+      openFile(path, client);
     });
   }, [client, openFile]);
 
@@ -87,6 +113,7 @@ export function App() {
       client
         .request("fs/write", { path, content: text })
         .then(() => {
+          lastWriteRef.current = { path, content: text };
           setStatus(`saved ${path}`);
         })
         .catch((e: unknown) => {
@@ -132,6 +159,7 @@ export function App() {
         <div style={{ flex: 1, minHeight: 0 }}>
           {openPath !== null ? (
             <Editor
+              path={openPath}
               content={content}
               onSave={onSave}
               onChange={onEditorChange}
