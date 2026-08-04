@@ -1,5 +1,9 @@
 {
   "name": "@zero/daemon",
   "type": "module",
-  "exports": { ".": "./src/index.ts" }
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@zero/protocol": "workspace:*",
+    "zod": "^3.23.0"
+  }
 }
