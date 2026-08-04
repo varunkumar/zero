@@ -37,7 +37,7 @@ export function createDaemon(opts: DaemonOptions) {
   });
 
   return {
-    rpc, token, port: server.port,
+    rpc, token, port: server.port as number,
     broadcast(method: string, params: unknown) {
       const msg = JSON.stringify({ jsonrpc: "2.0", method, params });
       for (const ws of sockets) ws.send(msg);
