@@ -81,6 +81,27 @@ export class TabStore {
     return id;
   }
 
+  /** Drops an editor group, moving its tabs into a surviving neighbour so a
+   * split close can never discard unsaved work. Refuses to remove the last
+   * group (there must always be somewhere to edit) and returns whether it
+   * removed anything. */
+  removeGroup(groupId: string): boolean {
+    if (this.#groups.length <= 1) return false;
+    const idx = this.#groups.findIndex((g) => g.id === groupId);
+    if (idx === -1) return false;
+    const [removed] = this.#groups.splice(idx, 1) as [Group];
+    const target = this.#groups[idx - 1] ?? this.#groups[0]!;
+    for (const tab of removed.tabs) {
+      // The same file open in both groups would otherwise become two tabs
+      // over one path in one group.
+      if (target.tabs.some((t) => t.path === tab.path)) continue;
+      target.tabs.push(tab);
+      target.activeTabId ??= tab.id;
+    }
+    this.#notify();
+    return true;
+  }
+
   findTab(tabId: string): { group: Group; tab: Tab } | undefined {
     for (const group of this.#groups) {
       const tab = group.tabs.find((t) => t.id === tabId);

@@ -77,3 +77,41 @@ test("subscribe notifies listeners on state changes", () => {
   store.openFile(store.getGroups()[0].id, "b.ts", "2");
   expect(notifications).toBe(1);
 });
+
+test("removeGroup refuses to remove the only group", () => {
+  const store = new TabStore();
+  expect(store.removeGroup(store.getGroups()[0].id)).toBe(false);
+  expect(store.getGroups().length).toBe(1);
+});
+
+test("removeGroup moves the closed group's tabs into a neighbour", () => {
+  const store = new TabStore();
+  const first = store.getGroups()[0].id;
+  const second = store.splitGroup(first);
+  const moved = store.openFile(second, "b.ts", "2");
+  store.updateContent(moved, "2-edited");
+  expect(store.removeGroup(second)).toBe(true);
+  const groups = store.getGroups();
+  expect(groups.length).toBe(1);
+  expect(groups[0].id).toBe(first);
+  expect(groups[0].tabs.map((t) => t.path)).toEqual(["b.ts"]);
+  expect(groups[0].activeTabId).toBe(moved);
+  expect(store.findTab(moved)!.tab.content).toBe("2-edited");
+});
+
+test("removeGroup does not duplicate a path already open in the target group", () => {
+  const store = new TabStore();
+  const first = store.getGroups()[0].id;
+  const kept = store.openFile(first, "a.ts", "1");
+  const second = store.splitGroup(first);
+  store.openFile(second, "a.ts", "1");
+  expect(store.removeGroup(second)).toBe(true);
+  expect(store.getGroups()[0].tabs.map((t) => t.id)).toEqual([kept]);
+});
+
+test("removeGroup ignores an unknown group id", () => {
+  const store = new TabStore();
+  store.splitGroup(store.getGroups()[0].id);
+  expect(store.removeGroup("group-nope")).toBe(false);
+  expect(store.getGroups().length).toBe(2);
+});

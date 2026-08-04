@@ -180,6 +180,9 @@ export function Workbench(props: { client: RpcClient }) {
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
+  // Group ids created by `view.splitEditor`, most recent last; `group-1` is
+  // deliberately absent so it can never be closed.
+  const splitStack = useRef<string[]>([]);
   // One EditorView per editor group; completions target the focused group's.
   const views = useConst(() => new Map<string, EditorView | undefined>());
   const activeGroupIdRef = useRef(activeGroupId);
@@ -226,13 +229,6 @@ export function Workbench(props: { client: RpcClient }) {
     void settingsStore.reconcile().then((s) => setSettings(s)).catch(() => undefined);
     return unsubscribe;
   }, [settingsStore]);
-
-  // theme.css keys its custom properties off `:root[data-theme=...]`, so the
-  // attribute has to land on <html>; ThemeProvider's own wrapper div is below
-  // :root and would never match.
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
 
   // THE single client.onNotification handler for the whole app. RpcClient
   // stores one handler and a second call silently replaces it, so every
@@ -315,7 +311,27 @@ export function Workbench(props: { client: RpcClient }) {
       params: { groupId: newGroupId },
       position: { referencePanel: editorPanelId(fromGroupId), direction: "right" },
     });
+    splitStack.current.push(newGroupId);
     setActiveGroupId(newGroupId);
+  }
+
+  /** Undo of `splitEditor`. workbench.css hides dockview's own tab/close
+   * chrome (document tabs come from TabStore), so without this a split is a
+   * one-way door. Closes the most recently created split — a stack, rather
+   * than focus tracking, keeps repeated split/close symmetric. */
+  function closeEditorGroup(): void {
+    const api = dockApi.current;
+    if (!api) return;
+    const groupId = splitStack.current.at(-1);
+    // The initial group is never on the stack, so the last editor area can't
+    // be closed; TabStore.removeGroup refuses that case as well.
+    if (!groupId) return;
+    if (!tabStore.removeGroup(groupId)) return;
+    splitStack.current.pop();
+    const panel = api.getPanel(editorPanelId(groupId));
+    if (panel) api.removePanel(panel);
+    views.delete(groupId);
+    setActiveGroupId(splitStack.current.at(-1) ?? tabStore.getGroups()[0]!.id);
   }
 
   function toggleSidebar(): void {
@@ -351,6 +367,7 @@ export function Workbench(props: { client: RpcClient }) {
     openSettings: () => setSettingsOpen(true),
     toggleSidebar,
     splitEditor,
+    closeEditorGroup,
   };
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -360,11 +377,15 @@ export function Workbench(props: { client: RpcClient }) {
       { id: "palette.commands", title: "Show All Commands", run: () => actionsRef.current.openPalette(), keybinding: "$mod+Shift+KeyP" },
       { id: "palette.files", title: "Go to File", run: () => actionsRef.current.openFileOpener(), keybinding: "$mod+KeyP" },
       { id: "file.save", title: "Save File", run: () => actionsRef.current.saveActive(), keybinding: "$mod+KeyS" },
-      { id: "file.close", title: "Close File", run: () => actionsRef.current.closeActive(), keybinding: "$mod+KeyW" },
+      // No keybinding: browsers reserve Cmd/Ctrl+W (tab close) and refuse
+      // preventDefault, so any such binding would close the browser tab and
+      // silently drop unsaved work. Palette-only for now.
+      { id: "file.close", title: "Close File", run: () => actionsRef.current.closeActive() },
       { id: "view.search", title: "Show Search", run: () => actionsRef.current.showSearch(), keybinding: "$mod+Shift+KeyF" },
       { id: "view.files", title: "Show Files", run: () => actionsRef.current.showFiles(), keybinding: "$mod+Shift+KeyE" },
       { id: "view.toggleSidebar", title: "Toggle Sidebar", run: () => actionsRef.current.toggleSidebar(), keybinding: "$mod+KeyB" },
       { id: "view.splitEditor", title: "Split Editor", run: () => actionsRef.current.splitEditor(), keybinding: "$mod+Backslash" },
+      { id: "view.closeEditorGroup", title: "Close Editor Group", run: () => actionsRef.current.closeEditorGroup(), keybinding: "$mod+Shift+Backslash" },
       { id: "view.toggleTheme", title: "Toggle Theme", run: () => actionsRef.current.toggleTheme() },
       { id: "preferences.open", title: "Preferences: Open Settings", run: () => actionsRef.current.openSettings() },
     ];
