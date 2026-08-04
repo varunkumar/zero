@@ -12,6 +12,7 @@ export function Editor(props: {
   onChange?: (text: string) => void;
   requestCompletion?: (s: { prefix: string; suffix: string }) => void;
   onViewChange?: (view: EditorView | undefined) => void;
+  onCursorChange?: (pos: { line: number; column: number }) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>();
@@ -45,6 +46,11 @@ export function Editor(props: {
           ghostText((s) => propsRef.current.requestCompletion?.(s)),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) propsRef.current.onChange?.(u.state.doc.toString());
+            if (u.selectionSet || u.docChanged) {
+              const pos = u.state.selection.main.head;
+              const line = u.state.doc.lineAt(pos);
+              propsRef.current.onCursorChange?.({ line: line.number, column: pos - line.from + 1 });
+            }
           }),
         ],
       }),
