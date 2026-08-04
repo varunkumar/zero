@@ -49,7 +49,7 @@ export class SettingsStore {
 
   async reconcile(): Promise<WorkbenchSettings> {
     const { value } = await this.#client.request("settings/get", { key: "workbench" }) as { value: unknown };
-    if (value) {
+    if (value !== undefined) {
       this.#snapshot = value as WorkbenchSettings;
       this.#writeStorage(this.#snapshot);
       this.#notify();
