@@ -9,6 +9,41 @@ export function SettingsPanel(props: { registry: CommandRegistry; theme: "light"
         onClick={(e) => e.stopPropagation()}
       >
         <h3>Preferences</h3>
+        <h4>Theme</h4>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <button
+            onClick={() => props.registry.run("view.toggleTheme")}
+            style={{
+              flex: 1,
+              padding: 8,
+              border: `2px solid ${props.theme === "light" ? "var(--zero-accent)" : "var(--zero-border)"}`,
+              background: props.theme === "light" ? "var(--zero-accent)" : "transparent",
+              color: props.theme === "light" ? "var(--zero-editor-bg)" : "var(--zero-editor-fg)",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontWeight: props.theme === "light" ? 600 : 400,
+              fontSize: 14,
+            }}
+          >
+            Light
+          </button>
+          <button
+            onClick={() => props.registry.run("view.toggleTheme")}
+            style={{
+              flex: 1,
+              padding: 8,
+              border: `2px solid ${props.theme === "dark" ? "var(--zero-accent)" : "var(--zero-border)"}`,
+              background: props.theme === "dark" ? "var(--zero-accent)" : "transparent",
+              color: props.theme === "dark" ? "var(--zero-editor-bg)" : "var(--zero-editor-fg)",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontWeight: props.theme === "dark" ? 600 : 400,
+              fontSize: 14,
+            }}
+          >
+            Dark
+          </button>
+        </div>
         <h4>Keybindings</h4>
         <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
           <tbody>
