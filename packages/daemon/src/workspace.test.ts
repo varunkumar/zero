@@ -80,3 +80,49 @@ test("watch reports changes", async () => {
   expect(await changed).toBe("a.ts");
   unsub();
 });
+
+test("search finds matches with line/column, respects case sensitivity", async () => {
+  const root = makeProject();
+  writeFileSync(join(root, "needle.ts"), "const Needle = 1;\nfunction find() { return Needle; }\n");
+  const ws = new Workspace(root);
+
+  const caseSensitive = await ws.search("Needle", true);
+  expect(caseSensitive.matches).toEqual([
+    { path: "needle.ts", line: 1, column: 6, text: "const Needle = 1;" },
+    { path: "needle.ts", line: 2, column: 25, text: "function find() { return Needle; }" },
+  ]);
+  expect(caseSensitive.truncated).toBe(false);
+
+  const caseInsensitiveOnly = await ws.search("needle", false);
+  expect(caseInsensitiveOnly.matches.length).toBe(2);
+
+  const caseSensitiveMiss = await ws.search("needle", true);
+  expect(caseSensitiveMiss.matches).toEqual([]);
+});
+
+test("search honors gitignore and skips .git", async () => {
+  const root = makeProject(); // makeProject() already writes dist/junk.js with content "x" and ignores dist/
+  const ws = new Workspace(root);
+  const result = await ws.search("x", false);
+  expect(result.matches.some((m) => m.path.startsWith("dist"))).toBe(false);
+  expect(result.matches.some((m) => m.path.startsWith(".git"))).toBe(false);
+});
+
+test("search caps matches and reports truncated", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  for (let i = 0; i < 10; i++) {
+    writeFileSync(join(root, `f${i}.ts`), Array(60).fill("target line").join("\n"));
+  }
+  const ws = new Workspace(root);
+  const result = await ws.search("target", false);
+  expect(result.matches.length).toBe(500);
+  expect(result.truncated).toBe(true);
+});
+
+test("search skips binary files", async () => {
+  const root = makeProject();
+  writeFileSync(join(root, "bin.dat"), Buffer.from([0, 1, 2, 0, 3, 0x66, 0x6f, 0x6f]));
+  const ws = new Workspace(root);
+  const result = await ws.search("foo", false);
+  expect(result.matches.some((m) => m.path === "bin.dat")).toBe(false);
+});
