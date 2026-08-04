@@ -1,0 +1,84 @@
+/* Dockview is used here purely as a resizable grid (sidebar | editor area,
+ * plus editor splits). Panel identity is ours: the editor area renders its
+ * own tab strip backed by TabStore, and the sidebar is a fixed dock. So the
+ * built-in dockview tab headers are hidden — otherwise every panel would
+ * carry a second, redundant tab bar above ours.
+ * Class names below are dockview 1.17's DOM (`.groupview >
+ * .tabs-and-actions-container`); scoped to `.zero-dockview` so nothing else
+ * on the page is affected. */
+.zero-dockview .groupview > .tabs-and-actions-container {
+  display: none;
+}
+
+.zero-tabstrip {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  background: var(--zero-tab-bg);
+  border-bottom: 1px solid var(--zero-border);
+  flex-shrink: 0;
+}
+
+.zero-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--zero-tab-fg);
+  background: var(--zero-tab-bg);
+  border: none;
+  border-right: 1px solid var(--zero-border);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.zero-tab[aria-selected="true"] {
+  background: var(--zero-tab-active-bg);
+  color: var(--zero-tab-active-fg);
+}
+
+.zero-tab-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.6;
+}
+
+.zero-tab-close:hover {
+  opacity: 1;
+}
+
+.zero-dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--zero-dirty-dot);
+  flex-shrink: 0;
+}
+
+.zero-sidebar-toggle {
+  display: flex;
+  border-bottom: 1px solid var(--zero-border);
+  flex-shrink: 0;
+}
+
+.zero-sidebar-toggle button {
+  flex: 1;
+  padding: 4px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--zero-sidebar-fg);
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.zero-sidebar-toggle button[aria-pressed="true"] {
+  border-bottom-color: var(--zero-accent);
+  color: var(--zero-accent);
+}
