@@ -7,3 +7,5 @@ export type {
 } from "./types";
 export { estimateTokens } from "./tokens";
 export { buildFimPrompt } from "./prompt";
+export { gatherContext } from "./context";
+export { BufferContext } from "./bufferContext";
