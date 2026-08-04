@@ -4,6 +4,7 @@
   "exports": { ".": "./src/index.ts" },
   "dependencies": {
     "@zero/protocol": "workspace:*",
+    "ignore": "^5.3.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
