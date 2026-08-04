@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { EditorView } from "@codemirror/view";
 import type { RpcClient, FsReadResult, FsChangedEvent } from "@zero/protocol";
 import { connect } from "./connection";
-import { FileTree } from "./FileTree";
 import { Editor } from "./Editor";
 import { createCompletion } from "./completionSetup";
 import { StatusPill } from "./StatusPill";
@@ -133,7 +132,7 @@ export function App() {
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
       <div style={{ width: 240, borderRight: "1px solid #ccc", flexShrink: 0 }}>
-        <FileTree client={client} activePath={openPath} onOpen={(path) => openFile(path, client)} />
+        <div style={{ color: "#888", padding: 8 }}>Loading workbench…</div>
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div
