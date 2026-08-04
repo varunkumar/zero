@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 import { CommandRegistry } from "../commands/registry";
 import { buildKeyMap } from "./dispatcher";
 
@@ -57,4 +57,25 @@ test("keyMap handler calls preventDefault on the event", () => {
   keyMap["$mod+KeyA"]!({ preventDefault: () => (prevented = true) } as unknown as KeyboardEvent);
 
   expect(prevented).toBe(true);
+});
+
+test("attachKeybindings calls tinykeys with the target and the built key map, and returns its detach fn unchanged", async () => {
+  const detach = () => {};
+  const tinykeysMock = mock((_target: unknown, _keyMap: unknown) => detach);
+  mock.module("tinykeys", () => ({ tinykeys: tinykeysMock }));
+
+  // Re-import so the module picks up the mocked "tinykeys" dependency.
+  const { attachKeybindings: attachKeybindingsWithMock } = await import("./dispatcher");
+
+  const registry = new CommandRegistry();
+  registry.register({ id: "a", title: "A", run: () => {}, keybinding: "$mod+KeyA" });
+  const target = {} as EventTarget;
+
+  const returned = attachKeybindingsWithMock(registry, target);
+
+  expect(tinykeysMock).toHaveBeenCalledTimes(1);
+  const [calledTarget, calledKeyMap] = tinykeysMock.mock.calls[0]!;
+  expect(calledTarget).toBe(target);
+  expect(Object.keys(calledKeyMap as Record<string, unknown>)).toEqual(["$mod+KeyA"]);
+  expect(returned).toBe(detach);
 });
