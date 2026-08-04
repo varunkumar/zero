@@ -1,0 +1,5 @@
+{
+  "name": "@zero/protocol",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" }
+}
