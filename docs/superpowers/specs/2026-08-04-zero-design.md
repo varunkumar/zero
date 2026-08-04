@@ -308,6 +308,13 @@ daemon path). Capability flags in WorkspaceProvider hide missing features.
 - M1, Completion: core engine, ChromeNanoProvider and probe, BufferContext,
   ghost-text UX, OpenAICompatProvider (Ollama) fallback, status pill. Usable
   as an offline copilot.
+- M1.5, Editor shell: turn the minimal M0 web shell into a VS Code-class
+  editor UI. Scope: workbench layout (resizable and collapsible panes, split
+  editors), editor tabs with dirty indicators, command palette, fuzzy file
+  opener (Cmd+P), global search panel, virtualized file tree with file
+  icons, keybinding system, light and dark themes, status bar, settings UI.
+  No new daemon capabilities; UI only. Gets its own design session and spec
+  before implementation. Can run any time after M1, independent of M2+.
 - M2, Terminal and LSP: PTY service and xterm.js with reattach; LSP service
   (TS, Python); diagnostics, hover, definitions; LspContext feeding
   completions.
