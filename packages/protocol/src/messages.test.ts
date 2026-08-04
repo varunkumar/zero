@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { parseMessage, ProtocolError } from "./messages";
 
 test("round-trips a request", () => {
-  const msg = { jsonrpc: "2.0", id: 1, method: "fs/read", params: { path: "a.ts" } };
+  const msg = { jsonrpc: "2.0" as const, id: 1, method: "fs/read", params: { path: "a.ts" } };
   expect(parseMessage(JSON.stringify(msg))).toEqual(msg);
 });
 test("classifies notification (no id)", () => {

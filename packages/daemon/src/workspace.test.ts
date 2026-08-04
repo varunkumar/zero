@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace, PathOutsideWorkspaceError } from "./workspace";
@@ -33,6 +33,36 @@ test("tree honors gitignore and skips .git", async () => {
   expect(paths).toContain("a.ts");
   expect(paths.some((p) => p.startsWith("dist"))).toBe(false);
   expect(paths.some((p) => p.startsWith(".git/"))).toBe(false);
+});
+
+test("blocks symlink escape for read and write", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  writeFileSync(join(outside, "secret.txt"), "secret");
+  symlinkSync(join(outside, "secret.txt"), join(root, "link.txt"));
+  const ws = new Workspace(root);
+  await expect(ws.read("link.txt")).rejects.toThrow(PathOutsideWorkspaceError);
+  await expect(ws.write("link.txt", "pwned")).rejects.toThrow(PathOutsideWorkspaceError);
+});
+
+test("blocks writes through a not-yet-existing path behind a symlinked directory", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await expect(ws.write("outdir/new.txt", "pwned")).rejects.toThrow(PathOutsideWorkspaceError);
+});
+
+test("tree skips symlinks", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  writeFileSync(join(root, "link.txt"), "x"); // placeholder so symlinkSync below targets a real file
+  symlinkSync(join(root, "link.txt"), join(root, "linkfile.txt"));
+  const ws = new Workspace(root);
+  const paths = (await ws.tree()).map((e) => e.path);
+  expect(paths).not.toContain("outdir");
+  expect(paths).not.toContain("linkfile.txt");
 });
 
 test("watch reports changes", async () => {
