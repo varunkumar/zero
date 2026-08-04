@@ -50,9 +50,29 @@ export class Workspace {
   }
 
   async #ignorer(): Promise<Ignore> {
-    const ig = ignore().add([".git"]);
+    const ig = ignore().add([".git", ".zero"]);
     try { ig.add(await fs.readFile(join(this.#root, ".gitignore"), "utf8")); } catch {}
     return ig;
+  }
+
+  async #readSettingsFile(): Promise<Record<string, unknown>> {
+    try {
+      const raw = await fs.readFile(join(this.#root, ".zero", "settings.json"), "utf8");
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  async readSetting(key: string): Promise<unknown> {
+    return (await this.#readSettingsFile())[key];
+  }
+
+  async writeSetting(key: string, value: unknown): Promise<void> {
+    const all = await this.#readSettingsFile();
+    all[key] = value;
+    await fs.mkdir(join(this.#root, ".zero"), { recursive: true });
+    await fs.writeFile(join(this.#root, ".zero", "settings.json"), JSON.stringify(all, null, 2), "utf8");
   }
 
   async tree(): Promise<TreeEntry[]> {
