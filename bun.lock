@@ -7,6 +7,9 @@
     },
     "packages/core": {
       "name": "@zero/core",
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+      },
     },
     "packages/daemon": {
       "name": "@zero/daemon",
