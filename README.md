@@ -1,5 +1,9 @@
 # Zero
 
+<p align="center">
+  <img src="docs/assets/zero-logo-dark.png" alt="Zero" width="320">
+</p>
+
 Zero is a local-first coding environment. The primary use case is coding fully
 offline: you write code by hand with copilot-style inline completions from an
 on-device model, plus an integrated terminal and a chat panel for asking
