@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { buildFimPrompt, estimateTokens } from "./index";
 
-const caps = { id: "fake", contextWindowTokens: 100, supportsFim: true };
+const caps = { id: "fake", contextWindowTokens: 450, supportsFim: true };
 const req = { path: "a.ts", prefix: "const a = ", suffix: ";\n" };
 
 test("estimateTokens is ceil(chars/4)", () => {
@@ -42,7 +42,7 @@ test("drops chunks over budget, highest score wins", () => {
 });
 
 test("trims prefix from the left to fit tiny windows", () => {
-  const tiny = { ...caps, contextWindowTokens: 70 };
+  const tiny = { ...caps, contextWindowTokens: 400 };
   const longPrefix = "y".repeat(1000) + "NEAR_CURSOR";
   const p = buildFimPrompt({ ...req, prefix: longPrefix }, [], tiny);
   expect(p).toContain("NEAR_CURSOR");
