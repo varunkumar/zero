@@ -46,9 +46,9 @@ test("fs/search and settings RPCs over the wire", async () => {
   expect(search.matches.map((m) => m.path)).toEqual(["a.ts"]);
   expect(search.truncated).toBe(false);
 
-  expect(await client.request("settings/get", { key: "workbench" })).toEqual({ value: undefined });
+  expect(await client.request<{ value: unknown }>("settings/get", { key: "workbench" })).toEqual({ value: undefined });
   await client.request("settings/set", { key: "workbench", value: { theme: "dark" } });
-  expect(await client.request("settings/get", { key: "workbench" })).toEqual({ value: { theme: "dark" } });
+  expect(await client.request<{ value: unknown }>("settings/get", { key: "workbench" })).toEqual({ value: { theme: "dark" } });
 
   ws.close(); d.stop();
 });
