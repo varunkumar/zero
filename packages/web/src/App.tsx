@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { EditorView } from "@codemirror/view";
 import type { RpcClient, FsReadResult, FsChangedEvent } from "@zero/protocol";
 import { connect } from "./connection";
 import { FileTree } from "./FileTree";
 import { Editor } from "./Editor";
+import { createCompletion } from "./completionSetup";
+import { StatusPill } from "./StatusPill";
+import { Settings } from "./Settings";
 
 export function App() {
   const [client, setClient] = useState<RpcClient | null>(null);
@@ -12,6 +16,13 @@ export function App() {
   const [status, setStatus] = useState<string>("");
   const openPathRef = useRef<string | null>(null);
   openPathRef.current = openPath;
+  const viewRef = useRef<EditorView | undefined>(undefined);
+  const completionRef = useRef(
+    createCompletion(
+      () => viewRef.current,
+      () => openPathRef.current ?? "",
+    ),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +56,7 @@ export function App() {
           setOpenPath(path);
           setContent(res.content);
           setStatus("");
+          completionRef.current.buffers.setBuffers([{ path, content: res.content }]);
         })
         .catch((e: unknown) => {
           setStatus(`error: ${e instanceof Error ? e.message : String(e)}`);
@@ -52,6 +64,12 @@ export function App() {
     },
     [],
   );
+
+  const onEditorChange = useCallback((text: string) => {
+    const path = openPathRef.current;
+    if (!path) return;
+    completionRef.current.buffers.setBuffers([{ path, content: text }]);
+  }, []);
 
   useEffect(() => {
     if (!client) return;
@@ -91,12 +109,35 @@ export function App() {
         <FileTree client={client} activePath={openPath} onOpen={(path) => openFile(path, client)} />
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ padding: "4px 8px", borderBottom: "1px solid #ccc", fontSize: 12, color: "#555" }}>
-          {openPath ?? "no file open"} {status}
+        <div
+          style={{
+            padding: "4px 8px",
+            borderBottom: "1px solid #ccc",
+            fontSize: 12,
+            color: "#555",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+        >
+          <span>
+            {openPath ?? "no file open"} {status}
+          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <StatusPill engine={completionRef.current.engine} />
+            <Settings />
+          </div>
         </div>
         <div style={{ flex: 1, minHeight: 0 }}>
           {openPath !== null ? (
-            <Editor content={content} onSave={onSave} />
+            <Editor
+              content={content}
+              onSave={onSave}
+              onChange={onEditorChange}
+              requestCompletion={completionRef.current.request}
+              onViewChange={(v) => { viewRef.current = v; }}
+            />
           ) : (
             <div style={{ padding: 16, color: "#888" }}>Select a file to edit</div>
           )}
