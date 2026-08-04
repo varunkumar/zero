@@ -3,8 +3,15 @@ import { EditorView, keymap } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { javascript } from "@codemirror/lang-javascript";
+import { ghostText } from "./ghostText";
 
-export function Editor(props: { content: string; onSave: (text: string) => void }) {
+export function Editor(props: {
+  content: string;
+  onSave: (text: string) => void;
+  onChange?: (text: string) => void;
+  requestCompletion?: (s: { prefix: string; suffix: string }) => void;
+  onViewChange?: (view: EditorView | undefined) => void;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>();
 
@@ -24,10 +31,18 @@ export function Editor(props: { content: string; onSave: (text: string) => void 
               run: (v) => { props.onSave(v.state.doc.toString()); return true; },
             },
           ]),
+          ghostText((s) => props.requestCompletion?.(s)),
+          EditorView.updateListener.of((u) => {
+            if (u.docChanged) props.onChange?.(u.state.doc.toString());
+          }),
         ],
       }),
     });
-    return () => view.current?.destroy();
+    props.onViewChange?.(view.current);
+    return () => {
+      view.current?.destroy();
+      props.onViewChange?.(undefined);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.content]);
 
