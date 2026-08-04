@@ -1,0 +1,33 @@
+import { z } from "zod";
+
+export class ProtocolError extends Error {}
+
+const request = z.object({ jsonrpc: z.literal("2.0"), id: z.number(),
+  method: z.string(), params: z.unknown().optional() });
+const response = z.object({ jsonrpc: z.literal("2.0"), id: z.number(),
+  result: z.unknown().optional(),
+  error: z.object({ code: z.number(), message: z.string() }).optional() });
+const notification = z.object({ jsonrpc: z.literal("2.0"),
+  method: z.string(), params: z.unknown().optional() });
+
+export type RpcRequest = z.infer<typeof request>;
+export type RpcResponse = z.infer<typeof response>;
+export type RpcError = NonNullable<RpcResponse["error"]>;
+export type RpcNotification = z.infer<typeof notification>;
+
+export function parseMessage(raw: string): RpcRequest | RpcResponse | RpcNotification {
+  let data: unknown;
+  try { data = JSON.parse(raw); } catch { throw new ProtocolError("invalid json"); }
+  for (const schema of [request, response, notification]) {
+    const r = schema.safeParse(data);
+    if (r.success) return r.data;
+  }
+  throw new ProtocolError("not a jsonrpc message");
+}
+
+export interface TreeEntry { path: string; kind: "file" | "dir" }
+export interface FsReadParams { path: string }
+export interface FsReadResult { content: string }
+export interface FsWriteParams { path: string; content: string }
+export interface FsTreeResult { entries: TreeEntry[] }
+export interface FsChangedEvent { path: string }

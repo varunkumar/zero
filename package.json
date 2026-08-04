@@ -1,0 +1,6 @@
+{
+  "name": "zero",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": { "test": "bun test", "typecheck": "bunx tsc -b" }
+}
