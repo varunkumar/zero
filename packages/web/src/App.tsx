@@ -14,18 +14,41 @@ export function App() {
   openPathRef.current = openPath;
 
   useEffect(() => {
+    let cancelled = false;
+    let close: (() => void) | null = null;
     connect()
-      .then(setClient)
-      .catch((e: unknown) => setConnectError(e instanceof Error ? e.message : String(e)));
+      .then((conn) => {
+        close = conn.close;
+        if (cancelled) {
+          // StrictMode double-invoked this effect and the first run was cleaned up
+          // before connect() resolved; close this now-orphaned connection instead
+          // of leaking it.
+          conn.close();
+          return;
+        }
+        setClient(conn.client);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setConnectError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+      close?.();
+    };
   }, []);
 
   const openFile = useCallback(
     (path: string, activeClient: RpcClient) => {
-      activeClient.request<FsReadResult>("fs/read", { path }).then((res) => {
-        setOpenPath(path);
-        setContent(res.content);
-        setStatus("");
-      });
+      activeClient
+        .request<FsReadResult>("fs/read", { path })
+        .then((res) => {
+          setOpenPath(path);
+          setContent(res.content);
+          setStatus("");
+        })
+        .catch((e: unknown) => {
+          setStatus(`error: ${e instanceof Error ? e.message : String(e)}`);
+        });
     },
     [],
   );
@@ -43,9 +66,14 @@ export function App() {
     (text: string) => {
       const path = openPathRef.current;
       if (!client || !path) return;
-      client.request("fs/write", { path, content: text }).then(() => {
-        setStatus(`saved ${path}`);
-      });
+      client
+        .request("fs/write", { path, content: text })
+        .then(() => {
+          setStatus(`saved ${path}`);
+        })
+        .catch((e: unknown) => {
+          setStatus(`error: ${e instanceof Error ? e.message : String(e)}`);
+        });
     },
     [client],
   );
