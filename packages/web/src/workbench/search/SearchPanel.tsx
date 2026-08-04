@@ -10,10 +10,16 @@ export function SearchPanel(props: { client: RpcClient; onJumpTo: (path: string,
   useEffect(() => {
     clearTimeout(debounceRef.current);
     if (!query) { setMatches([]); setTruncated(false); return; }
+
+    const requestQuery = query; // Capture query value for this request
+
     debounceRef.current = setTimeout(() => {
       props.client.request<FsSearchResult>("fs/search", { query }).then((res) => {
-        setMatches(res.matches);
-        setTruncated(res.truncated);
+        // Only apply results if response is for the current query
+        if (query === requestQuery) {
+          setMatches(res.matches);
+          setTruncated(res.truncated);
+        }
       });
     }, 200);
     return () => clearTimeout(debounceRef.current);
