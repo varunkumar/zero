@@ -37,7 +37,16 @@ test("tree honors gitignore and skips .git", async () => {
 
 test("watch reports changes", async () => {
   const ws = new Workspace(makeProject());
-  const changed = new Promise<string>((r) => ws.watch(r));
+  let onChange: (relPath: string) => void = () => {};
+  const unsub = ws.watch((relPath) => onChange(relPath));
+  // Let the watcher settle before arming the assertion. Recursive fs.watch
+  // backends (e.g. FSEvents on macOS) can deliver a backlogged event for
+  // files written just before the watcher was created; any such event
+  // fires into the no-op callback above and is discarded here, so it can't
+  // race with (or be mistaken for) the write below.
+  await new Promise((r) => setTimeout(r, 300));
+  const changed = new Promise<string>((r) => { onChange = r; });
   await ws.write("a.ts", "export const a = 2;\n");
   expect(await changed).toBe("a.ts");
+  unsub();
 });
