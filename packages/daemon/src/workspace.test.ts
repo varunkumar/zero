@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace, PathOutsideWorkspaceError } from "./workspace";
@@ -125,4 +125,35 @@ test("search skips binary files", async () => {
   const ws = new Workspace(root);
   const result = await ws.search("foo", false);
   expect(result.matches.some((m) => m.path === "bin.dat")).toBe(false);
+});
+
+test("readSetting returns undefined when nothing has been written", async () => {
+  const ws = new Workspace(makeProject());
+  expect(await ws.readSetting("workbench")).toBeUndefined();
+});
+
+test("writeSetting then readSetting round-trips, creates .zero/settings.json", async () => {
+  const root = makeProject();
+  const ws = new Workspace(root);
+  await ws.writeSetting("workbench", { theme: "dark", sidebarWidth: 240 });
+  expect(await ws.readSetting("workbench")).toEqual({ theme: "dark", sidebarWidth: 240 });
+  expect(existsSync(join(root, ".zero", "settings.json"))).toBe(true);
+});
+
+test("writeSetting preserves other keys", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.writeSetting("workbench", { theme: "dark" });
+  await ws.writeSetting("other", { foo: 1 });
+  expect(await ws.readSetting("workbench")).toEqual({ theme: "dark" });
+  expect(await ws.readSetting("other")).toEqual({ foo: 1 });
+});
+
+test("tree and search ignore .zero directory", async () => {
+  const root = makeProject();
+  const ws = new Workspace(root);
+  await ws.writeSetting("workbench", { theme: "dark" });
+  const paths = (await ws.tree()).map((e) => e.path);
+  expect(paths.some((p) => p.startsWith(".zero"))).toBe(false);
+  const result = await ws.search("dark", false);
+  expect(result.matches.some((m) => m.path.startsWith(".zero"))).toBe(false);
 });
