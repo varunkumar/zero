@@ -16,13 +16,14 @@ export function StatusBar(props: {
     <div
       style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "2px 8px", fontSize: 12,
+        padding: "10px 16px", fontSize: 14,
+        flexShrink: 0,
         background: "var(--zero-statusbar-bg)", color: "var(--zero-statusbar-fg)",
         borderTop: "1px solid var(--zero-border)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Logomark theme={props.theme} size={16} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Logomark theme={props.theme} size={22} />
         <span>{props.path ?? "no file open"}</span>
         {props.cursor && <span>Ln {props.cursor.line}, Col {props.cursor.column}</span>}
         {props.message && (
@@ -39,7 +40,7 @@ export function StatusBar(props: {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <StatusPill engine={props.engine} />
-        <button onClick={props.onToggleTheme} style={{ background: "transparent", border: "1px solid var(--zero-border)", color: "inherit", borderRadius: 4, fontSize: 11, cursor: "pointer" }}>
+        <button onClick={props.onToggleTheme} style={{ background: "transparent", border: "1px solid var(--zero-border)", color: "inherit", borderRadius: 4, fontSize: 13, padding: "2px 8px", cursor: "pointer" }}>
           {props.theme === "dark" ? "Dark" : "Light"}
         </button>
       </div>

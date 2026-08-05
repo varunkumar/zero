@@ -27,6 +27,7 @@ export function Palette<T>(props: {
         zIndex: 1000,
       }}
       onClick={props.onClose}
+      onKeyDown={(e) => { if (e.key === "Escape") props.onClose(); }}
     >
       <div
         style={{

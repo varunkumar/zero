@@ -1,13 +1,73 @@
 import { useEffect, useRef } from "react";
-import { EditorView, keymap } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { EditorView, keymap, highlightWhitespace } from "@codemirror/view";
+import { Compartment, EditorState } from "@codemirror/state";
 import { basicSetup } from "codemirror";
+import { indentWithTab } from "@codemirror/commands";
 import { javascript } from "@codemirror/lang-javascript";
 import { ghostText } from "./ghostText";
+
+// Gutter/selection colors aren't reachable via CSS custom properties (CodeMirror
+// renders them through CSSStyleSheet objects, not the document's cascade), so
+// the dark/light split is duplicated here rather than read from theme.css vars.
+// `.cm-selectionLayer` (drawSelection's custom selection rectangle) paints
+// behind `.cm-content` at z-index -1 (see @codemirror/view's LayerView). A
+// *solid* `.cm-activeLine` background sitting on the cursor's own line then
+// fully occludes that rectangle wherever the two overlap - confirmed by
+// inspecting the live DOM: `.cm-selectionBackground` had the right color and
+// a correct, non-zero rect, but was invisible in the screenshot specifically
+// on the active line. Multi-line selections looked fine because only the
+// cursor's own line carries `.cm-activeLine`; the rest have no background to
+// occlude anything. Fix: make the active-line wash translucent so it blends
+// with (rather than paints over) whatever's beneath it.
+const editorTheme = {
+  light: EditorView.theme({
+    "&": { fontSize: "15px" },
+    ".cm-gutters": { backgroundColor: "#f5f5f7", color: "#6e6e73", border: "none" },
+    ".cm-activeLineGutter": { backgroundColor: "#e5e5ea" },
+    ".cm-activeLine": { backgroundColor: "rgba(0, 0, 0, 0.035)" },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "rgba(0, 122, 255, 0.28) !important" },
+    // highlightWhitespace() renders dots via a radial-gradient background
+    // image (not a styleable :before), so the fade has to go into the
+    // gradient's color/opacity and a smaller circle, not a color/opacity rule.
+    ".cm-highlightSpace": { backgroundImage: "radial-gradient(circle at 50% 55%, rgba(60, 60, 67, 0.25) 12%, transparent 5%)" },
+  }),
+  dark: EditorView.theme({
+    "&": { fontSize: "15px", backgroundColor: "#1e1e2e", color: "#cdd6f4" },
+    ".cm-content": { caretColor: "#cdd6f4" },
+    ".cm-gutters": { backgroundColor: "#181825", color: "#6c7086", border: "none" },
+    ".cm-activeLineGutter": { backgroundColor: "#313244" },
+    ".cm-activeLine": { backgroundColor: "rgba(255, 255, 255, 0.045)" },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "rgba(116, 199, 236, 0.32) !important" },
+    ".cm-cursor": { borderLeftColor: "#cdd6f4" },
+    ".cm-highlightSpace": { backgroundImage: "radial-gradient(circle at 50% 55%, rgba(205, 214, 244, 0.22) 12%, transparent 5%)" },
+  }, { dark: true }),
+};
+
+const fontTheme = EditorView.theme({
+  "&": {
+    fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
+  },
+  ".cm-content": {
+    fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
+    // font-feature-settings alone (not font-variant-ligatures) is what VS
+    // Code's "font ligatures" setting uses too: font-variant-ligatures
+    // triggers the browser's text-shaping ligature path, which merges
+    // adjacent glyphs in a way that breaks Range.getClientRects() for a
+    // selection landing mid-glyph (e.g. selecting one word) - the
+    // selection rectangle collapses to zero width. A full-line selection
+    // never bisects a glyph, so it looked fine while word selection didn't.
+    fontFeatureSettings: "'liga' 1, 'calt' 1",
+  },
+  // A fixed line-height keeps selection/gutter/line rectangles pixel-aligned;
+  // without it the browser's font-dependent default causes visible seams
+  // between wrapped selection fragments.
+  ".cm-content, .cm-gutters": { lineHeight: "1.6" },
+});
 
 export function Editor(props: {
   path: string | null;
   content: string;
+  theme?: "light" | "dark";
   onSave: (text: string) => void;
   onChange?: (text: string) => void;
   requestCompletion?: (s: { prefix: string; suffix: string }) => void;
@@ -16,6 +76,10 @@ export function Editor(props: {
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>();
+  // The dark/light EditorView.theme() is swapped through this compartment
+  // rather than causing a full rebuild, so toggling theme doesn't reset
+  // cursor position, selection, or undo history.
+  const themeCompartment = useRef(new Compartment());
   // Path the currently-live EditorView was created for. Extensions below
   // read callbacks off this ref rather than closing over `props` directly,
   // since the view (and its extensions) can now outlive a single render.
@@ -36,12 +100,16 @@ export function Editor(props: {
         extensions: [
           basicSetup,
           javascript({ typescript: true }),
+          themeCompartment.current.of(editorTheme[propsRef.current.theme ?? "light"]),
+          fontTheme,
+          highlightWhitespace(),
           keymap.of([
             {
               key: "Mod-s",
               preventDefault: true,
               run: (v) => { propsRef.current.onSave(v.state.doc.toString()); return true; },
             },
+            indentWithTab,
           ]),
           ghostText((s) => propsRef.current.requestCompletion?.(s)),
           EditorView.updateListener.of((u) => {
@@ -83,6 +151,13 @@ export function Editor(props: {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.content]);
+
+  useEffect(() => {
+    if (!view.current) return;
+    view.current.dispatch({
+      effects: themeCompartment.current.reconfigure(editorTheme[props.theme ?? "light"]),
+    });
+  }, [props.theme]);
 
   return <div ref={host} style={{ height: "100%" }} />;
 }

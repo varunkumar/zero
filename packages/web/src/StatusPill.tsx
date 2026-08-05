@@ -21,7 +21,7 @@ export function StatusPill(props: { engine: CompletionEngine }) {
         padding: "2px 8px",
         borderRadius: 12,
         border: "1px solid #ccc",
-        fontSize: 12,
+        fontSize: 14,
         color: "#555",
       }}
     >

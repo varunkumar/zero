@@ -9,10 +9,10 @@ export function Settings() {
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_KEY) ?? "qwen2.5-coder:1.5b");
 
   return (
-    <div style={{ position: "relative", fontSize: 12 }}>
+    <div style={{ position: "relative", fontSize: 14 }}>
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer" }}
+        style={{ fontSize: 14, padding: "2px 8px", cursor: "pointer" }}
       >
         Settings
       </button>

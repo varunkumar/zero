@@ -22,7 +22,7 @@ export function SettingsPanel(props: { registry: CommandRegistry; theme: "light"
               borderRadius: 4,
               cursor: "pointer",
               fontWeight: props.theme === "light" ? 600 : 400,
-              fontSize: 14,
+              fontSize: 16,
             }}
           >
             Light
@@ -38,14 +38,14 @@ export function SettingsPanel(props: { registry: CommandRegistry; theme: "light"
               borderRadius: 4,
               cursor: "pointer",
               fontWeight: props.theme === "dark" ? 600 : 400,
-              fontSize: 14,
+              fontSize: 16,
             }}
           >
             Dark
           </button>
         </div>
         <h4>Keybindings</h4>
-        <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", fontSize: 14, borderCollapse: "collapse" }}>
           <tbody>
             {props.registry.list().filter((c) => c.keybinding).map((c) => (
               <tr key={c.id} style={{ borderBottom: "1px solid var(--zero-border)" }}>

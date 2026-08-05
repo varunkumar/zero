@@ -13,6 +13,8 @@
   --zero-accent: #74c7ec;
   --zero-dirty-dot: #f9e2af;
   --zero-error-fg: #f38ba8;
+  --zero-selection-bg: #313244;
+  --zero-selection-fg: #cdd6f4;
 }
 
 :root[data-theme="light"] {
@@ -30,6 +32,8 @@
   --zero-accent: #007aff;
   --zero-dirty-dot: #c48f00;
   --zero-error-fg: #b3261e;
+  --zero-selection-bg: #e5e5ea;
+  --zero-selection-fg: #1e1e2e;
 }
 
 [data-theme] {

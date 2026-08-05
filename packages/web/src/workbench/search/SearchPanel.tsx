@@ -55,17 +55,17 @@ export function SearchPanel(props: { client: RpcClient; onJumpTo: (path: string,
         placeholder="Search across files…"
         style={{ margin: 8, padding: 6, background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)", border: "1px solid var(--zero-border)" }}
       />
-      {error && <div role="alert" style={{ padding: "0 8px", fontSize: 11, color: "var(--zero-error-fg, crimson)" }}>Search failed: {error}</div>}
-      {truncated && <div style={{ padding: "0 8px", fontSize: 11, opacity: 0.7 }}>Showing first {matches.length} matches</div>}
+      {error && <div role="alert" style={{ padding: "0 8px", fontSize: 13, color: "var(--zero-error-fg, crimson)" }}>Search failed: {error}</div>}
+      {truncated && <div style={{ padding: "0 8px", fontSize: 13, opacity: 0.7 }}>Showing first {matches.length} matches</div>}
       <div style={{ overflow: "auto", flex: 1 }}>
         {[...grouped.entries()].map(([path, fileMatches]) => (
           <div key={path} style={{ padding: "4px 8px" }}>
-            <div style={{ fontWeight: 600, fontSize: 12 }}>{path}</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{path}</div>
             {fileMatches.map((m, i) => (
               <div
                 key={i}
                 onClick={() => props.onJumpTo(m.path, m.line)}
-                style={{ paddingLeft: 12, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                style={{ paddingLeft: 12, cursor: "pointer", fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
               >
                 {m.line}: {m.text.trim()}
               </div>

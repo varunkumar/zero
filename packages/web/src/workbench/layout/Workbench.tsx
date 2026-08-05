@@ -68,6 +68,7 @@ interface WorkbenchContextValue {
    * of the context value so a mutation produces a fresh object identity and
    * therefore re-renders every panel. */
   tabsVersion: number;
+  theme: "light" | "dark";
 }
 
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
@@ -184,6 +185,7 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
           <Editor
             path={tab.path}
             content={tab.content}
+            theme={w.theme}
             onSave={(text) => {
               w.tabStore.updateContent(tab.id, text);
               w.saveTab(tab.id);
@@ -597,6 +599,7 @@ export function Workbench(props: { client: RpcClient }) {
     setSidebarView,
     treeRefreshToken,
     tabsVersion,
+    theme,
   };
 
   return (

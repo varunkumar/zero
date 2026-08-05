@@ -30,16 +30,32 @@ function buildTree(entries: TreeEntry[]): Node[] {
 
 const EXTENSION_ICONS: Record<string, string> = {
   ts: "\u{1F537}",
-  tsx: "\u{1F537}",
-  js: "\u{1F538}",
-  jsx: "\u{1F538}",
-  json: "\u{1F4C4}",
+  tsx: "\u{1F535}",
+  js: "\u{1F7E8}",
+  jsx: "\u{1F7E7}",
+  json: "\u{1F7E9}",
   md: "\u{1F4DD}",
+  mdx: "\u{1F4DD}",
   css: "\u{1F3A8}",
+  scss: "\u{1F3A8}",
+  html: "\u{1F9E1}",
   png: "\u{1F5BC}",
   jpg: "\u{1F5BC}",
   jpeg: "\u{1F5BC}",
-  svg: "\u{1F5BC}",
+  gif: "\u{1F5BC}",
+  svg: "\u{1F7E3}",
+  py: "\u{1F40D}",
+  rs: "\u{1F980}",
+  go: "\u{1F53A}",
+  sh: "\u{1F7E9}",
+  bash: "\u{1F7E9}",
+  yml: "\u{2699}\u{FE0F}",
+  yaml: "\u{2699}\u{FE0F}",
+  toml: "\u{2699}\u{FE0F}",
+  lock: "\u{1F512}",
+  env: "\u{1F511}",
+  gitignore: "\u{1F648}",
+  test: "\u{1F9EA}",
 };
 
 function iconFor(node: Node): string {
@@ -49,16 +65,25 @@ function iconFor(node: Node): string {
 }
 
 function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
+  const indent = typeof style.paddingLeft === "number" ? style.paddingLeft : 0;
   return (
     <div
       ref={dragHandle}
-      style={{ ...style, cursor: node.data.kind === "file" ? "pointer" : "default", display: "flex", gap: 6, alignItems: "center" }}
+      style={{
+        ...style,
+        paddingLeft: indent + 8,
+        paddingRight: 12,
+        cursor: node.data.kind === "file" ? "pointer" : "default",
+        display: "flex", gap: 6, alignItems: "center",
+        background: node.isSelected ? "var(--zero-selection-bg)" : "transparent",
+        color: node.isSelected ? "var(--zero-selection-fg)" : "inherit",
+      }}
       onClick={() => {
         if (node.data.kind === "dir") node.toggle();
       }}
     >
       <span>{iconFor(node.data)}</span>
-      <span>{node.data.name}</span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.data.name}</span>
     </div>
   );
 }
@@ -118,7 +143,7 @@ export function FileTreePanel(props: {
       style={{ height: "100%", width: "100%", background: "var(--zero-sidebar-bg)", color: "var(--zero-sidebar-fg)" }}
     >
       {error && (
-        <div role="alert" style={{ padding: 8, fontSize: 12, color: "var(--zero-error-fg, crimson)" }}>
+        <div role="alert" style={{ padding: 8, fontSize: 14, color: "var(--zero-error-fg, crimson)" }}>
           Could not load file tree: {error}
         </div>
       )}
