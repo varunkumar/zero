@@ -1,52 +1,68 @@
-import * as pty from "node-pty";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import type { PtySessionInfo } from "@zero/protocol";
 
-interface Session { sessionId: string; shell: string; proc: pty.IPty }
+interface Session { sessionId: string; shell: string }
+
+interface WorkerEvent { event: "data" | "exit"; sessionId: string; data?: string; exitCode?: number }
 
 export class PtyService {
   #sessions = new Map<string, Session>();
+  #worker: ChildProcessWithoutNullStreams;
 
   constructor(
     private cwd: string,
     private onOutput: (sessionId: string, data: string) => void,
     private onExit: (sessionId: string, exitCode: number) => void,
-  ) {}
+  ) {
+    // node-pty's native binding does not work under Bun (confirmed: only the
+    // first onData event ever arrives, then the stream goes permanently
+    // silent — https://github.com/oven-sh/bun/issues/7362). Host it in a
+    // plain-JS worker run under real `node` instead, bridged over
+    // newline-delimited JSON on stdio.
+    this.#worker = spawn("node", [new URL("./pty-worker.js", import.meta.url).pathname]);
+    const rl = createInterface({ input: this.#worker.stdout });
+    rl.on("line", (line) => {
+      let msg: WorkerEvent;
+      try { msg = JSON.parse(line) as WorkerEvent; } catch { return; }
+      if (msg.event === "data") this.onOutput(msg.sessionId, msg.data ?? "");
+      else if (msg.event === "exit") {
+        // A natural exit (the shell process died on its own) still needs
+        // reporting; an exit for a session close()/closeAll() already
+        // removed is filtered by the worker itself (see pty-worker.js),
+        // so anything reaching here is a genuine, previously-unknown exit.
+        if (!this.#sessions.delete(msg.sessionId)) return;
+        this.onExit(msg.sessionId, msg.exitCode ?? 0);
+      }
+    });
+  }
+
+  #send(msg: unknown): void {
+    this.#worker.stdin.write(JSON.stringify(msg) + "\n");
+  }
 
   open(shell: string | undefined, cols: number, rows: number): { sessionId: string; shell: string } {
     const sessionId = randomUUID();
     const shellCmd = shell ?? (process.platform === "win32" ? "powershell.exe" : (process.env.SHELL ?? "/bin/bash"));
-    const proc = pty.spawn(shellCmd, [], {
-      name: "xterm-256color", cols, rows, cwd: this.cwd,
-      env: process.env as Record<string, string>,
-    });
-    proc.onData((data) => this.onOutput(sessionId, data));
-    proc.onExit(({ exitCode }) => {
-      // Skip if the session was already removed by an explicit close()/
-      // closeAll(), which notifies onExit synchronously itself — this
-      // avoids double-firing onExit once the OS actually reaps the process.
-      if (!this.#sessions.has(sessionId)) return;
-      this.#sessions.delete(sessionId);
-      this.onExit(sessionId, exitCode);
-    });
-    this.#sessions.set(sessionId, { sessionId, shell: shellCmd, proc });
+    this.#sessions.set(sessionId, { sessionId, shell: shellCmd });
+    this.#send({ type: "open", sessionId, shell: shellCmd, cols, rows, cwd: this.cwd });
     return { sessionId, shell: shellCmd };
   }
 
   input(sessionId: string, data: string): void {
-    this.#sessions.get(sessionId)?.proc.write(data);
+    if (!this.#sessions.has(sessionId)) return;
+    this.#send({ type: "input", sessionId, data });
   }
 
   resize(sessionId: string, cols: number, rows: number): void {
-    this.#sessions.get(sessionId)?.proc.resize(cols, rows);
+    if (!this.#sessions.has(sessionId)) return;
+    this.#send({ type: "resize", sessionId, cols, rows });
   }
 
   close(sessionId: string): void {
-    const session = this.#sessions.get(sessionId);
-    if (!session) return;
-    this.#sessions.delete(sessionId);
-    session.proc.kill();
-    this.onExit(sessionId, 0);
+    if (!this.#sessions.delete(sessionId)) return;
+    this.#send({ type: "close", sessionId });
   }
 
   list(): PtySessionInfo[] {
@@ -54,11 +70,8 @@ export class PtyService {
   }
 
   closeAll(): void {
-    const sessions = [...this.#sessions.values()];
     this.#sessions.clear();
-    for (const session of sessions) {
-      session.proc.kill();
-      this.onExit(session.sessionId, 0);
-    }
+    this.#send({ type: "closeAll" });
+    this.#worker.kill();
   }
 }
