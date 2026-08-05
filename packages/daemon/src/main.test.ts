@@ -30,3 +30,25 @@ test("fs methods over the wire, watcher broadcasts", async () => {
   expect(await changed).toEqual({ path: "a.ts" });
   ws.close(); d.stop();
 });
+
+test("fs/search and settings RPCs over the wire", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  writeFileSync(join(root, "a.ts"), "const target = 1;\n");
+  const d = startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const search = await client.request<{ matches: { path: string }[]; truncated: boolean }>(
+    "fs/search", { query: "target" });
+  expect(search.matches.map((m) => m.path)).toEqual(["a.ts"]);
+  expect(search.truncated).toBe(false);
+
+  expect(await client.request<{ value: unknown }>("settings/get", { key: "workbench" })).toEqual({ value: undefined });
+  await client.request("settings/set", { key: "workbench", value: { theme: "dark" } });
+  expect(await client.request<{ value: unknown }>("settings/get", { key: "workbench" })).toEqual({ value: { theme: "dark" } });
+
+  ws.close(); d.stop();
+});

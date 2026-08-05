@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseMessage, ProtocolError } from "./messages";
+import { parseMessage, ProtocolError, FsSearchParams, FsSearchResult, SettingsSetParams } from "./messages";
 
 test("round-trips a request", () => {
   const msg = { jsonrpc: "2.0" as const, id: 1, method: "fs/read", params: { path: "a.ts" } };
@@ -13,4 +13,13 @@ test("classifies notification (no id)", () => {
 test("rejects garbage", () => {
   expect(() => parseMessage("{}")).toThrow(ProtocolError);
   expect(() => parseMessage("not json")).toThrow(ProtocolError);
+});
+test("fs/search and settings params/results are plain JSON-serializable shapes", () => {
+  const search: FsSearchParams = { query: "foo", caseSensitive: true };
+  const result: FsSearchResult = { matches: [{ path: "a.ts", line: 1, column: 0, text: "foo()" }], truncated: false };
+  expect(JSON.parse(JSON.stringify(search))).toEqual(search);
+  expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+
+  const setParams: SettingsSetParams = { key: "workbench", value: { theme: "dark" } };
+  expect(JSON.parse(JSON.stringify(setParams))).toEqual(setParams);
 });

@@ -31,3 +31,9 @@ export interface FsReadResult { content: string }
 export interface FsWriteParams { path: string; content: string }
 export interface FsTreeResult { entries: TreeEntry[] }
 export interface FsChangedEvent { path: string }
+export interface FsSearchParams { query: string; caseSensitive?: boolean }
+export interface FsSearchMatch { path: string; line: number; column: number; text: string }
+export interface FsSearchResult { matches: FsSearchMatch[]; truncated: boolean }
+export interface SettingsGetParams { key: string }
+export interface SettingsGetResult { value: unknown }
+export interface SettingsSetParams { key: string; value: unknown }

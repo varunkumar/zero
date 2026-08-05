@@ -1,7 +1,7 @@
 import { promises as fs, watch as fsWatch, realpathSync } from "node:fs";
 import { join, resolve, relative, sep, dirname, basename } from "node:path";
 import ignore, { type Ignore } from "ignore";
-import type { TreeEntry } from "@zero/protocol";
+import type { TreeEntry, FsSearchResult } from "@zero/protocol";
 
 export class PathOutsideWorkspaceError extends Error {}
 
@@ -50,9 +50,29 @@ export class Workspace {
   }
 
   async #ignorer(): Promise<Ignore> {
-    const ig = ignore().add([".git"]);
+    const ig = ignore().add([".git", ".zero"]);
     try { ig.add(await fs.readFile(join(this.#root, ".gitignore"), "utf8")); } catch {}
     return ig;
+  }
+
+  async #readSettingsFile(): Promise<Record<string, unknown>> {
+    try {
+      const raw = await fs.readFile(join(this.#root, ".zero", "settings.json"), "utf8");
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  async readSetting(key: string): Promise<unknown> {
+    return (await this.#readSettingsFile())[key];
+  }
+
+  async writeSetting(key: string, value: unknown): Promise<void> {
+    const all = await this.#readSettingsFile();
+    all[key] = value;
+    await fs.mkdir(join(this.#root, ".zero"), { recursive: true });
+    await fs.writeFile(join(this.#root, ".zero", "settings.json"), JSON.stringify(all, null, 2), "utf8");
   }
 
   async tree(): Promise<TreeEntry[]> {
@@ -73,6 +93,41 @@ export class Workspace {
     };
     await walk(this.#root);
     return out.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  async search(query: string, caseSensitive = false): Promise<FsSearchResult> {
+    const MAX_MATCHES = 500;
+    const MAX_FILE_BYTES = 1_000_000;
+    const entries = await this.tree();
+    const matches: FsSearchResult["matches"] = [];
+    const needle = caseSensitive ? query : query.toLowerCase();
+    let truncated = false;
+
+    for (const entry of entries) {
+      if (truncated) break;
+      if (entry.kind !== "file") continue;
+      const abs = join(this.#root, entry.path);
+      let stat;
+      try { stat = await fs.stat(abs); } catch { continue; }
+      if (stat.size > MAX_FILE_BYTES) continue;
+
+      let buf: Buffer;
+      try { buf = await fs.readFile(abs); } catch { continue; }
+      if (buf.subarray(0, 8000).includes(0)) continue; // binary sniff
+
+      const text = buf.toString("utf8");
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const haystack = caseSensitive ? line : line.toLowerCase();
+        const column = haystack.indexOf(needle);
+        if (column === -1) continue;
+        matches.push({ path: entry.path, line: i + 1, column, text: line });
+        if (matches.length >= MAX_MATCHES) { truncated = true; break; }
+      }
+    }
+
+    return { matches, truncated };
   }
 
   watch(onChange: (relPath: string) => void): () => void {

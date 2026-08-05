@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace, PathOutsideWorkspaceError } from "./workspace";
@@ -79,4 +79,81 @@ test("watch reports changes", async () => {
   await ws.write("a.ts", "export const a = 2;\n");
   expect(await changed).toBe("a.ts");
   unsub();
+});
+
+test("search finds matches with line/column, respects case sensitivity", async () => {
+  const root = makeProject();
+  writeFileSync(join(root, "needle.ts"), "const Needle = 1;\nfunction find() { return Needle; }\n");
+  const ws = new Workspace(root);
+
+  const caseSensitive = await ws.search("Needle", true);
+  expect(caseSensitive.matches).toEqual([
+    { path: "needle.ts", line: 1, column: 6, text: "const Needle = 1;" },
+    { path: "needle.ts", line: 2, column: 25, text: "function find() { return Needle; }" },
+  ]);
+  expect(caseSensitive.truncated).toBe(false);
+
+  const caseInsensitiveOnly = await ws.search("needle", false);
+  expect(caseInsensitiveOnly.matches.length).toBe(2);
+
+  const caseSensitiveMiss = await ws.search("needle", true);
+  expect(caseSensitiveMiss.matches).toEqual([]);
+});
+
+test("search honors gitignore and skips .git", async () => {
+  const root = makeProject(); // makeProject() already writes dist/junk.js with content "x" and ignores dist/
+  const ws = new Workspace(root);
+  const result = await ws.search("x", false);
+  expect(result.matches.some((m) => m.path.startsWith("dist"))).toBe(false);
+  expect(result.matches.some((m) => m.path.startsWith(".git"))).toBe(false);
+});
+
+test("search caps matches and reports truncated", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  for (let i = 0; i < 10; i++) {
+    writeFileSync(join(root, `f${i}.ts`), Array(60).fill("target line").join("\n"));
+  }
+  const ws = new Workspace(root);
+  const result = await ws.search("target", false);
+  expect(result.matches.length).toBe(500);
+  expect(result.truncated).toBe(true);
+});
+
+test("search skips binary files", async () => {
+  const root = makeProject();
+  writeFileSync(join(root, "bin.dat"), Buffer.from([0, 1, 2, 0, 3, 0x66, 0x6f, 0x6f]));
+  const ws = new Workspace(root);
+  const result = await ws.search("foo", false);
+  expect(result.matches.some((m) => m.path === "bin.dat")).toBe(false);
+});
+
+test("readSetting returns undefined when nothing has been written", async () => {
+  const ws = new Workspace(makeProject());
+  expect(await ws.readSetting("workbench")).toBeUndefined();
+});
+
+test("writeSetting then readSetting round-trips, creates .zero/settings.json", async () => {
+  const root = makeProject();
+  const ws = new Workspace(root);
+  await ws.writeSetting("workbench", { theme: "dark", sidebarWidth: 240 });
+  expect(await ws.readSetting("workbench")).toEqual({ theme: "dark", sidebarWidth: 240 });
+  expect(existsSync(join(root, ".zero", "settings.json"))).toBe(true);
+});
+
+test("writeSetting preserves other keys", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.writeSetting("workbench", { theme: "dark" });
+  await ws.writeSetting("other", { foo: 1 });
+  expect(await ws.readSetting("workbench")).toEqual({ theme: "dark" });
+  expect(await ws.readSetting("other")).toEqual({ foo: 1 });
+});
+
+test("tree and search ignore .zero directory", async () => {
+  const root = makeProject();
+  const ws = new Workspace(root);
+  await ws.writeSetting("workbench", { theme: "dark" });
+  const paths = (await ws.tree()).map((e) => e.path);
+  expect(paths.some((p) => p.startsWith(".zero"))).toBe(false);
+  const result = await ws.search("dark", false);
+  expect(result.matches.some((m) => m.path.startsWith(".zero"))).toBe(false);
 });
