@@ -5,6 +5,7 @@
   "dependencies": {
     "@zero/protocol": "workspace:*",
     "ignore": "^5.3.0",
+    "node-pty": "^1.0.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
