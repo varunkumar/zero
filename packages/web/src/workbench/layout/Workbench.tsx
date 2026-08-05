@@ -19,6 +19,17 @@ import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
 
 const SIDEBAR_PANEL_ID = "sidebar";
+/** How long a transient status-bar message stays up. */
+const STATUS_MESSAGE_MS = 8000;
+/** Trailing debounce on tree refreshes: a build or branch switch fires a
+ * burst of fs/changed events, and each bump costs two full fs/tree round
+ * trips (file tree + file-opener path list). */
+const TREE_REFRESH_DEBOUNCE_MS = 250;
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 const editorPanelId = (groupId: string) => `editor:${groupId}`;
 
 /** Value shared with the dockview-hosted panels.
@@ -81,33 +92,91 @@ function SidebarPanel() {
 
 function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | null }) {
   const w = useWorkbench();
+  // Id of the dirty tab currently asking to confirm its own close. Per the
+  // design spec this is an inline bar in the tab itself, never a modal.
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+
+  // Any pointer press outside the confirm bar cancels it. `pointerdown`
+  // (rather than `click`) can't observe the very click that opened the bar,
+  // and the `[data-zero-confirm]` guard keeps the bar's own buttons alive
+  // long enough for their click to land.
+  useEffect(() => {
+    if (!confirmingId) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-zero-confirm]")) return;
+      setConfirmingId(null);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, [confirmingId]);
+
+  // A tab that stopped existing (or got saved elsewhere) must not leave a
+  // stale confirm bar behind.
+  const confirmingStillDirty = props.tabs.some((t) => t.id === confirmingId && t.dirty);
+  useEffect(() => {
+    if (confirmingId && !confirmingStillDirty) setConfirmingId(null);
+  }, [confirmingId, confirmingStillDirty]);
+
   return (
     <div className="zero-tabstrip" role="tablist">
-      {props.tabs.map((tab) => (
-        <div
-          key={tab.id}
-          className="zero-tab"
-          role="tab"
-          aria-selected={tab.id === props.activeTabId}
-          onClick={() => {
-            w.setActiveGroupId(props.groupId);
-            w.tabStore.setActiveTab(props.groupId, tab.id);
-          }}
-        >
-          <span>{tab.path.split("/").at(-1)}</span>
-          {tab.dirty && <span className="zero-dirty-dot" aria-label="unsaved changes" />}
-          <button
-            className="zero-tab-close"
-            aria-label={`Close ${tab.path}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              w.tabStore.closeTab(tab.id);
+      {props.tabs.map((tab) => {
+        const confirming = confirmingId === tab.id && tab.dirty;
+        return (
+          <div
+            key={tab.id}
+            className="zero-tab"
+            role="tab"
+            aria-selected={tab.id === props.activeTabId}
+            onClick={() => {
+              w.setActiveGroupId(props.groupId);
+              w.tabStore.setActiveTab(props.groupId, tab.id);
             }}
           >
-            ×
-          </button>
-        </div>
-      ))}
+            <span>{tab.path.split("/").at(-1)}</span>
+            {tab.dirty && <span className="zero-dirty-dot" aria-label="unsaved changes" />}
+            {confirming ? (
+              <span className="zero-tab-confirm" data-zero-confirm role="group" aria-label={`Discard unsaved changes to ${tab.path}?`}>
+                <span>Discard?</span>
+                <button
+                  aria-label={`Discard changes and close ${tab.path}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmingId(null);
+                    w.tabStore.closeTab(tab.id);
+                  }}
+                >
+                  Yes
+                </button>
+                <button
+                  aria-label={`Keep ${tab.path} open`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmingId(null);
+                  }}
+                >
+                  No
+                </button>
+              </span>
+            ) : (
+              <button
+                className="zero-tab-close"
+                data-zero-confirm={tab.dirty ? "" : undefined}
+                aria-label={`Close ${tab.path}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Clean tabs close on a single click, as before; a dirty tab
+                  // asks first so unsaved edits can't vanish on a stray click.
+                  if (tab.dirty) setConfirmingId(tab.id);
+                  else w.tabStore.closeTab(tab.id);
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -175,6 +244,7 @@ export function Workbench(props: { client: RpcClient }) {
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [allPaths, setAllPaths] = useState<string[]>([]);
   const [cursor, setCursor] = useState<{ line: number; column: number } | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   const [activeGroupId, setActiveGroupId] = useState("group-1");
   const [tabsVersion, setTabsVersion] = useState(0);
 
@@ -192,6 +262,23 @@ export function Workbench(props: { client: RpcClient }) {
   // fs/changed echo. The daemon's watcher can't tell our writes from external
   // ones, so without this every save would round-trip a re-read.
   const lastWriteRef = useRef<{ path: string; content: string } | null>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const treeDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  /** Surface an RPC failure in the status bar. Silence is the worst outcome
+   * here: a failed fs/write otherwise leaves a tab looking merely dirty. */
+  function report(text: string, tone: "error" | "info" = "error"): void {
+    setStatusMessage({ text, tone });
+    clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = setTimeout(() => setStatusMessage(null), STATUS_MESSAGE_MS);
+  }
+  const reportRef = useRef(report);
+  reportRef.current = report;
+
+  useEffect(() => () => {
+    clearTimeout(statusTimerRef.current);
+    clearTimeout(treeDebounceRef.current);
+  }, []);
 
   const completion = useConst(() =>
     createCompletion(
@@ -226,7 +313,10 @@ export function Workbench(props: { client: RpcClient }) {
     const unsubscribe = settingsStore.subscribe((s) => setSettings(s));
     // A daemon that can't serve settings must not take the editor down with
     // it — the local snapshot is already a usable default.
-    void settingsStore.reconcile().then((s) => setSettings(s)).catch(() => undefined);
+    void settingsStore
+      .reconcile()
+      .then((s) => setSettings(s))
+      .catch((e: unknown) => reportRef.current(`Could not load saved settings: ${errorText(e)}`, "info"));
     return unsubscribe;
   }, [settingsStore]);
 
@@ -237,7 +327,8 @@ export function Workbench(props: { client: RpcClient }) {
     client.onNotification((method, params) => {
       if (method !== "fs/changed") return;
       const { path } = params as FsChangedEvent;
-      setTreeRefreshToken((t) => t + 1);
+      clearTimeout(treeDebounceRef.current);
+      treeDebounceRef.current = setTimeout(() => setTreeRefreshToken((t) => t + 1), TREE_REFRESH_DEBOUNCE_MS);
 
       const lastWrite = lastWriteRef.current;
       if (lastWrite && lastWrite.path === path) {
@@ -251,22 +342,32 @@ export function Workbench(props: { client: RpcClient }) {
       // A dirty tab wins over the on-disk change — never silently discard
       // unsaved edits.
       if (!tab || tab.dirty) return;
-      void client.request<FsReadResult>("fs/read", { path }).then((res) => {
-        const current = tabStore.findTab(tab.id);
-        if (!current || current.tab.dirty) return;
-        tabStore.updateContent(tab.id, res.content);
-        tabStore.markSaved(tab.id);
-      });
+      void client
+        .request<FsReadResult>("fs/read", { path })
+        .then((res) => {
+          const current = tabStore.findTab(tab.id);
+          if (!current || current.tab.dirty) return;
+          tabStore.updateContent(tab.id, res.content);
+          tabStore.markSaved(tab.id);
+        })
+        .catch((e: unknown) => reportRef.current(`Could not reload ${path}: ${errorText(e)}`));
     });
   }, [client, tabStore]);
 
   // Path list backing the fuzzy file opener, refreshed whenever the tree does.
   useEffect(() => {
     let cancelled = false;
-    void client.request<FsTreeResult>("fs/tree").then((res) => {
-      if (cancelled) return;
-      setAllPaths(res.entries.filter((e) => e.kind === "file").map((e) => e.path));
-    });
+    void client
+      .request<FsTreeResult>("fs/tree")
+      .then((res) => {
+        if (cancelled) return;
+        setAllPaths(res.entries.filter((e) => e.kind === "file").map((e) => e.path));
+      })
+      // FileTreePanel renders its own error for the same failure; here the
+      // only visible effect would be an empty file opener.
+      .catch((e: unknown) => {
+        if (!cancelled) reportRef.current(`Could not list files: ${errorText(e)}`);
+      });
     return () => {
       cancelled = true;
     };
@@ -281,23 +382,31 @@ export function Workbench(props: { client: RpcClient }) {
   }, [completion, tabStore, tabsVersion]);
 
   function openFile(path: string): void {
-    void client.request<FsReadResult>("fs/read", { path }).then((res) => {
-      const groupId = tabStore.getGroups().some((g) => g.id === activeGroupIdRef.current)
-        ? activeGroupIdRef.current
-        : tabStore.getGroups()[0]!.id;
-      tabStore.openFile(groupId, path, res.content);
-      setActiveGroupId(groupId);
-    });
+    void client
+      .request<FsReadResult>("fs/read", { path })
+      .then((res) => {
+        const groupId = tabStore.getGroups().some((g) => g.id === activeGroupIdRef.current)
+          ? activeGroupIdRef.current
+          : tabStore.getGroups()[0]!.id;
+        tabStore.openFile(groupId, path, res.content);
+        setActiveGroupId(groupId);
+      })
+      .catch((e: unknown) => reportRef.current(`Could not open ${path}: ${errorText(e)}`));
   }
 
   function saveTab(tabId: string): void {
     const found = tabStore.findTab(tabId);
     if (!found) return;
     const { path, content } = found.tab;
-    void client.request("fs/write", { path, content }).then(() => {
-      lastWriteRef.current = { path, content };
-      tabStore.markSaved(tabId);
-    });
+    void client
+      .request("fs/write", { path, content })
+      .then(() => {
+        lastWriteRef.current = { path, content };
+        tabStore.markSaved(tabId);
+      })
+      // The tab correctly stays dirty on failure, which on its own is
+      // indistinguishable from "not saved yet" — say so out loud.
+      .catch((e: unknown) => reportRef.current(`Could not save ${path}: ${errorText(e)}`));
   }
 
   function splitEditor(): void {
@@ -477,6 +586,7 @@ export function Workbench(props: { client: RpcClient }) {
             cursor={cursor}
             theme={theme}
             onToggleTheme={() => registry.run("view.toggleTheme")}
+            message={statusMessage}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />

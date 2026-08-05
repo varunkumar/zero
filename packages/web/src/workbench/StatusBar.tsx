@@ -8,6 +8,9 @@ export function StatusBar(props: {
   cursor: { line: number; column: number } | null;
   theme: "light" | "dark";
   onToggleTheme: () => void;
+  /** Transient failure notice (save/open errors); the bar inherited this role
+   * from the old top bar's `status` string. */
+  message?: { text: string; tone: "error" | "info" } | null;
 }) {
   return (
     <div
@@ -22,6 +25,17 @@ export function StatusBar(props: {
         <Logomark theme={props.theme} size={16} />
         <span>{props.path ?? "no file open"}</span>
         {props.cursor && <span>Ln {props.cursor.line}, Col {props.cursor.column}</span>}
+        {props.message && (
+          <span
+            role="status"
+            style={{
+              color: props.message.tone === "error" ? "var(--zero-error-fg, crimson)" : "inherit",
+              maxWidth: 480, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}
+          >
+            {props.message.text}
+          </span>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <StatusPill engine={props.engine} />
