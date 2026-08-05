@@ -7,6 +7,12 @@ export function Palette<T>(props: {
   getLabel: (item: T) => string;
   onSelect: (item: T) => void;
   placeholder: string;
+  /** Live input value, for callers that rank/cap `items` themselves. */
+  onQueryChange?: (query: string) => void;
+  /** Set false when the caller has already filtered `items` (the file opener
+   * ranks with `command-score` and caps the list); cmdk would otherwise
+   * re-filter and could drop already-ranked entries. */
+  filter?: boolean;
 }) {
   if (!props.open) return null;
   return (
@@ -34,10 +40,11 @@ export function Palette<T>(props: {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <Command label={props.placeholder}>
+        <Command label={props.placeholder} shouldFilter={props.filter ?? true}>
           <Command.Input
             autoFocus
             placeholder={props.placeholder}
+            onValueChange={props.onQueryChange}
             style={{
               width: "100%",
               padding: 12,
@@ -53,7 +60,7 @@ export function Palette<T>(props: {
             <Command.Empty style={{ padding: 12, opacity: 0.6 }}>No results.</Command.Empty>
             {props.items.map((item, i) => (
               <Command.Item
-                key={i}
+                key={`${props.getLabel(item)}:${i}`}
                 value={props.getLabel(item)}
                 onSelect={() => {
                   props.onSelect(item);

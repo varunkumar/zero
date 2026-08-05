@@ -70,14 +70,24 @@ export function FileTreePanel(props: {
   refreshToken: number;
 }) {
   const [entries, setEntries] = useState<TreeEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 240, height: 500 });
 
   useEffect(() => {
     let cancelled = false;
-    props.client.request<FsTreeResult>("fs/tree").then((res) => {
-      if (!cancelled) setEntries(res.entries);
-    });
+    props.client
+      .request<FsTreeResult>("fs/tree")
+      .then((res) => {
+        if (cancelled) return;
+        setEntries(res.entries);
+        setError(null);
+      })
+      // Without this a failed fs/tree is indistinguishable from an empty
+      // workspace.
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
     return () => {
       cancelled = true;
     };
@@ -107,6 +117,11 @@ export function FileTreePanel(props: {
       ref={containerRef}
       style={{ height: "100%", width: "100%", background: "var(--zero-sidebar-bg)", color: "var(--zero-sidebar-fg)" }}
     >
+      {error && (
+        <div role="alert" style={{ padding: 8, fontSize: 12, color: "var(--zero-error-fg, crimson)" }}>
+          Could not load file tree: {error}
+        </div>
+      )}
       <Tree
         data={data}
         openByDefault={false}

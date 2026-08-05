@@ -1,5 +1,5 @@
 import { expect, test, mock } from "bun:test";
-import { SettingsStore, DEFAULT_SETTINGS, type WorkbenchSettings } from "./store";
+import { SettingsStore, DEFAULT_SETTINGS, normalizeSettings, type WorkbenchSettings } from "./store";
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const map = new Map(Object.entries(initial));
@@ -46,6 +46,39 @@ test("update writes localStorage synchronously and debounces the daemon write", 
   await new Promise((r) => setTimeout(r, 600));
   expect(requests.length).toBe(1);
   expect(requests[0]).toEqual(["settings/set", { key: "workbench", value: store.getSnapshot() }]);
+});
+
+test("reconcile falls back to the default theme when the daemon value has an invalid theme", async () => {
+  // `.zero/settings.json` is hand-editable, so the daemon can hand back junk.
+  const store = new SettingsStore({ request: async () => ({ value: { theme: "solarized", sidebarWidth: 300, sidebarCollapsed: true } }) }, fakeStorage());
+  const merged = await store.reconcile();
+  expect(merged.theme).toBe(DEFAULT_SETTINGS.theme);
+  expect(merged.sidebarWidth).toBe(300);
+  expect(merged.sidebarCollapsed).toBe(true);
+});
+
+test("reconcile merges a partial daemon value with the defaults", async () => {
+  const store = new SettingsStore({ request: async () => ({ value: { theme: "light" } }) }, fakeStorage());
+  const merged = await store.reconcile();
+  expect(merged).toEqual({ ...DEFAULT_SETTINGS, theme: "light" });
+  expect(merged.sidebarWidth).toBe(DEFAULT_SETTINGS.sidebarWidth);
+});
+
+test("reconcile ignores a non-object daemon value", async () => {
+  const store = new SettingsStore({ request: async () => ({ value: "nonsense" }) }, fakeStorage());
+  expect(await store.reconcile()).toEqual(DEFAULT_SETTINGS);
+});
+
+test("localStorage hydration clamps an invalid theme and fills missing keys", () => {
+  const storage = fakeStorage({ "zero.workbench": JSON.stringify({ theme: "neon", sidebarCollapsed: true }) });
+  const store = new SettingsStore({ request: async () => ({ value: undefined }) }, storage);
+  expect(store.getSnapshot()).toEqual({ ...DEFAULT_SETTINGS, sidebarCollapsed: true });
+});
+
+test("normalizeSettings rejects a non-numeric sidebarWidth", () => {
+  expect(normalizeSettings({ sidebarWidth: "wide" }).sidebarWidth).toBe(DEFAULT_SETTINGS.sidebarWidth);
+  expect(normalizeSettings({ sidebarWidth: Number.NaN }).sidebarWidth).toBe(DEFAULT_SETTINGS.sidebarWidth);
+  expect(normalizeSettings(null)).toEqual(DEFAULT_SETTINGS);
 });
 
 test("subscribe notifies on update", () => {
