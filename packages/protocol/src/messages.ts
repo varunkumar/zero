@@ -37,3 +37,12 @@ export interface FsSearchResult { matches: FsSearchMatch[]; truncated: boolean }
 export interface SettingsGetParams { key: string }
 export interface SettingsGetResult { value: unknown }
 export interface SettingsSetParams { key: string; value: unknown }
+export interface PtyOpenParams { shell?: string; cols: number; rows: number }
+export interface PtyOpenResult { sessionId: string; shell: string }
+export interface PtyInputParams { sessionId: string; data: string }
+export interface PtyResizeParams { sessionId: string; cols: number; rows: number }
+export interface PtyCloseParams { sessionId: string }
+export interface PtySessionInfo { sessionId: string; shell: string }
+export interface PtyListResult { sessions: PtySessionInfo[] }
+export interface PtyOutputEvent { sessionId: string; data: string }
+export interface PtyExitEvent { sessionId: string; exitCode: number }
