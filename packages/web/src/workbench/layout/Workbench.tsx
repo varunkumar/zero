@@ -51,6 +51,13 @@ interface WorkbenchContextValue {
   activePath: string | null;
   openFile: (path: string) => void;
   saveTab: (tabId: string) => void;
+  /** Close a tab, or - when it is dirty - ask first. Lives on the context so
+   * the tab strip's × and the `file.close` command drive the same
+   * confirmation instead of one of them closing silently. */
+  requestCloseTab: (tabId: string) => void;
+  /** Tab currently showing its inline "Discard?" bar, if any. */
+  confirmingTabId: string | null;
+  cancelCloseTab: () => void;
   setCursor: (cursor: { line: number; column: number }) => void;
   registerView: (groupId: string, view: EditorView | undefined) => void;
   requestCompletion: (s: { prefix: string; suffix: string }) => void;
@@ -92,31 +99,10 @@ function SidebarPanel() {
 
 function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | null }) {
   const w = useWorkbench();
-  // Id of the dirty tab currently asking to confirm its own close. Per the
-  // design spec this is an inline bar in the tab itself, never a modal.
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
-
-  // Any pointer press outside the confirm bar cancels it. `pointerdown`
-  // (rather than `click`) can't observe the very click that opened the bar,
-  // and the `[data-zero-confirm]` guard keeps the bar's own buttons alive
-  // long enough for their click to land.
-  useEffect(() => {
-    if (!confirmingId) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("[data-zero-confirm]")) return;
-      setConfirmingId(null);
-    };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    return () => window.removeEventListener("pointerdown", onPointerDown, true);
-  }, [confirmingId]);
-
-  // A tab that stopped existing (or got saved elsewhere) must not leave a
-  // stale confirm bar behind.
-  const confirmingStillDirty = props.tabs.some((t) => t.id === confirmingId && t.dirty);
-  useEffect(() => {
-    if (confirmingId && !confirmingStillDirty) setConfirmingId(null);
-  }, [confirmingId, confirmingStillDirty]);
+  // The dirty tab asking to confirm its own close (per the design spec an
+  // inline bar in the tab itself, never a modal) is Workbench state, so that
+  // the `file.close` command can raise the very same bar.
+  const confirmingId = w.confirmingTabId;
 
   return (
     <div className="zero-tabstrip" role="tablist">
@@ -142,7 +128,7 @@ function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | n
                   aria-label={`Discard changes and close ${tab.path}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setConfirmingId(null);
+                    w.cancelCloseTab();
                     w.tabStore.closeTab(tab.id);
                   }}
                 >
@@ -152,7 +138,7 @@ function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | n
                   aria-label={`Keep ${tab.path} open`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setConfirmingId(null);
+                    w.cancelCloseTab();
                   }}
                 >
                   No
@@ -167,8 +153,7 @@ function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | n
                   e.stopPropagation();
                   // Clean tabs close on a single click, as before; a dirty tab
                   // asks first so unsaved edits can't vanish on a stray click.
-                  if (tab.dirty) setConfirmingId(tab.id);
-                  else w.tabStore.closeTab(tab.id);
+                  w.requestCloseTab(tab.id);
                 }}
               >
                 ×
@@ -247,6 +232,7 @@ export function Workbench(props: { client: RpcClient }) {
   const [statusMessage, setStatusMessage] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   const [activeGroupId, setActiveGroupId] = useState("group-1");
   const [tabsVersion, setTabsVersion] = useState(0);
+  const [confirmingTabId, setConfirmingTabId] = useState<string | null>(null);
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -409,6 +395,38 @@ export function Workbench(props: { client: RpcClient }) {
       .catch((e: unknown) => reportRef.current(`Could not save ${path}: ${errorText(e)}`));
   }
 
+  /** Close `tabId`, or raise its inline confirm bar when it is dirty. Both
+   * the tab strip's × and the `file.close` command go through here, so no
+   * entry point can drop unsaved edits without asking. */
+  function requestCloseTab(tabId: string): void {
+    const found = tabStore.findTab(tabId);
+    if (!found) return;
+    if (found.tab.dirty) setConfirmingTabId(tabId);
+    else tabStore.closeTab(tabId);
+  }
+
+  // Any pointer press outside the confirm bar cancels it. `pointerdown`
+  // (rather than `click`) can't observe the very click that opened the bar,
+  // and the `[data-zero-confirm]` guard keeps the bar's own buttons alive
+  // long enough for their click to land.
+  useEffect(() => {
+    if (!confirmingTabId) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-zero-confirm]")) return;
+      setConfirmingTabId(null);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, [confirmingTabId]);
+
+  // A tab that stopped existing (or got saved elsewhere) must not leave a
+  // stale confirm bar behind. Recomputed per render, which tabsVersion drives.
+  const confirmingStillDirty = confirmingTabId !== null && (tabStore.findTab(confirmingTabId)?.tab.dirty ?? false);
+  useEffect(() => {
+    if (confirmingTabId && !confirmingStillDirty) setConfirmingTabId(null);
+  }, [confirmingTabId, confirmingStillDirty]);
+
   function splitEditor(): void {
     const api = dockApi.current;
     if (!api) return;
@@ -435,6 +453,14 @@ export function Workbench(props: { client: RpcClient }) {
     // The initial group is never on the stack, so the last editor area can't
     // be closed; TabStore.removeGroup refuses that case as well.
     if (!groupId) return;
+    // removeGroup merges this group's tabs into a neighbour, but drops any
+    // whose path is already open there. Dropping a dirty one would destroy
+    // unsaved edits with no prompt, so refuse the whole close instead.
+    const lost = tabStore.dirtyTabsLostOnRemoveGroup(groupId);
+    if (lost.length > 0) {
+      report(`Cannot close: ${lost.length} unsaved file(s) in this group would be lost; save or close them first`);
+      return;
+    }
     if (!tabStore.removeGroup(groupId)) return;
     splitStack.current.pop();
     const panel = api.getPanel(editorPanelId(groupId));
@@ -471,7 +497,9 @@ export function Workbench(props: { client: RpcClient }) {
     },
     closeActive: () => {
       const tab = activeTabRef.current;
-      if (tab) tabStore.closeTab(tab.id);
+      // Same path as clicking the tab's ×: a dirty tab gets the inline
+      // confirm bar rather than being discarded from the palette.
+      if (tab) requestCloseTab(tab.id);
     },
     openSettings: () => setSettingsOpen(true),
     toggleSidebar,
@@ -557,6 +585,9 @@ export function Workbench(props: { client: RpcClient }) {
     activePath,
     openFile,
     saveTab,
+    requestCloseTab,
+    confirmingTabId,
+    cancelCloseTab: () => setConfirmingTabId(null),
     setCursor,
     registerView: (groupId, view) => {
       views.set(groupId, view);
