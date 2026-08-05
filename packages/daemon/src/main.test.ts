@@ -52,3 +52,41 @@ test("fs/search and settings RPCs over the wire", async () => {
 
   ws.close(); d.stop();
 });
+
+test("pty methods over the wire: open, input/output, resize, close", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const outputs: unknown[] = [];
+  client.onNotification((method, params) => { if (method === "pty/output") outputs.push(params); });
+
+  const { sessionId, shell } = await client.request<{ sessionId: string; shell: string }>(
+    "pty/open", { shell: "/bin/sh", cols: 80, rows: 24 });
+  expect(shell).toBe("/bin/sh");
+
+  const listed = await client.request<{ sessions: { sessionId: string; shell: string }[] }>("pty/list");
+  expect(listed.sessions).toEqual([{ sessionId, shell: "/bin/sh" }]);
+
+  await client.request("pty/input", { sessionId, data: "echo pty-wire-test\n" });
+  await new Promise<void>((resolve) => {
+    const check = setInterval(() => {
+      if (outputs.some((o) => typeof o === "object" && o !== null && "data" in o
+        && String((o as { data: unknown }).data).includes("pty-wire-test"))) {
+        clearInterval(check);
+        resolve();
+      }
+    }, 20);
+  });
+
+  await client.request("pty/resize", { sessionId, cols: 100, rows: 40 });
+  await client.request("pty/close", { sessionId });
+  const listedAfter = await client.request<{ sessions: unknown[] }>("pty/list");
+  expect(listedAfter.sessions).toEqual([]);
+
+  ws.close(); d.stop();
+});
