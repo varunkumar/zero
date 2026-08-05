@@ -39,3 +39,19 @@ test("sync produces diagnostics, hover and definition resolve", async () => {
   client.close(filePath);
   client.dispose();
 }, 20000);
+
+test("a process that spawns but never speaks LSP degrades hover() to null instead of hanging", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-lsp-"));
+  const filePath = join(root, "a.ts");
+  writeFileSync(filePath, "const greeting: string = \"hi\";\n");
+
+  // `cat` spawns successfully at the process level (so the "error" listener
+  // never fires) but never sends a valid LSP `initialize` response, so
+  // #awaitReady() must rely on the initialize timeout, not a rejection.
+  const client = new LspClient("cat", [], root, () => {});
+
+  const hover = await client.hover(filePath, { line: 0, character: 6 });
+  expect(hover).toBeNull();
+
+  client.dispose();
+}, 10000);

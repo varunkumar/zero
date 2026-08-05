@@ -61,9 +61,15 @@ export class LspClient {
     this.#conn.onNotification(PublishDiagnosticsNotification.type, (params) => {
       this.onDiagnostics(fileUriToPath(params.uri), params.diagnostics.map(toLspDiagnostic));
     });
+    // If the connection dies at any point (server crash, stdio pipe closed,
+    // protocol-level error) after a successful initialize, subsequent
+    // hover()/definition()/sync() calls must degrade to null/[]/no-op rather
+    // than reject with an uncaught rejection from #conn.sendRequest.
+    this.#conn.onClose(() => { this.#failed = true; });
+    this.#conn.onError(() => { this.#failed = true; });
     this.#conn.listen();
-    this.#ready = this.#conn
-      .sendRequest(InitializeRequest.type, {
+    this.#ready = Promise.race([
+      this.#conn.sendRequest(InitializeRequest.type, {
         processId: process.pid, rootUri: pathToFileURL(rootPath).toString(),
         // Language servers such as typescript-language-server gate whether
         // they bother computing/publishing diagnostics on the client having
@@ -78,7 +84,14 @@ export class LspClient {
           },
         },
         workspaceFolders: null,
-      })
+      }),
+      // A server that spawns but never speaks the LSP protocol (or just
+      // never responds to initialize) would otherwise hang #awaitReady()
+      // forever for every caller. Bound it.
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("lsp initialize timed out")), 5000);
+      }),
+    ])
       .then(() => { this.#conn.sendNotification(InitializedNotification.type, {}); })
       .catch(() => { this.#failed = true; });
   }
@@ -112,9 +125,9 @@ export class LspClient {
 
   async hover(path: string, position: LspPosition): Promise<string | null> {
     if (!(await this.#awaitReady())) return null;
-    const result = await this.#conn.sendRequest(HoverRequest.type, {
-      textDocument: { uri: pathUri(path) }, position,
-    });
+    const result = await this.#conn
+      .sendRequest(HoverRequest.type, { textDocument: { uri: pathUri(path) }, position })
+      .catch(() => { this.#failed = true; return null; });
     if (!result) return null;
     const contents = result.contents;
     if (typeof contents === "string") return contents;
@@ -126,9 +139,9 @@ export class LspClient {
 
   async definition(path: string, position: LspPosition): Promise<{ path: string; range: LspRange }[]> {
     if (!(await this.#awaitReady())) return [];
-    const result = await this.#conn.sendRequest(DefinitionRequest.type, {
-      textDocument: { uri: pathUri(path) }, position,
-    });
+    const result = await this.#conn
+      .sendRequest(DefinitionRequest.type, { textDocument: { uri: pathUri(path) }, position })
+      .catch(() => { this.#failed = true; return null; });
     const raw: (Location | LocationLink)[] = Array.isArray(result) ? result : result ? [result] : [];
     return raw.map((loc) =>
       "uri" in loc
