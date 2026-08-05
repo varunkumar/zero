@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import type { PtySessionInfo } from "@zero/protocol";
 
 interface Session { sessionId: string; shell: string }
@@ -10,6 +11,7 @@ interface WorkerEvent { event: "data" | "exit"; sessionId: string; data?: string
 export class PtyService {
   #sessions = new Map<string, Session>();
   #worker: ChildProcessWithoutNullStreams;
+  #dead = false;
 
   constructor(
     private cwd: string,
@@ -21,15 +23,35 @@ export class PtyService {
     // silent — https://github.com/oven-sh/bun/issues/7362). Host it in a
     // plain-JS worker run under real `node` instead, bridged over
     // newline-delimited JSON on stdio.
-    this.#worker = spawn("node", [new URL("./pty-worker.js", import.meta.url).pathname]);
+    const workerPath = fileURLToPath(new URL("./pty-worker.js", import.meta.url));
+    this.#worker = spawn("node", [workerPath]);
+
+    // A spawn failure (e.g. `node` missing from PATH) emits 'error' on the
+    // ChildProcess EventEmitter; with no listener that throws and takes down
+    // the whole daemon process. Mark the service dead instead and let every
+    // subsequent call become a no-op — degrade this subsystem only, per the
+    // project's "never break editing" constraint.
+    this.#worker.on("error", () => {
+      this.#dead = true;
+    });
+    this.#worker.on("exit", () => {
+      this.#dead = true;
+    });
+    // A broken stdin pipe (e.g. after the worker has already died) would
+    // otherwise also throw as an unhandled 'error' event.
+    this.#worker.stdin.on("error", () => {
+      this.#dead = true;
+    });
+
     const rl = createInterface({ input: this.#worker.stdout });
     rl.on("line", (line) => {
       let msg: WorkerEvent;
       try { msg = JSON.parse(line) as WorkerEvent; } catch { return; }
       if (msg.event === "data") this.onOutput(msg.sessionId, msg.data ?? "");
       else if (msg.event === "exit") {
-        // A natural exit (the shell process died on its own) still needs
-        // reporting; an exit for a session close()/closeAll() already
+        // A natural exit (the shell process died on its own, or the worker
+        // reports a spawn failure for a session that never came up) still
+        // needs reporting; an exit for a session close()/closeAll() already
         // removed is filtered by the worker itself (see pty-worker.js),
         // so anything reaching here is a genuine, previously-unknown exit.
         if (!this.#sessions.delete(msg.sessionId)) return;
@@ -39,7 +61,12 @@ export class PtyService {
   }
 
   #send(msg: unknown): void {
-    this.#worker.stdin.write(JSON.stringify(msg) + "\n");
+    if (this.#dead) return;
+    try {
+      this.#worker.stdin.write(JSON.stringify(msg) + "\n");
+    } catch {
+      this.#dead = true;
+    }
   }
 
   open(shell: string | undefined, cols: number, rows: number): { sessionId: string; shell: string } {
