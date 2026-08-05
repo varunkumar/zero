@@ -109,6 +109,31 @@ test("removeGroup does not duplicate a path already open in the target group", (
   expect(store.getGroups()[0].tabs.map((t) => t.id)).toEqual([kept]);
 });
 
+test("dirtyTabsLostOnRemoveGroup reports only dirty tabs the merge would drop", () => {
+  const store = new TabStore();
+  const first = store.getGroups()[0].id;
+  store.openFile(first, "a.ts", "1");
+  const second = store.splitGroup(first);
+  const shadowed = store.openFile(second, "a.ts", "1");
+  const moved = store.openFile(second, "b.ts", "2");
+  // Dirty, but its path is free in the target group, so it survives the move.
+  store.updateContent(moved, "2-edited");
+  expect(store.dirtyTabsLostOnRemoveGroup(second)).toEqual([]);
+
+  store.updateContent(shadowed, "1-edited");
+  expect(store.dirtyTabsLostOnRemoveGroup(second).map((t) => t.id)).toEqual([shadowed]);
+});
+
+test("dirtyTabsLostOnRemoveGroup is empty when the group cannot be removed", () => {
+  const store = new TabStore();
+  const first = store.getGroups()[0].id;
+  const only = store.openFile(first, "a.ts", "1");
+  store.updateContent(only, "1-edited");
+  expect(store.dirtyTabsLostOnRemoveGroup(first)).toEqual([]);
+  store.splitGroup(first);
+  expect(store.dirtyTabsLostOnRemoveGroup("group-nope")).toEqual([]);
+});
+
 test("removeGroup ignores an unknown group id", () => {
   const store = new TabStore();
   store.splitGroup(store.getGroups()[0].id);

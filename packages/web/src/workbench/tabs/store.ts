@@ -81,22 +81,42 @@ export class TabStore {
     return id;
   }
 
+  /** What `removeGroup(groupId)` would do: which group disappears and which
+   * neighbour absorbs its tabs. `undefined` when the removal is refused (last
+   * group, or no such group). Shared so callers can inspect the outcome
+   * before committing to it. */
+  #removalPlan(groupId: string): { idx: number; removed: Group; target: Group } | undefined {
+    if (this.#groups.length <= 1) return undefined;
+    const idx = this.#groups.findIndex((g) => g.id === groupId);
+    if (idx === -1) return undefined;
+    const survivors = this.#groups.filter((_, i) => i !== idx);
+    return { idx, removed: this.#groups[idx]!, target: survivors[idx - 1] ?? survivors[0]! };
+  }
+
+  /** Tabs with unsaved edits that `removeGroup(groupId)` would destroy rather
+   * than move: the merge drops a tab whose path is already open in the target
+   * group, so those buffers would vanish. Callers use this to refuse the
+   * close instead of losing work. */
+  dirtyTabsLostOnRemoveGroup(groupId: string): Tab[] {
+    const plan = this.#removalPlan(groupId);
+    if (!plan) return [];
+    return plan.removed.tabs.filter((t) => t.dirty && plan.target.tabs.some((o) => o.path === t.path));
+  }
+
   /** Drops an editor group, moving its tabs into a surviving neighbour so a
    * split close can never discard unsaved work. Refuses to remove the last
    * group (there must always be somewhere to edit) and returns whether it
    * removed anything. */
   removeGroup(groupId: string): boolean {
-    if (this.#groups.length <= 1) return false;
-    const idx = this.#groups.findIndex((g) => g.id === groupId);
-    if (idx === -1) return false;
-    const [removed] = this.#groups.splice(idx, 1) as [Group];
-    const target = this.#groups[idx - 1] ?? this.#groups[0]!;
-    for (const tab of removed.tabs) {
+    const plan = this.#removalPlan(groupId);
+    if (!plan) return false;
+    this.#groups.splice(plan.idx, 1);
+    for (const tab of plan.removed.tabs) {
       // The same file open in both groups would otherwise become two tabs
       // over one path in one group.
-      if (target.tabs.some((t) => t.path === tab.path)) continue;
-      target.tabs.push(tab);
-      target.activeTabId ??= tab.id;
+      if (plan.target.tabs.some((t) => t.path === tab.path)) continue;
+      plan.target.tabs.push(tab);
+      plan.target.activeTabId ??= tab.id;
     }
     this.#notify();
     return true;
