@@ -19,6 +19,8 @@ Zero is a platform with multiple flavours sharing one core:
 - Zero Lite: pure-browser, zero-install flavour. No daemon, browser APIs only.
 - Zero Claude Plugin: exposes Gemini Nano on Chrome as a model that Claude
   Code can be pointed at, enabling a fully offline Claude Code.
+- Zero VS Code Plugin: offline copilot and agent capabilities inside VS
+  Code, backed by the same model gateway (Nano and local models).
 - Zero IDE: desktop app wrapping the same client and daemon.
 
 ## 2. Core decisions
@@ -276,7 +278,38 @@ limit, not plumbing. The plugin packages the ergonomics: a launcher that
 starts the bridge, verifies a Nano host, prints the env to switch, and shows
 health. The same gateway serves Zero Agents for Nano-backed runs.
 
-## 10. Zero Lite
+## 10. Zero VS Code Plugin
+
+Goal: offline copilot and agent capabilities inside VS Code, with local
+Gemini Nano working out of the box. The extension is a thin client of the
+daemon's model gateway (section 9); no model logic lives in the extension.
+
+Two capability paths, reflecting what VS Code actually allows:
+
+- Inline completions: GitHub Copilot's inline completion model is not
+  user-swappable, so Zero provides completions itself via VS Code's
+  InlineCompletionItemProvider API. The provider reuses @zero/core's
+  CompletionEngine with an OpenAICompatProvider pointed at the daemon's
+  gateway, which routes to Nano (via the browser bridge) or a local model
+  such as Ollama. Ghost text, debounce, and cancellation behavior match the
+  Zero web client.
+- Chat and agent mode: Copilot Chat supports custom models via
+  OpenAI-compatible endpoints ("Manage Models", including local providers).
+  The extension auto-configures Copilot to list the Zero gateway as a model
+  provider, so Copilot Chat and agent mode run against Nano or local models
+  offline. Where Copilot is not installed, the extension registers the
+  gateway through VS Code's Language Model API so built-in chat and other
+  extensions can use it.
+
+"Just works" with Nano: on activation the extension checks for a running
+daemon (starting one for the workspace if needed), verifies a Nano host is
+attached via the gateway's health endpoint (launching the app-mode Chrome
+Nano host page if not), and shows a status bar item with the active model
+and a reason when degraded. Tool calling for agent mode uses the gateway's
+constrained-decoding tool emulation from section 9; the same honesty
+applies: functioning offline agent, not Copilot-cloud parity.
+
+## 11. Zero Lite
 
 Pure browser flavour, no daemon, browser APIs only: BrowserFSWorkspace over
 the File System Access API (persistent permissions), Nano completions and
@@ -286,7 +319,7 @@ platform constraints: FileSystemObserver is still experimental (fall back to
 polling), and search reads files through sandboxed handles (slower than the
 daemon path). Capability flags in WorkspaceProvider hide missing features.
 
-## 11. Testing
+## 12. Testing
 
 - @zero/core: dense unit coverage with injected fakes. Prompt assembly per
   window size, budget and latency accounting, compaction and pruning, the
@@ -300,7 +333,7 @@ daemon path). Capability flags in WorkspaceProvider hide missing features.
 - E2E: a few Playwright flows (open project, ghost text with stubbed model,
   terminal command, chat turn with tool approval).
 
-## 12. Roadmap
+## 13. Roadmap
 
 - M0, Skeleton: monorepo, @zero/protocol, daemon serving the client,
   WebSocket RPC, file tree, CodeMirror editing, save. Usable as a bare local
@@ -329,6 +362,10 @@ daemon path). Capability flags in WorkspaceProvider hide missing features.
   `zero agent "task"` CLI, git checkpointing. Model gateway lands here.
 - M6, Zero Lite: BrowserFSWorkspace, in-browser context, static hosting.
 - M7, Zero Claude Plugin: Anthropic-compatible Nano bridge per section 9.
+- M7.5, Zero VS Code Plugin: inline completion provider over the gateway,
+  Copilot custom-model auto-configuration, Language Model API registration,
+  daemon/Nano-host autostart per section 10. Depends on the model gateway
+  (M5) and the Nano bridge (M7); shares their tool emulation.
 - M8, Zero IDE: Tauri wrap with bundled daemon (Bun compile), auto-update,
   native menus. Plugin worker isolation and online capabilities (cloud
   providers, sync) land in this era.
