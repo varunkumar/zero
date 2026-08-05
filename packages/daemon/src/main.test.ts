@@ -14,7 +14,7 @@ function wsAdapter(ws: WebSocket): SocketLike {
 test("fs methods over the wire, watcher broadcasts", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   writeFileSync(join(root, "a.ts"), "1");
-  const d = startZero({ root });
+  const d = await startZero({ root });
   const ws = await new Promise<WebSocket>((res, rej) => {
     const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
     w.onopen = () => res(w); w.onerror = rej;
@@ -34,7 +34,7 @@ test("fs methods over the wire, watcher broadcasts", async () => {
 test("fs/search and settings RPCs over the wire", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   writeFileSync(join(root, "a.ts"), "const target = 1;\n");
-  const d = startZero({ root });
+  const d = await startZero({ root });
   const ws = await new Promise<WebSocket>((res, rej) => {
     const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
     w.onopen = () => res(w); w.onerror = rej;
@@ -53,9 +53,39 @@ test("fs/search and settings RPCs over the wire", async () => {
   ws.close(); d.stop();
 });
 
+test("lsp methods over the wire: sync, hover, definition, diagnostics broadcast", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  writeFileSync(join(root, "a.ts"), "const greeting: string = \"hi\";\nconsole.log(greeting);\n");
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const diagnosticEvents: unknown[] = [];
+  client.onNotification((method, params) => { if (method === "lsp/diagnostics") diagnosticEvents.push(params); });
+
+  await client.request("lsp/sync", { path: "a.ts", content: "const greeting: string = \"hi\";\nconsole.log(greeting);\n" });
+  const hover = await client.request<{ contents: string | null }>(
+    "lsp/hover", { path: "a.ts", position: { line: 0, character: 6 } });
+  expect(hover.contents).toBeTruthy();
+
+  const definition = await client.request<{ locations: { path: string }[] }>(
+    "lsp/definition", { path: "a.ts", position: { line: 1, character: 12 } });
+  expect(definition.locations.length).toBeGreaterThan(0);
+
+  await client.request("lsp/sync", { path: "a.ts", content: "const greeting: string = 42;\n" });
+  await new Promise<void>((resolve) => {
+    const check = setInterval(() => { if (diagnosticEvents.length > 0) { clearInterval(check); resolve(); } }, 50);
+  });
+
+  ws.close(); d.stop();
+}, 20000);
+
 test("pty methods over the wire: open, input/output, resize, close", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
-  const d = startZero({ root });
+  const d = await startZero({ root });
   const ws = await new Promise<WebSocket>((res, rej) => {
     const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
     w.onopen = () => res(w); w.onerror = rej;
