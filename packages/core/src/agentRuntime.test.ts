@@ -87,12 +87,12 @@ test("a provider that does not support tools never receives tool specs", async (
   expect(capturedTools).toEqual([]);
 });
 
-test("no available provider: yields nothing and sets a degraded status", async () => {
+test("no available provider: yields a degraded status and an error event", async () => {
   const provider = fakeProvider({ id: "m", avail: false, reply: () => ({ text: "unreachable" }) });
   const runtime = new AgentRuntime({ providers: [provider], tools: [], client: fakeClient(), workspace: () => ({}) });
 
   const events = await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
-  expect(events).toEqual([]);
+  expect(events).toEqual([{ type: "error", message: "no chat model available" }]);
   expect(runtime.status()).toEqual({ activeModel: null, reason: "no chat model available" });
 });
 
@@ -191,8 +191,11 @@ test("provider that throws a genuine error on chat: sendMessage stops cleanly wi
   const runtime = new AgentRuntime({ providers: [provider], tools: [], client, workspace: () => ({}) });
 
   const events = await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
-  // Should have the partial text, then stops when error is caught
-  expect(events).toEqual([{ type: "text", delta: "partial" }]);
+  // Should have the partial text, then an error event surfacing the failure, then stops
+  expect(events).toEqual([
+    { type: "text", delta: "partial" },
+    { type: "error", message: "network error" },
+  ]);
   // No persistence on provider error
   expect(client.saved).toEqual([]);
 });
@@ -261,9 +264,11 @@ test("compaction: provider that throws on compaction call returns original histo
 
   const events = await collect(runtime.sendMessage("s1", "status?", new AbortController().signal));
 
-  // Turn should proceed despite compaction error; should have text and done
+  // Turn should proceed despite compaction error; should have an error event, text, and done
+  const hasError = events.some((e) => e.type === "error" && e.message.includes("compaction failed"));
   const hasText = events.some((e) => e.type === "text");
   const hasDone = events.some((e) => e.type === "done");
+  expect(hasError).toBe(true);
   expect(hasText).toBe(true);
   expect(hasDone).toBe(true);
 
@@ -272,4 +277,91 @@ test("compaction: provider that throws on compaction call returns original histo
   const userMsgs = persisted.filter((m) => m.role === "user" && m.content.startsWith("q"));
   // Should have all 6 original messages (not compacted down)
   expect(userMsgs.length).toBe(6);
+});
+
+test("#pick prefers a tool-capable available provider over an earlier non-tool-capable one", async () => {
+  let capturedTools: ChatToolSpec[] | undefined;
+  const nonToolProvider = fakeProvider({
+    id: "nano", supportsTools: false, avail: true,
+    reply: () => ({ text: "should not be reached" }),
+  });
+  const toolProvider = fakeProvider({
+    id: "ollama", supportsTools: true, avail: true,
+    reply: (_messages, tools) => { capturedTools = tools; return { text: "ok" }; },
+  });
+  const tool: ToolProvider = { name: "fs_read", description: "Read a file.", schema: {}, execute: async () => "" };
+  const client = fakeClient();
+  const runtime = new AgentRuntime({
+    providers: [nonToolProvider, toolProvider], tools: [tool], client, workspace: () => ({}),
+  });
+
+  await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
+  expect(runtime.status().activeModel).toBe("ollama");
+  expect(capturedTools).toEqual([{ name: "fs_read", description: "Read a file.", schema: {} }]);
+});
+
+test("#pick falls back to the first available provider when none support tools", async () => {
+  const nonToolProvider = fakeProvider({ id: "nano", supportsTools: false, avail: true, reply: () => ({ text: "ok" }) });
+  const client = fakeClient();
+  const runtime = new AgentRuntime({ providers: [nonToolProvider], tools: [], client, workspace: () => ({}) });
+
+  await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
+  expect(runtime.status().activeModel).toBe("nano");
+});
+
+test("abort mid-tool-round: stops before executing later tool calls in the same round", async () => {
+  const ctl = new AbortController();
+  const provider = fakeProvider({
+    id: "m",
+    reply: () => ({
+      toolCalls: [
+        { id: "c1", name: "first", args: {} },
+        { id: "c2", name: "second", args: {} },
+      ],
+    }),
+  });
+  let secondExecuted = false;
+  const tools: ToolProvider[] = [
+    { name: "first", description: "First tool.", schema: {}, execute: async () => { ctl.abort(); return "first-result"; } },
+    { name: "second", description: "Second tool.", schema: {}, execute: async () => { secondExecuted = true; return "second-result"; } },
+  ];
+  const client = fakeClient();
+  const runtime = new AgentRuntime({ providers: [provider], tools, client, workspace: () => ({}) });
+
+  const events = await collect(runtime.sendMessage("s1", "hi", ctl.signal));
+  expect(events.map((e) => e.type)).toEqual(["toolCall", "toolResult"]);
+  expect((events[0] as { type: "toolCall"; call: { name: string } }).call.name).toBe("first");
+  expect(secondExecuted).toBe(false);
+});
+
+test("onStatusChange returns a disposer that stops further updates to that listener", async () => {
+  const provider = fakeProvider({ id: "m", reply: () => ({ text: "ok" }) });
+  const runtime = new AgentRuntime({ providers: [provider], tools: [], client: fakeClient(), workspace: () => ({}) });
+
+  const seen: (string | null)[] = [];
+  const unsubscribe = runtime.onStatusChange((s) => seen.push(s.activeModel));
+  await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
+  expect(seen).toEqual(["m"]);
+
+  unsubscribe();
+  const provider2 = fakeProvider({ id: "m2", reply: () => ({ text: "ok" }) });
+  const runtime2 = new AgentRuntime({ providers: [provider2], tools: [], client: fakeClient(), workspace: () => ({}) });
+  // Re-use the same listener registered on `runtime`, but confirm unsubscribe stops updates on `runtime` itself
+  await collect(runtime.sendMessage("s1", "hi again", new AbortController().signal));
+  expect(seen).toEqual(["m"]); // no new entries after unsubscribe
+});
+
+test("chat/get rejecting yields an error event instead of an unhandled rejection", async () => {
+  const provider = fakeProvider({ id: "m", reply: () => ({ text: "ok" }) });
+  const client: AgentRuntimeClient & { saved: ChatMessage[][] } = {
+    saved: [],
+    async request<R>(method: string): Promise<R> {
+      if (method === "chat/get") throw new Error("disk error");
+      throw new Error(`unexpected method ${method}`);
+    },
+  };
+  const runtime = new AgentRuntime({ providers: [provider], tools: [], client, workspace: () => ({}) });
+
+  const events = await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
+  expect(events).toEqual([{ type: "error", message: expect.stringContaining("disk error") }]);
 });

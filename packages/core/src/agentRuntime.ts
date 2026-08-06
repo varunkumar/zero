@@ -6,7 +6,8 @@ export type TurnEvent =
   | { type: "text"; delta: string }
   | { type: "toolCall"; call: ChatToolCall }
   | { type: "toolResult"; call: ChatToolCall; result: string }
-  | { type: "done"; message: ChatMessage };
+  | { type: "done"; message: ChatMessage }
+  | { type: "error"; message: string };
 
 export interface AgentRuntimeClient {
   request<R>(method: string, params?: unknown): Promise<R>;
@@ -42,8 +43,9 @@ export class AgentRuntime {
     return this.#status;
   }
 
-  onStatusChange(fn: (s: AgentRuntimeStatus) => void): void {
+  onStatusChange(fn: (s: AgentRuntimeStatus) => void): () => void {
     this.#listeners.add(fn);
+    return () => this.#listeners.delete(fn);
   }
 
   #setStatus(s: AgentRuntimeStatus): void {
@@ -52,25 +54,36 @@ export class AgentRuntime {
   }
 
   async #pick(): Promise<ChatCapableProvider | null> {
+    const available: ChatCapableProvider[] = [];
     for (const p of this.#providers) {
-      if (await p.available().catch(() => false)) return p;
+      if (await p.available().catch(() => false)) available.push(p);
     }
-    return null;
+    return available.find((p) => p.supportsTools()) ?? available[0] ?? null;
   }
 
   async *sendMessage(sessionId: string, userText: string, signal: AbortSignal): AsyncIterable<TurnEvent> {
     const provider = await this.#pick();
     if (!provider) {
-      this.#setStatus({ activeModel: null, reason: "no chat model available" });
+      const reason = "no chat model available";
+      this.#setStatus({ activeModel: null, reason });
+      yield { type: "error", message: reason };
       return;
     }
     this.#setStatus({ activeModel: provider.id, reason: null });
 
-    const loaded = await this.#client.request<{ messages: ChatMessage[] }>("chat/get", { id: sessionId });
+    let loaded: { messages: ChatMessage[] };
+    try {
+      loaded = await this.#client.request<{ messages: ChatMessage[] }>("chat/get", { id: sessionId });
+    } catch (e) {
+      yield { type: "error", message: `failed to load session: ${e instanceof Error ? e.message : String(e)}` };
+      return;
+    }
     let history = loaded.messages;
 
     if (needsCompaction(history, provider.capabilities().contextWindowTokens)) {
-      history = await this.#compact(provider, history, signal);
+      const compacted = await this.#compact(provider, history, signal);
+      history = compacted.history;
+      if (compacted.error) yield { type: "error", message: compacted.error };
     }
     if (signal.aborted) return;
 
@@ -95,7 +108,9 @@ export class AgentRuntime {
         }
       } catch (e) {
         if (signal.aborted) return;
-        // Provider error (not cancellation): stop cleanly without throwing, matching the "degrade only failing subsystem" constraint
+        // Provider error (not cancellation): surface it, then stop without throwing,
+        // matching the "degrade only failing subsystem" constraint.
+        yield { type: "error", message: e instanceof Error ? e.message : String(e) };
         return;
       }
       if (signal.aborted) return;
@@ -106,12 +121,18 @@ export class AgentRuntime {
       history = [...history, assistantMsg];
 
       if (toolCalls.length === 0) {
-        await this.#client.request("chat/append", { id: sessionId, messages: history });
+        try {
+          await this.#client.request("chat/append", { id: sessionId, messages: history });
+        } catch (e) {
+          yield { type: "error", message: `failed to save turn: ${e instanceof Error ? e.message : String(e)}` };
+          return;
+        }
         yield { type: "done", message: assistantMsg };
         return;
       }
 
       for (const call of toolCalls) {
+        if (signal.aborted) return;
         yield { type: "toolCall", call };
         const tool = this.#tools.find((t) => t.name === call.name);
         const rawResult = tool
@@ -123,13 +144,20 @@ export class AgentRuntime {
       }
     }
 
-    await this.#client.request("chat/append", { id: sessionId, messages: history });
+    try {
+      await this.#client.request("chat/append", { id: sessionId, messages: history });
+    } catch (e) {
+      yield { type: "error", message: `failed to save turn: ${e instanceof Error ? e.message : String(e)}` };
+      return;
+    }
     yield { type: "done", message: { role: "assistant", content: "(tool round limit reached)", createdAt: Date.now() } };
   }
 
-  async #compact(provider: ChatCapableProvider, history: ChatMessage[], signal: AbortSignal): Promise<ChatMessage[]> {
+  async #compact(
+    provider: ChatCapableProvider, history: ChatMessage[], signal: AbortSignal,
+  ): Promise<{ history: ChatMessage[]; error?: string }> {
     const { toSummarize, toKeep } = selectForCompaction(history);
-    if (toSummarize.length === 0) return history;
+    if (toSummarize.length === 0) return { history };
 
     const prompt: ChatMessage[] = [
       { role: "system", content: COMPACTION_SYSTEM_PROMPT, createdAt: Date.now() },
@@ -144,11 +172,11 @@ export class AgentRuntime {
     } catch (e) {
       if (signal.aborted) {
         // Cancellation: return original history unchanged
-        return history;
+        return { history };
       }
-      // Provider error: return original history unchanged, don't throw
-      return history;
+      // Provider error: return original history unchanged, don't abort the turn over it
+      return { history, error: `compaction failed: ${e instanceof Error ? e.message : String(e)}` };
     }
-    return [{ role: "system", content: summary, createdAt: Date.now() }, ...toKeep];
+    return { history: [{ role: "system", content: summary, createdAt: Date.now() }, ...toKeep] };
   }
 }
