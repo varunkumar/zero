@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { RpcClient } from "@zero/protocol";
 import type { PtyStore } from "./store";
+import { ZERO_MONO_FONT } from "../theme/fonts";
 import { terminalTheme } from "./theme";
 import "@xterm/xterm/css/xterm.css";
 
@@ -20,7 +21,7 @@ export function TerminalHost(props: {
   useEffect(() => {
     const t = new Terminal({
       convertEol: true,
-      fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
+      fontFamily: ZERO_MONO_FONT,
       theme: terminalTheme(props.theme),
     });
     const f = new FitAddon();

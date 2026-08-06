@@ -7,6 +7,8 @@ import { javascript } from "@codemirror/lang-javascript";
 import { linter, type Diagnostic as CmDiagnostic, forceLinting } from "@codemirror/lint";
 import type { LspDiagnostic, RpcClient, LspHoverResult, LspDefinitionResult } from "@zero/protocol";
 import { ghostText } from "./ghostText";
+import { ZERO_MONO_FONT } from "./workbench/theme/fonts";
+import { ZERO_COLORS } from "./workbench/theme/colors";
 
 export function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnostic[]): CmDiagnostic[] {
   return diagnostics.map((d) => {
@@ -35,8 +37,8 @@ export function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnos
 const editorTheme = {
   light: EditorView.theme({
     "&": { fontSize: "15px" },
-    ".cm-gutters": { backgroundColor: "#f5f5f7", color: "#6e6e73", border: "none" },
-    ".cm-activeLineGutter": { backgroundColor: "#e5e5ea" },
+    ".cm-gutters": { backgroundColor: ZERO_COLORS.light.gutterBg, color: ZERO_COLORS.light.gutterFg, border: "none" },
+    ".cm-activeLineGutter": { backgroundColor: ZERO_COLORS.light.activeLineGutterBg },
     ".cm-activeLine": { backgroundColor: "rgba(0, 0, 0, 0.035)" },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "rgba(0, 122, 255, 0.28) !important" },
     // highlightWhitespace() renders dots via a radial-gradient background
@@ -45,13 +47,13 @@ const editorTheme = {
     ".cm-highlightSpace": { backgroundImage: "radial-gradient(circle at 50% 55%, rgba(60, 60, 67, 0.25) 12%, transparent 5%)" },
   }),
   dark: EditorView.theme({
-    "&": { fontSize: "15px", backgroundColor: "#1e1e2e", color: "#cdd6f4" },
-    ".cm-content": { caretColor: "#cdd6f4" },
-    ".cm-gutters": { backgroundColor: "#181825", color: "#6c7086", border: "none" },
-    ".cm-activeLineGutter": { backgroundColor: "#313244" },
+    "&": { fontSize: "15px", backgroundColor: ZERO_COLORS.dark.editorBg, color: ZERO_COLORS.dark.editorFg },
+    ".cm-content": { caretColor: ZERO_COLORS.dark.cursor },
+    ".cm-gutters": { backgroundColor: ZERO_COLORS.dark.gutterBg, color: ZERO_COLORS.dark.gutterFg, border: "none" },
+    ".cm-activeLineGutter": { backgroundColor: ZERO_COLORS.dark.activeLineGutterBg },
     ".cm-activeLine": { backgroundColor: "rgba(255, 255, 255, 0.045)" },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "rgba(116, 199, 236, 0.32) !important" },
-    ".cm-cursor": { borderLeftColor: "#cdd6f4" },
+    ".cm-cursor": { borderLeftColor: ZERO_COLORS.dark.cursor },
     ".cm-highlightSpace": { backgroundImage: "radial-gradient(circle at 50% 55%, rgba(205, 214, 244, 0.22) 12%, transparent 5%)" },
   }, { dark: true }),
 };
@@ -68,11 +70,11 @@ export const editorLayoutStyle = {
 const fontTheme = EditorView.theme({
   "&": {
     ...editorLayoutStyle["&"],
-    fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
+    fontFamily: ZERO_MONO_FONT,
   },
   ".cm-scroller": editorLayoutStyle[".cm-scroller"],
   ".cm-content": {
-    fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
+    fontFamily: ZERO_MONO_FONT,
     // font-feature-settings alone (not font-variant-ligatures) is what VS
     // Code's "font ligatures" setting uses too: font-variant-ligatures
     // triggers the browser's text-shaping ligature path, which merges

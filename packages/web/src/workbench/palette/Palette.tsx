@@ -1,4 +1,6 @@
 import { Command } from "cmdk";
+import type { ReactNode } from "react";
+import { ZERO_MONO_FONT } from "../theme/fonts";
 
 export function Palette<T>(props: {
   open: boolean;
@@ -13,6 +15,8 @@ export function Palette<T>(props: {
    * ranks with `command-score` and caps the list); cmdk would otherwise
    * re-filter and could drop already-ranked entries. */
   filter?: boolean;
+  /** Optional per-item leading icon, rendered before the label. */
+  renderIcon?: (item: T) => ReactNode;
 }) {
   if (!props.open) return null;
   return (
@@ -30,6 +34,7 @@ export function Palette<T>(props: {
       onKeyDown={(e) => { if (e.key === "Escape") props.onClose(); }}
     >
       <div
+        className="zero-palette"
         style={{
           background: "var(--zero-editor-bg)",
           color: "var(--zero-editor-fg)",
@@ -38,9 +43,16 @@ export function Palette<T>(props: {
           borderRadius: 8,
           border: "1px solid var(--zero-border)",
           overflow: "hidden",
+          fontFamily: ZERO_MONO_FONT,
         }}
         onClick={(e) => e.stopPropagation()}
       >
+        <style>{`
+          .zero-palette [cmdk-item][data-selected="true"] {
+            background: var(--zero-selection-bg);
+            color: var(--zero-selection-fg);
+          }
+        `}</style>
         <Command label={props.placeholder} shouldFilter={props.filter ?? true}>
           <Command.Input
             autoFocus
@@ -55,6 +67,7 @@ export function Palette<T>(props: {
               color: "inherit",
               outline: "none",
               boxSizing: "border-box",
+              fontFamily: ZERO_MONO_FONT,
             }}
           />
           <Command.List style={{ maxHeight: "50vh", overflow: "auto", padding: 4 }}>
@@ -67,8 +80,9 @@ export function Palette<T>(props: {
                   props.onSelect(item);
                   props.onClose();
                 }}
-                style={{ padding: "8px 12px", borderRadius: 4, cursor: "pointer" }}
+                style={{ padding: "8px 12px", borderRadius: 4, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}
               >
+                {props.renderIcon?.(item)}
                 {props.getLabel(item)}
               </Command.Item>
             ))}

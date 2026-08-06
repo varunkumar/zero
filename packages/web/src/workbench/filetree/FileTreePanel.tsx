@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type NodeRendererProps } from "react-arborist";
 import type { RpcClient, TreeEntry, FsTreeResult } from "@zero/protocol";
+import { iconFor } from "../icons/iconFor";
 
 interface Node {
   id: string;
@@ -28,42 +29,6 @@ function buildTree(entries: TreeEntry[]): Node[] {
   return roots;
 }
 
-const EXTENSION_ICONS: Record<string, string> = {
-  ts: "\u{1F537}",
-  tsx: "\u{1F535}",
-  js: "\u{1F7E8}",
-  jsx: "\u{1F7E7}",
-  json: "\u{1F7E9}",
-  md: "\u{1F4DD}",
-  mdx: "\u{1F4DD}",
-  css: "\u{1F3A8}",
-  scss: "\u{1F3A8}",
-  html: "\u{1F9E1}",
-  png: "\u{1F5BC}",
-  jpg: "\u{1F5BC}",
-  jpeg: "\u{1F5BC}",
-  gif: "\u{1F5BC}",
-  svg: "\u{1F7E3}",
-  py: "\u{1F40D}",
-  rs: "\u{1F980}",
-  go: "\u{1F53A}",
-  sh: "\u{1F7E9}",
-  bash: "\u{1F7E9}",
-  yml: "\u{2699}\u{FE0F}",
-  yaml: "\u{2699}\u{FE0F}",
-  toml: "\u{2699}\u{FE0F}",
-  lock: "\u{1F512}",
-  env: "\u{1F511}",
-  gitignore: "\u{1F648}",
-  test: "\u{1F9EA}",
-};
-
-function iconFor(node: Node): string {
-  if (node.kind === "dir") return "\u{1F4C1}";
-  const ext = node.name.includes(".") ? node.name.split(".").at(-1)! : "";
-  return EXTENSION_ICONS[ext] ?? "\u{1F4C4}";
-}
-
 function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
   const indent = typeof style.paddingLeft === "number" ? style.paddingLeft : 0;
   return (
@@ -82,7 +47,7 @@ function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
         if (node.data.kind === "dir") node.toggle();
       }}
     >
-      <span>{iconFor(node.data)}</span>
+      <img src={iconFor(node.data.name, node.data.kind === "dir")} alt="" width={16} height={16} style={{ flexShrink: 0 }} />
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.data.name}</span>
     </div>
   );

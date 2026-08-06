@@ -25,11 +25,11 @@ Full design and roadmap:
 
 ## Status
 
-Pre-M2. M0 (skeleton: daemon-served browser editor with save) and M1
-(offline copilot: Chrome Nano completions with an Ollama-compatible fallback)
-are implemented. See the roadmap in the design spec for what's next
-(terminal/LSP, Graphify, chat/AgentRuntime, Zero Agents, Zero Lite, the
-Claude plugin, Zero IDE).
+M0 (skeleton: daemon-served browser editor with save), M1 (offline copilot:
+Chrome Nano completions with an Ollama-compatible fallback), and M2
+(terminal via PTY, LSP diagnostics/hover/go-to-definition) are implemented.
+See the roadmap in the design spec for what's next (Graphify, chat/
+AgentRuntime, Zero Agents, Zero Lite, the Claude plugin, Zero IDE).
 
 ## Architecture
 

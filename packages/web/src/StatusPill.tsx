@@ -20,9 +20,9 @@ export function StatusPill(props: { engine: CompletionEngine }) {
         gap: 6,
         padding: "2px 8px",
         borderRadius: 12,
-        border: "1px solid #ccc",
+        border: "1px solid var(--zero-border)",
         fontSize: 14,
-        color: "#555",
+        color: "var(--zero-statusbar-fg)",
       }}
     >
       <span
