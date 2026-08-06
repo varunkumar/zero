@@ -25,16 +25,19 @@ Full design and roadmap:
 
 ## Status
 
-M0–M2 are on `main` (skeleton, offline copilot, editor shell, terminal and
-LSP). **M3 (Graphify and plugin host) is implemented** on this branch: in-process
-plugin host, Graphify indexer (`graph/*` RPC, `.zero/graph.json` cache,
-`graphify.grammars`), `GraphContext` for completions, and status/settings UI.
+M0–M3 are implemented on `main`:
 
-- **M3 design:**
-  [`docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md`](docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md)
-  (Status: Approved)
-- **Plugins (daemon plugin host + Graphify):**
-  [`docs/plugins.md`](docs/plugins.md)
+- **M0** skeleton (daemon-served editor with save)
+- **M1** offline copilot (Chrome Nano + Ollama-compatible fallback)
+- **M1.5** editor shell (workbench, tabs, palette, search, themes)
+- **M2** terminal (PTY) and LSP (diagnostics, hover, go-to-definition)
+- **M3** Graphify and plugin host (in-process built-ins, tree-sitter index,
+  `graph/*` RPC, `.zero/graph.json` cache, `GraphContext` for completions)
+
+Design and plugin docs:
+
+- [M3 design](docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md)
+- [Plugins](docs/plugins.md)
 
 See the roadmap in the design spec for what follows (chat/AgentRuntime, Zero
 Agents, Zero Lite, Claude plugin, Zero IDE).
