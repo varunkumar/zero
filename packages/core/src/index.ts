@@ -9,6 +9,7 @@ export { estimateTokens } from "./tokens";
 export { buildFimPrompt } from "./prompt";
 export { gatherContext } from "./context";
 export { BufferContext } from "./bufferContext";
+export { LspContext, type LspContextClient } from "./lspContext";
 export { CompletionEngine } from "./engine";
 export type { EngineStatus } from "./engine";
 export { CompletionScheduler } from "./scheduler";
