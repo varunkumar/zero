@@ -65,6 +65,31 @@ test("onExit fires for a natural process exit and the session drops from list()"
   service.closeAll();
 }, 10000);
 
+test("two concurrent sessions keep independent output streams (second terminal tab)", async () => {
+  const output: { sessionId: string; data: string }[] = [];
+  const service = new PtyService(process.cwd(), (sessionId, data) => output.push({ sessionId, data }), () => {});
+
+  const a = service.open("/bin/bash", 80, 24).sessionId;
+  const b = service.open("/bin/bash", 80, 24).sessionId;
+
+  service.input(a, "echo aaa$(echo a11)\n");
+  service.input(b, "echo bbb$(echo b22)\n");
+
+  await new Promise<void>((resolve) => {
+    const check = setInterval(() => {
+      const aDone = output.some((o) => o.sessionId === a && o.data.includes("aaaa11"));
+      const bDone = output.some((o) => o.sessionId === b && o.data.includes("bbbb22"));
+      if (aDone && bDone) { clearInterval(check); resolve(); }
+    }, 20);
+  });
+
+  // Each session's output only ever carries its own text, never the other's.
+  expect(output.some((o) => o.sessionId === a && o.data.includes("bbbb22"))).toBe(false);
+  expect(output.some((o) => o.sessionId === b && o.data.includes("aaaa11"))).toBe(false);
+
+  service.closeAll();
+}, 10000);
+
 test("resize does not throw for a live session", () => {
   const service = new PtyService(process.cwd(), () => {}, () => {});
   const { sessionId } = service.open("/bin/bash", 80, 24);

@@ -38,6 +38,27 @@ test("handleExit removes the session and notifies subscribers", () => {
   expect(notified).toBe(1);
 });
 
+test("reattach (re-adding an already-known session) is idempotent and does not replay output", () => {
+  const store = new PtyStore();
+  store.addSession({ sessionId: "a", shell: "/bin/bash" });
+
+  // Output produced before a listener subscribes (e.g. while the browser
+  // tab was reloading) is not buffered - PtyStore has no replay log, so it
+  // is simply gone, matching the "only new output after reattach" contract.
+  store.handleOutput("a", "produced-before-reload");
+
+  // Simulates reattach: the reload path calls addSession again for a
+  // session that already exists (the daemon's pty/list still reports it).
+  store.addSession({ sessionId: "a", shell: "/bin/bash" });
+  expect(store.getSessions()).toEqual([{ sessionId: "a", shell: "/bin/bash" }]);
+
+  const chunks: string[] = [];
+  store.onOutput("a", (d) => chunks.push(d));
+  store.handleOutput("a", "produced-after-reattach");
+
+  expect(chunks).toEqual(["produced-after-reattach"]);
+});
+
 test("unsubscribed onOutput listener stops receiving data", () => {
   const store = new PtyStore();
   store.addSession({ sessionId: "a", shell: "/bin/bash" });

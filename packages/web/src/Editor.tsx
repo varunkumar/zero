@@ -10,7 +10,7 @@ import { ghostText } from "./ghostText";
 import { ZERO_MONO_FONT } from "./workbench/theme/fonts";
 import { ZERO_COLORS } from "./workbench/theme/colors";
 
-function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnostic[]): CmDiagnostic[] {
+export function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnostic[]): CmDiagnostic[] {
   return diagnostics.map((d) => {
     const fromLine = doc.line(Math.min(d.range.start.line + 1, doc.lines));
     const toLine = doc.line(Math.min(d.range.end.line + 1, doc.lines));
@@ -58,15 +58,21 @@ const editorTheme = {
   }, { dark: true }),
 };
 
-const fontTheme = EditorView.theme({
-  // CodeMirror's ".cm-editor" root defaults to height:auto, so without an
-  // explicit height the editor grows to fit its full content instead of
-  // scrolling internally - the surrounding page scrolls instead.
-  "&": {
-    fontFamily: ZERO_MONO_FONT,
-    height: "100%",
-  },
+// CodeMirror's ".cm-editor" root defaults to height:auto, so without an
+// explicit height the editor grows to fit its full content instead of
+// scrolling internally - the surrounding page scrolls instead. Exported so
+// a regression test can assert on it directly without instantiating a view.
+export const editorLayoutStyle = {
+  "&": { height: "100%" },
   ".cm-scroller": { overflow: "auto" },
+};
+
+const fontTheme = EditorView.theme({
+  "&": {
+    ...editorLayoutStyle["&"],
+    fontFamily: ZERO_MONO_FONT,
+  },
+  ".cm-scroller": editorLayoutStyle[".cm-scroller"],
   ".cm-content": {
     fontFamily: ZERO_MONO_FONT,
     // font-feature-settings alone (not font-variant-ligatures) is what VS

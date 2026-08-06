@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { CompletionEngine } from "./engine";
 import { CompletionScheduler } from "./scheduler";
-import type { ModelProvider } from "./types";
+import type { ContextProvider, ModelProvider } from "./types";
 
 function fakeProvider(id: string, avail: boolean, output = "done()"): ModelProvider {
   return {
@@ -80,6 +80,28 @@ test("re-checks availability after cache expires, but not on repeated hits", asy
   } finally {
     Date.now = realNow;
   }
+});
+
+test("context providers (e.g. LspContext) are woven into the prompt sent to the model", async () => {
+  let capturedPrompt = "";
+  const provider: ModelProvider = {
+    id: "m",
+    available: async () => true,
+    capabilities: () => ({ id: "m", contextWindowTokens: 1000, supportsFim: true }),
+    async *complete(prompt) { capturedPrompt = prompt; yield "x"; },
+  };
+  // Shaped like LspContext's gather() output, without spawning a real
+  // language server - LspContext itself is covered separately in
+  // lspContext.test.ts. This confirms the engine actually threads a
+  // context provider's chunks into the model prompt, not just that
+  // LspContext.gather() returns the right shape in isolation.
+  const lspLikeContext: ContextProvider = {
+    name: "lsp",
+    gather: async () => [{ source: "lsp", text: "greeting: string", score: 1, tokenCost: 4 }],
+  };
+  const engine = new CompletionEngine({ providers: [provider], context: [lspLikeContext] });
+  await engine.complete(req, new AbortController().signal);
+  expect(capturedPrompt).toContain("greeting: string");
 });
 
 test("scheduler debounces and aborts previous run", async () => {
