@@ -7,7 +7,7 @@ function ChatStatusPill(props: { runtime: AgentRuntime }) {
   const [status, setStatus] = useState<AgentRuntimeStatus>(() => props.runtime.status());
   useEffect(() => {
     setStatus(props.runtime.status());
-    props.runtime.onStatusChange(setStatus);
+    return props.runtime.onStatusChange(setStatus);
   }, [props.runtime]);
   const active = status.activeModel !== null;
   return (
@@ -33,13 +33,20 @@ export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; cha
   const [streaming, setStreaming] = useState("");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [banner, setBanner] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const sessions = chatStore.getSessions();
   const activeId = chatStore.getActiveId();
 
+  function reportError(message: string): void {
+    setBanner(message);
+  }
+
   useEffect(() => {
-    client.request<{ sessions: ChatSessionSummary[] }>("chat/list").then((r) => chatStore.setSessions(r.sessions));
+    client.request<{ sessions: ChatSessionSummary[] }>("chat/list")
+      .then((r) => chatStore.setSessions(r.sessions))
+      .catch((e) => reportError(`failed to load chats: ${e instanceof Error ? e.message : String(e)}`));
   }, [client, chatStore]);
 
   // Fix #1 & #2: Clean up previous session's in-flight turn and streaming text when switching sessions
@@ -57,6 +64,8 @@ export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; cha
       if (!cancelled) {
         setMessages(r.messages);
       }
+    }).catch((e) => {
+      if (!cancelled) reportError(`failed to load chat: ${e instanceof Error ? e.message : String(e)}`);
     });
     return () => { cancelled = true; };
   }, [client, activeId]);
@@ -69,8 +78,12 @@ export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; cha
   }, []);
 
   async function newSession(): Promise<void> {
-    const { id } = await client.request<{ id: string }>("chat/create", {});
-    chatStore.addSession({ id, title: "New chat", updatedAt: Date.now(), messageCount: 0 });
+    try {
+      const { id } = await client.request<{ id: string }>("chat/create", {});
+      chatStore.addSession({ id, title: "New chat", updatedAt: Date.now(), messageCount: 0 });
+    } catch (e) {
+      reportError(`failed to create chat: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   function closeSession(id: string): void {
@@ -84,7 +97,9 @@ export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; cha
 
   async function send(): Promise<void> {
     if (!activeId || !input.trim() || busy) return;
+    const sessionId = activeId;
     const text = input;
+    const isFirstExchange = messages.length === 0;
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text, createdAt: Date.now() }]);
     setStreaming("");
@@ -92,19 +107,30 @@ export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; cha
     const ctl = new AbortController();
     abortRef.current = ctl;
     try {
-      for await (const event of runtime.sendMessage(activeId, text, ctl.signal)) {
+      for await (const event of runtime.sendMessage(sessionId, text, ctl.signal)) {
+        if (ctl.signal.aborted) break;
         if (event.type === "text") {
           setStreaming((s) => s + event.delta);
         } else if (event.type === "toolResult") {
           setMessages((m) => [...m, { role: "tool", content: event.result, toolName: event.call.name, createdAt: Date.now() }]);
+        } else if (event.type === "error") {
+          setMessages((m) => [...m, { role: "tool", content: event.message, toolName: "error", createdAt: Date.now() }]);
         } else if (event.type === "done") {
           setMessages((m) => [...m, event.message]);
           setStreaming("");
+          const current = chatStore.getSessions().find((s) => s.id === sessionId);
+          if (isFirstExchange && current?.title === "New chat") {
+            const title = text.trim().slice(0, 40) + (text.trim().length > 40 ? "…" : "");
+            chatStore.touchSession(sessionId, title);
+            client.request("chat/rename", { id: sessionId, title }).catch(() => {
+              // Non-fatal: local title already updated, persistence can be retried later.
+            });
+          }
         }
       }
     } finally {
       setBusy(false);
-      chatStore.touchSession(activeId);
+      chatStore.touchSession(sessionId);
     }
   }
 
@@ -125,6 +151,17 @@ export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; cha
           <ChatStatusPill runtime={runtime} />
         </div>
       </div>
+      {banner && (
+        <div
+          style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "4px 8px", background: "#5a1f1f", color: "#fff", fontSize: 13,
+          }}
+        >
+          <span>⚠ {banner}</span>
+          <button onClick={() => setBanner(null)} aria-label="Dismiss error">×</button>
+        </div>
+      )}
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 8 }}>
         {!activeId ? (
           <div style={{ padding: 16, opacity: 0.6 }}>No chat open</div>
@@ -154,7 +191,12 @@ export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; cha
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
           placeholder={activeId ? "Ask Zero..." : "Open a chat to start"}
         />
-        <button onClick={() => void send()} disabled={!activeId || busy || !input.trim()}>Send</button>
+        <button
+          onClick={() => (busy ? abortRef.current?.abort() : void send())}
+          disabled={!activeId || (!busy && !input.trim())}
+        >
+          {busy ? "Stop" : "Send"}
+        </button>
       </div>
     </div>
   );
