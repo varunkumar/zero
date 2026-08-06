@@ -56,15 +56,21 @@ const editorTheme = {
   }, { dark: true }),
 };
 
-const fontTheme = EditorView.theme({
-  // CodeMirror's ".cm-editor" root defaults to height:auto, so without an
-  // explicit height the editor grows to fit its full content instead of
-  // scrolling internally - the surrounding page scrolls instead.
-  "&": {
-    fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
-    height: "100%",
-  },
+// CodeMirror's ".cm-editor" root defaults to height:auto, so without an
+// explicit height the editor grows to fit its full content instead of
+// scrolling internally - the surrounding page scrolls instead. Exported so
+// a regression test can assert on it directly without instantiating a view.
+export const editorLayoutStyle = {
+  "&": { height: "100%" },
   ".cm-scroller": { overflow: "auto" },
+};
+
+const fontTheme = EditorView.theme({
+  "&": {
+    ...editorLayoutStyle["&"],
+    fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
+  },
+  ".cm-scroller": editorLayoutStyle[".cm-scroller"],
   ".cm-content": {
     fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
     // font-feature-settings alone (not font-variant-ligatures) is what VS

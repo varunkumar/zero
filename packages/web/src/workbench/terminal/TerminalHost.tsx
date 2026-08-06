@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { RpcClient } from "@zero/protocol";
 import type { PtyStore } from "./store";
+import { terminalTheme } from "./theme";
 import "@xterm/xterm/css/xterm.css";
 
 export function TerminalHost(props: {
@@ -20,12 +21,7 @@ export function TerminalHost(props: {
     const t = new Terminal({
       convertEol: true,
       fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
-      // xterm.js defaults cursor/cursorAccent to white when unset, which is
-      // invisible against a white terminal background - both themes must
-      // set it explicitly, not just override background/foreground.
-      theme: props.theme === "dark"
-        ? { background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#cdd6f4", cursorAccent: "#1e1e2e" }
-        : { background: "#ffffff", foreground: "#1d1d1f", cursor: "#1d1d1f", cursorAccent: "#ffffff" },
+      theme: terminalTheme(props.theme),
     });
     const f = new FitAddon();
     t.loadAddon(f);
