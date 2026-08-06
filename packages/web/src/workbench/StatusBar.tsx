@@ -2,6 +2,13 @@ import type { CompletionEngine } from "@zero/core";
 import { StatusPill } from "../StatusPill";
 import { Logomark } from "./theme/Logomark";
 
+export type GraphStatus = {
+  ready: boolean;
+  indexing: boolean;
+  lastError?: string;
+  nodeCount?: number;
+} | null;
+
 export function StatusBar(props: {
   engine: CompletionEngine;
   path: string | null;
@@ -12,6 +19,8 @@ export function StatusBar(props: {
    * from the old top bar's `status` string. */
   message?: { text: string; tone: "error" | "info" } | null;
   lspStatus: { path: string; count: number; failed: boolean } | null;
+  /** Graphify indexer status from `graph/status`, polled by Workbench. */
+  graphStatus?: GraphStatus;
 }) {
   return (
     <div
@@ -50,6 +59,15 @@ export function StatusBar(props: {
           <span role="status" title={`${props.lspStatus.count} problem(s) in ${props.lspStatus.path}`}
             style={{ color: "var(--zero-error-fg, crimson)" }}>
             {props.lspStatus.count} problem{props.lspStatus.count === 1 ? "" : "s"}
+          </span>
+        )}
+        {props.graphStatus && (
+          <span title={props.graphStatus.lastError ?? ""}>
+            {props.graphStatus.indexing
+              ? "Indexing…"
+              : props.graphStatus.ready
+                ? `Graph ${props.graphStatus.nodeCount ?? ""}`
+                : "Graph off"}
           </span>
         )}
         <StatusPill engine={props.engine} />

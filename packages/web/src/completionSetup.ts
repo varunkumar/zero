@@ -1,4 +1,4 @@
-import { CompletionEngine, CompletionScheduler, BufferContext, LspContext,
+import { CompletionEngine, CompletionScheduler, BufferContext, LspContext, GraphContext,
   ChromeNanoProvider, OpenAICompatProvider, type NanoApi } from "@zero/core";
 import type { EditorView } from "@codemirror/view";
 import type { RpcClient } from "@zero/protocol";
@@ -15,7 +15,7 @@ export function createCompletion(client: RpcClient, getView: () => EditorView | 
         model: localStorage.getItem("zero.ollamaModel") ?? "qwen2.5-coder:1.5b",
       }),
     ],
-    context: [buffers, new LspContext(client)],
+    context: [buffers, new LspContext(client), new GraphContext(client)],
   });
 
   let latest = { prefix: "", suffix: "" };
