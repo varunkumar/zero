@@ -31,6 +31,7 @@ export function Palette<T>(props: {
       onKeyDown={(e) => { if (e.key === "Escape") props.onClose(); }}
     >
       <div
+        className="zero-palette"
         style={{
           background: "var(--zero-editor-bg)",
           color: "var(--zero-editor-fg)",
@@ -43,6 +44,12 @@ export function Palette<T>(props: {
         }}
         onClick={(e) => e.stopPropagation()}
       >
+        <style>{`
+          .zero-palette [cmdk-item][data-selected="true"] {
+            background: var(--zero-selection-bg);
+            color: var(--zero-selection-fg);
+          }
+        `}</style>
         <Command label={props.placeholder} shouldFilter={props.filter ?? true}>
           <Command.Input
             autoFocus
