@@ -6,7 +6,7 @@ import {
   type GrammarSettings,
 } from "./grammars";
 import { extractFromSource } from "./extract";
-import type { GraphDocument, GraphStore } from "./store";
+import { GraphStore, type GraphDocument } from "./store";
 
 const GRAPH_CACHE_PATH = ".zero/graph.json";
 
@@ -21,6 +21,8 @@ export class GraphIndexer {
   #lastOverrides?: GrammarSettings;
   #debounce = new Map<string, ReturnType<typeof setTimeout>>();
   #fullIndexPromise: Promise<void> | null = null;
+  /** Paths changed while a full index was in flight; reindexed after it settles. */
+  #pendingPaths = new Set<string>();
 
   constructor(opts: {
     workspace: Workspace;
@@ -75,12 +77,18 @@ export class GraphIndexer {
       await this.#fullIndexPromise;
     } finally {
       this.#fullIndexPromise = null;
+      const pending = [...this.#pendingPaths];
+      this.#pendingPaths.clear();
+      for (const p of pending) {
+        await this.#reindexPath(p);
+      }
     }
   }
 
   async #doFullIndex(): Promise<void> {
     this.#indexing = true;
-    this.#ready = false;
+    // Keep serving a warm graph: only drop ready when there is nothing to serve.
+    if (this.#store.nodeCount === 0) this.#ready = false;
     try {
       const overrides = await this.#getGrammarSettings();
       this.#lastOverrides = overrides;
@@ -88,14 +96,23 @@ export class GraphIndexer {
       const files = entries.filter(
         (e) => e.kind === "file" && resolveLanguage(e.path, overrides),
       );
-      this.#store.clear();
-      this.#fileCount = 0;
+      // Build into a temporary store; live store keeps previous nodes until swap.
+      const next = new GraphStore();
+      let fileCount = 0;
+      let hadFileError = false;
       for (const f of files) {
-        await this.#indexPath(f.path, overrides);
-        this.#fileCount++;
+        try {
+          await this.#indexPath(f.path, overrides, next);
+          fileCount++;
+        } catch (e) {
+          hadFileError = true;
+          this.#lastError = `${f.path}: ${e instanceof Error ? e.message : String(e)}`;
+        }
       }
+      this.#store.loadJSON(next.toJSON());
+      this.#fileCount = fileCount;
       this.#ready = true;
-      this.#lastError = undefined;
+      if (!hadFileError) this.#lastError = undefined;
       try {
         await this.saveCache();
       } catch {
@@ -135,6 +152,11 @@ export class GraphIndexer {
   }
 
   async #reindexPath(path: string): Promise<void> {
+    // Avoid racing the live store against a full rebuild; queue for after.
+    if (this.#fullIndexPromise) {
+      this.#pendingPaths.add(path);
+      return;
+    }
     const overrides = await this.#getGrammarSettings();
     this.#lastOverrides = overrides;
     if (!resolveLanguage(path, overrides)) {
@@ -142,20 +164,24 @@ export class GraphIndexer {
       return;
     }
     try {
-      await this.#indexPath(path, overrides);
+      await this.#indexPath(path, overrides, this.#store);
     } catch (e) {
       this.#lastError = `${path}: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
 
-  async #indexPath(path: string, overrides?: GrammarSettings): Promise<void> {
+  async #indexPath(
+    path: string,
+    overrides: GrammarSettings | undefined,
+    store: GraphStore,
+  ): Promise<void> {
     const lang = resolveLanguage(path, overrides);
     if (!lang) return;
     let source: string;
     try {
       source = await this.#workspace.read(path);
     } catch {
-      this.#store.removeFile(path);
+      store.removeFile(path);
       return;
     }
     const { nodes, edges } = await extractFromSource(
@@ -164,6 +190,6 @@ export class GraphIndexer {
       lang,
       overrides,
     );
-    this.#store.replaceFile(path, nodes, edges);
+    store.replaceFile(path, nodes, edges);
   }
 }

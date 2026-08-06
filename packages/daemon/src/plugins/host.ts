@@ -100,6 +100,8 @@ export class PluginHost {
   }
 
   #liveHealth(plugin: ZeroPlugin, cached: PluginHealth): PluginHealth {
+    // Activate failure is sticky: do not let a later health() report ok.
+    if (!cached.ok) return cached;
     try {
       return plugin.health?.() ?? cached;
     } catch (e) {

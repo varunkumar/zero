@@ -62,3 +62,25 @@ test("activate failure marks plugin unhealthy and does not throw", async () => {
   expect(host.list().plugins[0]!.health.detail).toContain("boom");
   expect(host.health().ok).toBe(false);
 });
+
+test("failed activate is not masked by later health() reporting ok", async () => {
+  const { host } = makeHost();
+  const sneaky = (): ZeroPlugin => ({
+    manifest: {
+      id: "sneaky",
+      name: "Sneaky",
+      version: "0.0.1",
+      contributions: {},
+    },
+    activate() {
+      throw new Error("activate failed");
+    },
+    health: () => ({ ok: true, detail: "looks fine" }),
+  });
+  await host.activateBuiltins([sneaky]);
+  const h = host.list().plugins[0]!.health;
+  expect(h.ok).toBe(false);
+  expect(h.detail).toContain("activate failed");
+  expect(host.health().plugins.sneaky?.ok).toBe(false);
+  expect(host.health().plugins.sneaky?.detail).toContain("activate failed");
+});

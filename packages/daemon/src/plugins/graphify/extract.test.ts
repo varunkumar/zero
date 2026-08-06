@@ -28,6 +28,39 @@ test(
   30_000,
 );
 
+test(
+  "does not invent callers for top-level calls without enclosing symbol",
+  async () => {
+    const src = `
+function a() { return 1; }
+function b() { return 2; }
+a();
+`;
+    const { edges } = await extractFromSource("src/top.ts", src, "typescript");
+    const calls = edges.filter((e) => e.relation === "calls");
+    // Top-level a() has no enclosing function/class; must not invent b->a.
+    expect(calls).toHaveLength(0);
+  },
+  30_000,
+);
+
+test(
+  "emits calls only when callee is local and caller range encloses the call",
+  async () => {
+    const src = `
+function a() { return 1; }
+function b() { return a(); }
+`;
+    const { edges } = await extractFromSource("src/call.ts", src, "typescript");
+    const calls = edges.filter((e) => e.relation === "calls");
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    expect(calls.some((e) => e.source.includes("b") && e.target.includes("a"))).toBe(
+      true,
+    );
+  },
+  30_000,
+);
+
 test("resolveLanguage maps extensions via defaults and overrides", () => {
   expect(resolveLanguage("foo/bar.ts")).toBe("typescript");
   expect(resolveLanguage("x.tsx")).toBe("tsx");

@@ -211,7 +211,7 @@ export async function extractFromSource(
         const callee = fn.text;
         const targetId = symbols.get(callee);
         if (targetId) {
-          // caller = innermost enclosing symbol range
+          // caller = innermost enclosing symbol range only (no inventing callers)
           let callerId: string | undefined;
           for (const r of symbolRanges) {
             if (
@@ -219,18 +219,8 @@ export async function extractFromSource(
               node.endIndex <= r.end &&
               r.id !== targetId
             ) {
-              if (!callerId) callerId = r.id;
               // prefer tightest range (later in walk ≈ nested); keep last matching
               callerId = r.id;
-            }
-          }
-          // if still none, try first symbol that isn't the callee (legacy heuristic)
-          if (!callerId) {
-            for (const [name, id] of symbols) {
-              if (id !== targetId) {
-                callerId = id;
-                break;
-              }
             }
           }
           if (callerId) {
