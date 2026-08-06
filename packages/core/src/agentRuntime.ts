@@ -87,10 +87,16 @@ export class AgentRuntime {
       };
       let text = "";
       const toolCalls: ChatToolCall[] = [];
-      for await (const delta of provider.chat([system, ...history], toolSpecs, signal)) {
+      try {
+        for await (const delta of provider.chat([system, ...history], toolSpecs, signal)) {
+          if (signal.aborted) return;
+          if (delta.text) { text += delta.text; yield { type: "text", delta: delta.text }; }
+          if (delta.toolCalls) toolCalls.push(...delta.toolCalls);
+        }
+      } catch (e) {
         if (signal.aborted) return;
-        if (delta.text) { text += delta.text; yield { type: "text", delta: delta.text }; }
-        if (delta.toolCalls) toolCalls.push(...delta.toolCalls);
+        // Provider error (not cancellation): stop cleanly without throwing, matching the "degrade only failing subsystem" constraint
+        return;
       }
       if (signal.aborted) return;
 
@@ -118,6 +124,7 @@ export class AgentRuntime {
     }
 
     await this.#client.request("chat/append", { id: sessionId, messages: history });
+    yield { type: "done", message: { role: "assistant", content: "(tool round limit reached)", createdAt: Date.now() } };
   }
 
   async #compact(provider: ChatCapableProvider, history: ChatMessage[], signal: AbortSignal): Promise<ChatMessage[]> {
@@ -130,8 +137,17 @@ export class AgentRuntime {
       { role: "user", content: "Summarize the conversation above.", createdAt: Date.now() },
     ];
     let summary = "";
-    for await (const delta of provider.chat(prompt, [], signal)) {
-      if (delta.text) summary += delta.text;
+    try {
+      for await (const delta of provider.chat(prompt, [], signal)) {
+        if (delta.text) summary += delta.text;
+      }
+    } catch (e) {
+      if (signal.aborted) {
+        // Cancellation: return original history unchanged
+        return history;
+      }
+      // Provider error: return original history unchanged, don't throw
+      return history;
     }
     return [{ role: "system", content: summary, createdAt: Date.now() }, ...toKeep];
   }
