@@ -42,9 +42,11 @@
       "dependencies": {
         "@codemirror/commands": "^6.7.0",
         "@codemirror/lang-javascript": "^6.2.0",
+        "@codemirror/language": "^6.12.4",
         "@codemirror/lint": "^6.8.0",
         "@codemirror/state": "^6.4.0",
         "@codemirror/view": "^6.28.0",
+        "@lezer/highlight": "^1.2.3",
         "@xterm/addon-fit": "^0.10.0",
         "@xterm/xterm": "^5.5.0",
         "@zero/core": "workspace:*",
