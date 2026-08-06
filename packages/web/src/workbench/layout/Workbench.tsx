@@ -203,6 +203,16 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
             requestCompletion={w.requestCompletion}
             onViewChange={(view) => w.registerView(groupId, view)}
             diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
+            client={w.client}
+            onGoToDefinition={(path, line, character) => {
+              w.openFile(path);
+              // Cursor placement after open happens once the tab's EditorView mounts;
+              // the simplest correct thing for M2 is opening the file — landing the
+              // cursor precisely requires the view to exist first, which openFile's
+              // async fs/read round-trip doesn't guarantee synchronously. Out of scope
+              // refinement: thread the target position through TabStore.openFile and
+              // have EditorPanel's mount effect dispatch a selection once ready.
+            }}
           />
         ) : (
           <div style={{ padding: 16, opacity: 0.6 }}>Select a file to edit (Cmd/Ctrl+P)</div>
