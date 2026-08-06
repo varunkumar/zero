@@ -4,7 +4,20 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { indentWithTab } from "@codemirror/commands";
 import { javascript } from "@codemirror/lang-javascript";
+import { linter, type Diagnostic as CmDiagnostic, forceLinting } from "@codemirror/lint";
+import type { LspDiagnostic } from "@zero/protocol";
 import { ghostText } from "./ghostText";
+
+function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnostic[]): CmDiagnostic[] {
+  return diagnostics.map((d) => {
+    const fromLine = doc.line(Math.min(d.range.start.line + 1, doc.lines));
+    const toLine = doc.line(Math.min(d.range.end.line + 1, doc.lines));
+    const from = Math.min(fromLine.from + d.range.start.character, doc.length);
+    const to = Math.min(toLine.from + d.range.end.character, doc.length);
+    const severity = d.severity === 1 ? "error" : d.severity === 2 ? "warning" : "info";
+    return { from, to: Math.max(to, from), severity, message: d.message, source: d.source };
+  });
+}
 
 // Gutter/selection colors aren't reachable via CSS custom properties (CodeMirror
 // renders them through CSSStyleSheet objects, not the document's cascade), so
@@ -73,6 +86,7 @@ export function Editor(props: {
   requestCompletion?: (s: { prefix: string; suffix: string }) => void;
   onViewChange?: (view: EditorView | undefined) => void;
   onCursorChange?: (pos: { line: number; column: number }) => void;
+  diagnostics?: LspDiagnostic[];
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>();
@@ -112,6 +126,7 @@ export function Editor(props: {
             indentWithTab,
           ]),
           ghostText((s) => propsRef.current.requestCompletion?.(s)),
+          linter(() => toCmDiagnostics(view.current!.state.doc, propsRef.current.diagnostics ?? [])),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) propsRef.current.onChange?.(u.state.doc.toString());
             if (u.selectionSet || u.docChanged) {
@@ -158,6 +173,13 @@ export function Editor(props: {
       effects: themeCompartment.current.reconfigure(editorTheme[props.theme ?? "light"]),
     });
   }, [props.theme]);
+
+  // The linter extension above only re-runs on doc changes by default; force
+  // a re-lint when diagnostics for the open file change externally (an
+  // lsp/diagnostics push unrelated to any local edit).
+  useEffect(() => {
+    if (view.current) forceLinting(view.current);
+  }, [props.diagnostics]);
 
   return <div ref={host} style={{ height: "100%" }} />;
 }

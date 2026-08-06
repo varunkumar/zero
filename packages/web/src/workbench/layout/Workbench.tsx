@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import type { EditorView } from "@codemirror/view";
-import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult } from "@zero/protocol";
+import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent } from "@zero/protocol";
 import { Editor } from "../../Editor";
 import { createCompletion } from "../../completionSetup";
 import { CommandRegistry } from "../commands/registry";
@@ -74,6 +74,7 @@ interface WorkbenchContextValue {
   tabsVersion: number;
   theme: "light" | "dark";
   ptyStore: PtyStore;
+  diagnosticsByPath: Map<string, LspDiagnostic[]>;
 }
 
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
@@ -201,6 +202,7 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
             }}
             requestCompletion={w.requestCompletion}
             onViewChange={(view) => w.registerView(groupId, view)}
+            diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
           />
         ) : (
           <div style={{ padding: 16, opacity: 0.6 }}>Select a file to edit (Cmd/Ctrl+P)</div>
@@ -246,6 +248,7 @@ export function Workbench(props: { client: RpcClient }) {
   const [activeGroupId, setActiveGroupId] = useState("group-1");
   const [tabsVersion, setTabsVersion] = useState(0);
   const [confirmingTabId, setConfirmingTabId] = useState<string | null>(null);
+  const [diagnosticsByPath, setDiagnosticsByPath] = useState<Map<string, LspDiagnostic[]>>(new Map());
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -333,6 +336,15 @@ export function Workbench(props: { client: RpcClient }) {
       if (method === "pty/exit") {
         const { sessionId } = params as PtyExitEvent;
         ptyStore.handleExit(sessionId);
+        return;
+      }
+      if (method === "lsp/diagnostics") {
+        const { path, diagnostics } = params as LspDiagnosticsEvent;
+        setDiagnosticsByPath((prev) => {
+          const next = new Map(prev);
+          next.set(path, diagnostics);
+          return next;
+        });
         return;
       }
       if (method !== "fs/changed") return;
@@ -687,6 +699,7 @@ export function Workbench(props: { client: RpcClient }) {
     tabsVersion,
     theme,
     ptyStore,
+    diagnosticsByPath,
   };
 
   return (
@@ -708,6 +721,7 @@ export function Workbench(props: { client: RpcClient }) {
             theme={theme}
             onToggleTheme={() => registry.run("view.toggleTheme")}
             message={statusMessage}
+            lspStatus={activePath ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length } : null}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />

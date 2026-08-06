@@ -42,6 +42,7 @@
       "dependencies": {
         "@codemirror/commands": "^6.7.0",
         "@codemirror/lang-javascript": "^6.2.0",
+        "@codemirror/lint": "^6.8.0",
         "@codemirror/state": "^6.4.0",
         "@codemirror/view": "^6.28.0",
         "@xterm/addon-fit": "^0.10.0",
