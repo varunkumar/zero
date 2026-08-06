@@ -63,6 +63,9 @@ export class Workspace {
   }
 
   async write(rel: string, content: string): Promise<void> {
+    // Create parent dirs first so #resolveReal can realpath them (e.g. `.zero/`).
+    const abs = this.#resolve(rel);
+    await fs.mkdir(dirname(abs), { recursive: true });
     await fs.writeFile(await this.#resolveReal(rel), content, "utf8");
   }
 

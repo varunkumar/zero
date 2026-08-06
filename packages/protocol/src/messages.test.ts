@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { parseMessage, ProtocolError, FsSearchParams, FsSearchResult, SettingsSetParams, PtyOpenParams, PtyOpenResult, PtyOutputEvent, LspDiagnosticsEvent, LspHoverResult, LspDefinitionResult } from "./messages";
+import {
+  parseMessage, ProtocolError, FsSearchParams, FsSearchResult, SettingsSetParams,
+  PtyOpenParams, PtyOpenResult, PtyOutputEvent, LspDiagnosticsEvent, LspHoverResult, LspDefinitionResult,
+} from "./messages";
+import type {
+  GraphContextAtParams, GraphQueryResult, PluginListResult, GraphStatusResult,
+} from "./messages";
 
 test("round-trips a request", () => {
   const msg = { jsonrpc: "2.0" as const, id: 1, method: "fs/read", params: { path: "a.ts" } };
@@ -43,4 +49,24 @@ test("lsp message shapes are plain JSON-serializable", () => {
   expect(JSON.parse(JSON.stringify(diag))).toEqual(diag);
   expect(JSON.parse(JSON.stringify(hover))).toEqual(hover);
   expect(JSON.parse(JSON.stringify(def))).toEqual(def);
+});
+
+test("graph and plugin types are plain JSON-serializable shapes", () => {
+  const ctx: GraphContextAtParams = { path: "a.ts", position: { line: 0, character: 1 }, maxChunks: 4 };
+  const q: GraphQueryResult = {
+    nodes: [{ id: "a", label: "A", source_file: "a.ts", kind: "function" }],
+    edges: [{ source: "a", target: "b", relation: "calls" }],
+    text: "A calls b",
+  };
+  const st: GraphStatusResult = {
+    ready: true, indexing: false, fileCount: 1, nodeCount: 2, edgeCount: 1, languages: ["typescript"],
+  };
+  const pl: PluginListResult = {
+    plugins: [{
+      id: "graphify", name: "Graphify", version: "0.1.0",
+      health: { ok: true },
+      contributions: { rpcMethods: ["graph/query"], contextProviders: ["graph"], tools: ["graph_query"] },
+    }],
+  };
+  expect(JSON.parse(JSON.stringify({ ctx, q, st, pl }))).toEqual({ ctx, q, st, pl });
 });

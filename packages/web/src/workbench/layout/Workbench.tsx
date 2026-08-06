@@ -268,6 +268,12 @@ export function Workbench(props: { client: RpcClient }) {
   // all, so this is tracked separately to give the status bar something
   // to show for the latter ("LSP unavailable" vs. no problems found).
   const [lspFailedByPath, setLspFailedByPath] = useState<Map<string, boolean>>(new Map());
+  const [graphStatus, setGraphStatus] = useState<{
+    ready: boolean;
+    indexing: boolean;
+    lastError?: string;
+    nodeCount?: number;
+  } | null>(null);
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -310,6 +316,31 @@ export function Workbench(props: { client: RpcClient }) {
       () => activePathRef.current ?? "",
     ),
   );
+
+  // Poll graphify indexer status for the status bar. Failures surface as
+  // "Graph off" rather than taking the editor down.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await client.request<{
+          ready: boolean;
+          indexing: boolean;
+          lastError?: string;
+          nodeCount: number;
+        }>("graph/status");
+        if (!cancelled) setGraphStatus(s);
+      } catch {
+        if (!cancelled) setGraphStatus({ ready: false, indexing: false, lastError: "unreachable" });
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [client]);
 
   useEffect(() => tabStore.subscribe(() => setTabsVersion((v) => v + 1)), [tabStore]);
 
@@ -779,6 +810,7 @@ export function Workbench(props: { client: RpcClient }) {
             lspStatus={activePath
               ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length, failed: lspFailedByPath.get(activePath) ?? false }
               : null}
+            graphStatus={graphStatus}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />

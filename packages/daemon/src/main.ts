@@ -4,6 +4,8 @@ import { Workspace } from "./workspace";
 import { PtyService } from "./pty";
 import { LspService } from "./lsp/service";
 import { DEFAULT_LSP_SERVERS, type LspServerConfig } from "./lsp/registry";
+import { PluginHost } from "./plugins/host";
+import { createGraphify } from "./plugins/graphify";
 
 export async function startZero(opts: DaemonOptions) {
   const daemon = createDaemon(opts);
@@ -53,7 +55,36 @@ export async function startZero(opts: DaemonOptions) {
   daemon.rpc.register("lsp/contextAt", z.object({ path: z.string(), position: lspPosition }),
     async (p) => ({ chunks: await lsp.contextAt(p.path, p.position) }));
 
-  const unwatch = ws.watch((path) => daemon.broadcast("fs/changed", { path }));
+  const graphify = createGraphify();
+  const host = new PluginHost({
+    rpc: daemon.rpc,
+    workspace: ws,
+    root: opts.root,
+    broadcast: (m, p) => daemon.broadcast(m, p),
+  });
+  host.registerHostRpcs();
+  // Fire-and-forget activation; tests can await pluginsReady.
+  // Failures degrade Graphify only (host catches factory/activate errors).
+  const pluginsReady = host.activateBuiltins([graphify.factory]);
+
+  const unwatch = ws.watch((path) => {
+    daemon.broadcast("fs/changed", { path });
+    try {
+      graphify.getIndexer()?.onFileChanged(path);
+    } catch {
+      // Graphify reindex must not break fs broadcast
+    }
+  });
+
   const stop = daemon.stop;
-  return { ...daemon, stop: () => { unwatch(); pty.closeAll(); lsp.dispose(); stop(); } };
+  return {
+    ...daemon,
+    pluginsReady,
+    stop: () => {
+      unwatch();
+      pty.closeAll();
+      lsp.dispose();
+      stop();
+    },
+  };
 }

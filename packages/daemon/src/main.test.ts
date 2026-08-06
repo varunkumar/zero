@@ -120,3 +120,39 @@ test("pty methods over the wire: open, input/output, resize, close", async () =>
 
   ws.close(); d.stop();
 });
+
+test("plugin/list and graph/status over the wire", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  writeFileSync(join(root, "a.ts"), "export function foo() { return 1; }\n");
+  const d = await startZero({ root });
+  await d.pluginsReady;
+
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w);
+    w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const list = await client.request<{ plugins: { id: string }[] }>("plugin/list");
+  expect(list.plugins.some((p) => p.id === "graphify")).toBe(true);
+
+  const deadline = Date.now() + 30_000;
+  let status = await client.request<{ ready: boolean; nodeCount: number }>(
+    "graph/status",
+  );
+  while (!status.ready && Date.now() < deadline) {
+    await Bun.sleep(100);
+    status = await client.request("graph/status");
+  }
+  expect(status.nodeCount).toBeGreaterThan(0);
+
+  const ctx = await client.request<{ chunks: unknown[]; ready: boolean }>(
+    "graph/contextAt",
+    { path: "a.ts", position: { line: 0, character: 0 } },
+  );
+  expect(ctx.ready).toBe(true);
+
+  ws.close();
+  d.stop();
+}, 60_000);
