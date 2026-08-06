@@ -8,7 +8,7 @@ import { linter, type Diagnostic as CmDiagnostic, forceLinting } from "@codemirr
 import type { LspDiagnostic, RpcClient, LspHoverResult, LspDefinitionResult } from "@zero/protocol";
 import { ghostText } from "./ghostText";
 
-function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnostic[]): CmDiagnostic[] {
+export function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnostic[]): CmDiagnostic[] {
   return diagnostics.map((d) => {
     const fromLine = doc.line(Math.min(d.range.start.line + 1, doc.lines));
     const toLine = doc.line(Math.min(d.range.end.line + 1, doc.lines));

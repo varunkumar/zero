@@ -59,6 +59,20 @@ test("isFailed reports a server that never speaks the LSP protocol, and false be
   service.dispose();
 }, 15000);
 
+test("a failed server degrades hover/definition/contextAt to empty, never throws (editor stays usable)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-lspsvc-"));
+  writeFileSync(join(root, "a.ts"), "const a = 1;\n");
+  const servers = { typescript: { command: "sh", args: ["-c", "cat > /dev/null"], languageIds: ["typescript"] } };
+  const service = new LspService(new Workspace(root), servers, () => {});
+
+  await service.sync("a.ts", "const a = 1;\n");
+  await expect(service.hover("a.ts", { line: 0, character: 0 })).resolves.toBeNull();
+  await expect(service.definition("a.ts", { line: 0, character: 0 })).resolves.toEqual([]);
+  await expect(service.contextAt("a.ts", { line: 0, character: 0 })).resolves.toEqual([]);
+
+  service.dispose();
+}, 15000);
+
 test("a path that escapes the workspace root is a silent no-op, not an error", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-lspsvc-"));
   const service = new LspService(new Workspace(root), DEFAULT_LSP_SERVERS, () => {});
