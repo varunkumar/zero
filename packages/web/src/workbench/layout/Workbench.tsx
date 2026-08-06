@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import type { EditorView } from "@codemirror/view";
 import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent } from "@zero/protocol";
+import type { AgentRuntime } from "@zero/core";
 import { Editor } from "../../Editor";
 import { createCompletion } from "../../completionSetup";
 import { CommandRegistry } from "../commands/registry";
@@ -17,11 +18,15 @@ import { StatusBar } from "../StatusBar";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { PtyStore } from "../terminal/store";
 import { TerminalPanel } from "../terminal/TerminalPanel";
+import { createChat } from "../../chatSetup";
+import { ChatStore } from "../chat/store";
+import { ChatPanel } from "../chat/ChatPanel";
 import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
 
 const SIDEBAR_PANEL_ID = "sidebar";
 const TERMINAL_PANEL_ID = "terminal";
+const CHAT_PANEL_ID = "chat";
 const TERMINAL_SESSIONS_KEY = "zero.terminal.sessionIds";
 /** How long a transient status-bar message stays up. */
 const STATUS_MESSAGE_MS = 8000;
@@ -77,6 +82,8 @@ interface WorkbenchContextValue {
   tabsVersion: number;
   theme: "light" | "dark";
   ptyStore: PtyStore;
+  chatStore: ChatStore;
+  chatRuntime: AgentRuntime;
   diagnosticsByPath: Map<string, LspDiagnostic[]>;
 }
 
@@ -230,9 +237,14 @@ function BottomTerminalPanel() {
   return <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />;
 }
 
+function BottomChatPanel() {
+  const w = useWorkbench();
+  return <ChatPanel client={w.client} runtime={w.chatRuntime} chatStore={w.chatStore} />;
+}
+
 /** Stable component map — see the note on WorkbenchContextValue for why this
  * must not be rebuilt per render. */
-const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel, terminal: BottomTerminalPanel };
+const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel, terminal: BottomTerminalPanel, chat: BottomChatPanel };
 
 /** Ref that initialises exactly once, unlike `useRef(new X())` which
  * constructs a throwaway on every render. */
@@ -248,6 +260,8 @@ export function Workbench(props: { client: RpcClient }) {
   const tabStore = useConst(() => new TabStore());
   const settingsStore = useConst(() => new SettingsStore(client, window.localStorage));
   const ptyStore = useConst(() => new PtyStore());
+  const chatStore = useConst(() => new ChatStore());
+  const chatRuntime = useConst(() => createChat(client, () => activePathRef.current ?? undefined));
 
   const [settings, setSettings] = useState(() => settingsStore.getSnapshot());
   const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
@@ -689,6 +703,22 @@ export function Workbench(props: { client: RpcClient }) {
         .then((s) => ptyStore.addSession(s))
         .catch((e: unknown) => reportRef.current(`Could not open terminal: ${errorText(e)}`));
     },
+    showChatPanel: () => {
+      const api = dockApi.current;
+      if (!api || api.getPanel(CHAT_PANEL_ID)) return;
+      api.addPanel({
+        id: CHAT_PANEL_ID, component: "chat", params: {},
+        position: { direction: "below" },
+        initialHeight: 320,
+      });
+    },
+    toggleChat: () => {
+      const api = dockApi.current;
+      if (!api) return;
+      const panel = api.getPanel(CHAT_PANEL_ID);
+      if (panel) { api.removePanel(panel); return; }
+      actionsRef.current.showChatPanel();
+    },
   };
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -711,6 +741,7 @@ export function Workbench(props: { client: RpcClient }) {
       { id: "preferences.open", title: "Preferences: Open Settings", run: () => actionsRef.current.openSettings() },
       { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleTerminal(), keybinding: "Control+Backquote" },
       { id: "terminal.new", title: "New Terminal", run: () => actionsRef.current.newTerminal() },
+      { id: "view.toggleChat", title: "Toggle Chat", run: () => actionsRef.current.toggleChat(), keybinding: "Control+Shift+KeyC" },
     ];
     for (const command of commands) registry.register(command);
     const detach = attachKeybindings(registry);
@@ -785,6 +816,8 @@ export function Workbench(props: { client: RpcClient }) {
     tabsVersion,
     theme,
     ptyStore,
+    chatStore,
+    chatRuntime,
     diagnosticsByPath,
   };
 
