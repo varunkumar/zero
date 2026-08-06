@@ -37,3 +37,26 @@ export interface FsSearchResult { matches: FsSearchMatch[]; truncated: boolean }
 export interface SettingsGetParams { key: string }
 export interface SettingsGetResult { value: unknown }
 export interface SettingsSetParams { key: string; value: unknown }
+export interface PtyOpenParams { shell?: string; cols: number; rows: number }
+export interface PtyOpenResult { sessionId: string; shell: string }
+export interface PtyInputParams { sessionId: string; data: string }
+export interface PtyResizeParams { sessionId: string; cols: number; rows: number }
+export interface PtyCloseParams { sessionId: string }
+export interface PtySessionInfo { sessionId: string; shell: string }
+export interface PtyListResult { sessions: PtySessionInfo[] }
+export interface PtyOutputEvent { sessionId: string; data: string }
+export interface PtyExitEvent { sessionId: string; exitCode: number }
+export interface LspPosition { line: number; character: number }
+export interface LspRange { start: LspPosition; end: LspPosition }
+/** 1=Error, 2=Warning, 3=Information, 4=Hint — matches LSP's DiagnosticSeverity. */
+export interface LspDiagnostic { range: LspRange; severity: 1 | 2 | 3 | 4; message: string; source?: string }
+export interface LspDiagnosticsEvent { path: string; diagnostics: LspDiagnostic[] }
+export interface LspSyncParams { path: string; content: string }
+export interface LspHoverParams { path: string; position: LspPosition }
+export interface LspHoverResult { contents: string | null }
+export interface LspDefinitionParams { path: string; position: LspPosition }
+export interface LspDefinitionLocation { path: string; range: LspRange }
+export interface LspDefinitionResult { locations: LspDefinitionLocation[] }
+export interface LspContextAtParams { path: string; position: LspPosition }
+export interface LspContextChunk { text: string; score: number }
+export interface LspContextAtResult { chunks: LspContextChunk[] }

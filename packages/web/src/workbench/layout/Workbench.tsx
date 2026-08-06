@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import type { EditorView } from "@codemirror/view";
-import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult } from "@zero/protocol";
+import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent } from "@zero/protocol";
 import { Editor } from "../../Editor";
 import { createCompletion } from "../../completionSetup";
 import { CommandRegistry } from "../commands/registry";
@@ -15,16 +15,23 @@ import { FileOpener } from "../palette/FileOpener";
 import { SearchPanel } from "../search/SearchPanel";
 import { StatusBar } from "../StatusBar";
 import { SettingsPanel } from "../settings/SettingsPanel";
+import { PtyStore } from "../terminal/store";
+import { TerminalPanel } from "../terminal/TerminalPanel";
 import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
 
 const SIDEBAR_PANEL_ID = "sidebar";
+const TERMINAL_PANEL_ID = "terminal";
+const TERMINAL_SESSIONS_KEY = "zero.terminal.sessionIds";
 /** How long a transient status-bar message stays up. */
 const STATUS_MESSAGE_MS = 8000;
 /** Trailing debounce on tree refreshes: a build or branch switch fires a
  * burst of fs/changed events, and each bump costs two full fs/tree round
  * trips (file tree + file-opener path list). */
 const TREE_REFRESH_DEBOUNCE_MS = 250;
+/** Trailing debounce on lsp/sync: keeps the spawned language server current
+ * with the buffer as the user types, without a round trip per keystroke. */
+const LSP_SYNC_DEBOUNCE_MS = 300;
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -69,6 +76,8 @@ interface WorkbenchContextValue {
    * therefore re-renders every panel. */
   tabsVersion: number;
   theme: "light" | "dark";
+  ptyStore: PtyStore;
+  diagnosticsByPath: Map<string, LspDiagnostic[]>;
 }
 
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
@@ -196,6 +205,17 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
             }}
             requestCompletion={w.requestCompletion}
             onViewChange={(view) => w.registerView(groupId, view)}
+            diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
+            client={w.client}
+            onGoToDefinition={(path, line, character) => {
+              w.openFile(path);
+              // Cursor placement after open happens once the tab's EditorView mounts;
+              // the simplest correct thing for M2 is opening the file — landing the
+              // cursor precisely requires the view to exist first, which openFile's
+              // async fs/read round-trip doesn't guarantee synchronously. Out of scope
+              // refinement: thread the target position through TabStore.openFile and
+              // have EditorPanel's mount effect dispatch a selection once ready.
+            }}
           />
         ) : (
           <div style={{ padding: 16, opacity: 0.6 }}>Select a file to edit (Cmd/Ctrl+P)</div>
@@ -205,9 +225,14 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
   );
 }
 
+function BottomTerminalPanel() {
+  const w = useWorkbench();
+  return <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />;
+}
+
 /** Stable component map — see the note on WorkbenchContextValue for why this
  * must not be rebuilt per render. */
-const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel };
+const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel, terminal: BottomTerminalPanel };
 
 /** Ref that initialises exactly once, unlike `useRef(new X())` which
  * constructs a throwaway on every render. */
@@ -222,6 +247,7 @@ export function Workbench(props: { client: RpcClient }) {
   const registry = useConst(() => new CommandRegistry());
   const tabStore = useConst(() => new TabStore());
   const settingsStore = useConst(() => new SettingsStore(client, window.localStorage));
+  const ptyStore = useConst(() => new PtyStore());
 
   const [settings, setSettings] = useState(() => settingsStore.getSnapshot());
   const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
@@ -235,6 +261,13 @@ export function Workbench(props: { client: RpcClient }) {
   const [activeGroupId, setActiveGroupId] = useState("group-1");
   const [tabsVersion, setTabsVersion] = useState(0);
   const [confirmingTabId, setConfirmingTabId] = useState<string | null>(null);
+  const [diagnosticsByPath, setDiagnosticsByPath] = useState<Map<string, LspDiagnostic[]>>(new Map());
+  // Whether the language server responsible for a given path has failed
+  // (spawn error, init timeout, crash). An empty diagnostics list looks
+  // identical whether the file is clean or the server never came up at
+  // all, so this is tracked separately to give the status bar something
+  // to show for the latter ("LSP unavailable" vs. no problems found).
+  const [lspFailedByPath, setLspFailedByPath] = useState<Map<string, boolean>>(new Map());
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -252,6 +285,7 @@ export function Workbench(props: { client: RpcClient }) {
   const lastWriteRef = useRef<{ path: string; content: string } | null>(null);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const treeDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const lspSyncDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   /** Surface an RPC failure in the status bar. Silence is the worst outcome
    * here: a failed fs/write otherwise leaves a tab looking merely dirty. */
@@ -266,10 +300,12 @@ export function Workbench(props: { client: RpcClient }) {
   useEffect(() => () => {
     clearTimeout(statusTimerRef.current);
     clearTimeout(treeDebounceRef.current);
+    clearTimeout(lspSyncDebounceRef.current);
   }, []);
 
   const completion = useConst(() =>
     createCompletion(
+      client,
       () => views.get(activeGroupIdRef.current),
       () => activePathRef.current ?? "",
     ),
@@ -313,6 +349,25 @@ export function Workbench(props: { client: RpcClient }) {
   // consumer of daemon notifications fans out from right here.
   useEffect(() => {
     client.onNotification((method, params) => {
+      if (method === "pty/output") {
+        const { sessionId, data } = params as PtyOutputEvent;
+        ptyStore.handleOutput(sessionId, data);
+        return;
+      }
+      if (method === "pty/exit") {
+        const { sessionId } = params as PtyExitEvent;
+        ptyStore.handleExit(sessionId);
+        return;
+      }
+      if (method === "lsp/diagnostics") {
+        const { path, diagnostics } = params as LspDiagnosticsEvent;
+        setDiagnosticsByPath((prev) => {
+          const next = new Map(prev);
+          next.set(path, diagnostics);
+          return next;
+        });
+        return;
+      }
       if (method !== "fs/changed") return;
       const { path } = params as FsChangedEvent;
       clearTimeout(treeDebounceRef.current);
@@ -340,7 +395,7 @@ export function Workbench(props: { client: RpcClient }) {
         })
         .catch((e: unknown) => reportRef.current(`Could not reload ${path}: ${errorText(e)}`));
     });
-  }, [client, tabStore]);
+  }, [client, tabStore, ptyStore]);
 
   // Path list backing the fuzzy file opener, refreshed whenever the tree does.
   useEffect(() => {
@@ -361,6 +416,46 @@ export function Workbench(props: { client: RpcClient }) {
     };
   }, [client, treeRefreshToken]);
 
+  // Reattach on mount: ask the daemon which pty sessions are still alive,
+  // keep only the ones this browser previously knew about (persisted below),
+  // and reveal the terminal panel if any were restored.
+  useEffect(() => {
+    let cancelled = false;
+    void client
+      .request<PtyListResult>("pty/list")
+      .then((res) => {
+        if (cancelled) return;
+        let persistedIds: string[] = [];
+        try {
+          persistedIds = JSON.parse(window.localStorage.getItem(TERMINAL_SESSIONS_KEY) ?? "[]") as string[];
+        } catch {
+          persistedIds = [];
+        }
+        const persisted = new Set(persistedIds);
+        let restored = false;
+        for (const session of res.sessions) {
+          if (persisted.has(session.sessionId)) {
+            ptyStore.addSession(session);
+            restored = true;
+          }
+        }
+        if (restored) actionsRef.current.showTerminalPanel();
+      })
+      .catch((e: unknown) => reportRef.current(`Could not restore terminals: ${errorText(e)}`));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client]);
+
+  // Persist the session id list on every PtyStore mutation (new terminal,
+  // closed terminal, exited terminal) so the reattach effect above can find
+  // them again after a reload.
+  useEffect(() => ptyStore.subscribe(() => {
+    const ids = ptyStore.getSessions().map((s) => s.sessionId);
+    window.localStorage.setItem(TERMINAL_SESSIONS_KEY, JSON.stringify(ids));
+  }), [ptyStore]);
+
   // Every open buffer is completion context.
   useEffect(() => {
     completion.buffers.setBuffers(
@@ -368,6 +463,40 @@ export function Workbench(props: { client: RpcClient }) {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completion, tabStore, tabsVersion]);
+
+  // Keep the daemon's spawned language server current with what the user
+  // sees, not just what's on disk: debounce-sync the active buffer on every
+  // edit (and, via the tabsVersion dependency, immediately on openFile and
+  // saveTab too).
+  useEffect(() => {
+    if (!activeTab) return;
+    clearTimeout(lspSyncDebounceRef.current);
+    lspSyncDebounceRef.current = setTimeout(() => {
+      const path = activeTab.path;
+      void client.request<{ failed: boolean }>("lsp/sync", { path, content: activeTab.content })
+        .then((res) => {
+          setLspFailedByPath((prev) => {
+            if (prev.get(path) === res.failed) return prev;
+            const next = new Map(prev);
+            next.set(path, res.failed);
+            return next;
+          });
+        })
+        .catch(() => {
+          // A missing/unconfigured language server for this file is expected
+          // and silent — lsp/sync degrades to a no-op daemon-side (Task 6).
+          // A genuine RPC failure here must not surface as a blocking error;
+          // diagnostics and failed-status simply stay stale until the next
+          // successful sync.
+        });
+    }, LSP_SYNC_DEBOUNCE_MS);
+    return () => clearTimeout(lspSyncDebounceRef.current);
+    // activeTab.content is the trigger; activeTab itself changes identity on
+    // every keystroke (TabStore mutates in place but bumps tabsVersion), so
+    // depending on tabsVersion + activeTab?.path avoids re-debouncing on
+    // unrelated state changes elsewhere in the tree.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, activeTab?.path, activeTab?.content]);
 
   function openFile(path: string): void {
     void client
@@ -507,6 +636,28 @@ export function Workbench(props: { client: RpcClient }) {
     toggleSidebar,
     splitEditor,
     closeEditorGroup,
+    showTerminalPanel: () => {
+      const api = dockApi.current;
+      if (!api || api.getPanel(TERMINAL_PANEL_ID)) return;
+      api.addPanel({
+        id: TERMINAL_PANEL_ID, component: "terminal", params: {},
+        position: { direction: "below" },
+        initialHeight: 240,
+      });
+    },
+    toggleTerminal: () => {
+      const api = dockApi.current;
+      if (!api) return;
+      const panel = api.getPanel(TERMINAL_PANEL_ID);
+      if (panel) { api.removePanel(panel); return; }
+      actionsRef.current.showTerminalPanel();
+    },
+    newTerminal: () => {
+      actionsRef.current.showTerminalPanel();
+      void client.request<{ sessionId: string; shell: string }>("pty/open", { cols: 80, rows: 24 })
+        .then((s) => ptyStore.addSession(s))
+        .catch((e: unknown) => reportRef.current(`Could not open terminal: ${errorText(e)}`));
+    },
   };
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -527,6 +678,8 @@ export function Workbench(props: { client: RpcClient }) {
       { id: "view.closeEditorGroup", title: "Close Editor Group", run: () => actionsRef.current.closeEditorGroup(), keybinding: "$mod+Shift+Backslash" },
       { id: "view.toggleTheme", title: "Toggle Theme", run: () => actionsRef.current.toggleTheme() },
       { id: "preferences.open", title: "Preferences: Open Settings", run: () => actionsRef.current.openSettings() },
+      { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleTerminal(), keybinding: "Control+Backquote" },
+      { id: "terminal.new", title: "New Terminal", run: () => actionsRef.current.newTerminal() },
     ];
     for (const command of commands) registry.register(command);
     const detach = attachKeybindings(registry);
@@ -600,6 +753,8 @@ export function Workbench(props: { client: RpcClient }) {
     treeRefreshToken,
     tabsVersion,
     theme,
+    ptyStore,
+    diagnosticsByPath,
   };
 
   return (
@@ -621,6 +776,9 @@ export function Workbench(props: { client: RpcClient }) {
             theme={theme}
             onToggleTheme={() => registry.run("view.toggleTheme")}
             message={statusMessage}
+            lspStatus={activePath
+              ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length, failed: lspFailedByPath.get(activePath) ?? false }
+              : null}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />

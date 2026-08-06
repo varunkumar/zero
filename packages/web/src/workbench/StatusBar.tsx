@@ -11,6 +11,7 @@ export function StatusBar(props: {
   /** Transient failure notice (save/open errors); the bar inherited this role
    * from the old top bar's `status` string. */
   message?: { text: string; tone: "error" | "info" } | null;
+  lspStatus: { path: string; count: number; failed: boolean } | null;
 }) {
   return (
     <div
@@ -39,6 +40,18 @@ export function StatusBar(props: {
         )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {props.lspStatus && props.lspStatus.failed && (
+          <span role="status" title={`Language server unavailable for ${props.lspStatus.path}`}
+            style={{ color: "var(--zero-statusbar-fg)", opacity: 0.7 }}>
+            LSP unavailable
+          </span>
+        )}
+        {props.lspStatus && !props.lspStatus.failed && props.lspStatus.count > 0 && (
+          <span role="status" title={`${props.lspStatus.count} problem(s) in ${props.lspStatus.path}`}
+            style={{ color: "var(--zero-error-fg, crimson)" }}>
+            {props.lspStatus.count} problem{props.lspStatus.count === 1 ? "" : "s"}
+          </span>
+        )}
         <StatusPill engine={props.engine} />
         <button onClick={props.onToggleTheme} style={{ background: "transparent", border: "1px solid var(--zero-border)", color: "inherit", borderRadius: 4, fontSize: 13, padding: "2px 8px", cursor: "pointer" }}>
           {props.theme === "dark" ? "Dark" : "Light"}

@@ -14,6 +14,15 @@ export class Workspace {
     try { this.#root = realpathSync(abs); } catch { this.#root = abs; }
   }
 
+  /** The workspace root, already resolved through symlinks (see
+   * constructor). Other daemon subsystems that need to reason about the
+   * same filesystem paths Workspace does (e.g. LspService matching
+   * language-server-reported `file://` URIs) should reuse this rather than
+   * re-deriving or re-realpath'ing opts.root themselves. */
+  get root(): string {
+    return this.#root;
+  }
+
   #resolve(rel: string): string {
     const abs = resolve(this.#root, rel);
     if (abs !== this.#root && !abs.startsWith(this.#root + sep))
@@ -39,6 +48,14 @@ export class Workspace {
     if (real !== this.#root && !real.startsWith(this.#root + sep))
       throw new PathOutsideWorkspaceError(rel);
     return abs; // original (non-realpath'd) path, now proven safe to use
+  }
+
+  /** Public entry point for other subsystems (e.g. LspService) that need
+   * this same lexical-plus-symlink containment guard before touching a
+   * caller-supplied relative path, without duplicating it. Resolves to the
+   * guarded absolute path, or rejects with PathOutsideWorkspaceError. */
+  async resolveInRoot(rel: string): Promise<string> {
+    return this.#resolveReal(rel);
   }
 
   async read(rel: string): Promise<string> {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseMessage, ProtocolError, FsSearchParams, FsSearchResult, SettingsSetParams } from "./messages";
+import { parseMessage, ProtocolError, FsSearchParams, FsSearchResult, SettingsSetParams, PtyOpenParams, PtyOpenResult, PtyOutputEvent, LspDiagnosticsEvent, LspHoverResult, LspDefinitionResult } from "./messages";
 
 test("round-trips a request", () => {
   const msg = { jsonrpc: "2.0" as const, id: 1, method: "fs/read", params: { path: "a.ts" } };
@@ -22,4 +22,25 @@ test("fs/search and settings params/results are plain JSON-serializable shapes",
 
   const setParams: SettingsSetParams = { key: "workbench", value: { theme: "dark" } };
   expect(JSON.parse(JSON.stringify(setParams))).toEqual(setParams);
+});
+
+test("pty message shapes are plain JSON-serializable", () => {
+  const open: PtyOpenParams = { cols: 80, rows: 24 };
+  const result: PtyOpenResult = { sessionId: "abc", shell: "/bin/bash" };
+  const output: PtyOutputEvent = { sessionId: "abc", data: "hello\n" };
+  expect(JSON.parse(JSON.stringify(open))).toEqual(open);
+  expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+  expect(JSON.parse(JSON.stringify(output))).toEqual(output);
+});
+
+test("lsp message shapes are plain JSON-serializable", () => {
+  const diag: LspDiagnosticsEvent = {
+    path: "a.ts",
+    diagnostics: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, severity: 1, message: "boom" }],
+  };
+  const hover: LspHoverResult = { contents: "const x: number" };
+  const def: LspDefinitionResult = { locations: [{ path: "b.ts", range: { start: { line: 2, character: 0 }, end: { line: 2, character: 5 } } }] };
+  expect(JSON.parse(JSON.stringify(diag))).toEqual(diag);
+  expect(JSON.parse(JSON.stringify(hover))).toEqual(hover);
+  expect(JSON.parse(JSON.stringify(def))).toEqual(def);
 });

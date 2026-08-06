@@ -13,11 +13,14 @@
     "@codemirror/view": "^6.28.0",
     "@codemirror/commands": "^6.7.0",
     "@codemirror/lang-javascript": "^6.2.0",
+    "@codemirror/lint": "^6.8.0",
     "dockview-react": "^1.17.0",
     "cmdk": "^1.0.0",
     "command-score": "^0.1.2",
     "react-arborist": "^3.4.0",
-    "tinykeys": "^2.1.0"
+    "tinykeys": "^2.1.0",
+    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.10.0"
   },
   "devDependencies": {
     "vite": "^6.4.3",

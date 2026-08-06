@@ -1,10 +1,23 @@
 import { useEffect, useRef } from "react";
-import { EditorView, keymap, highlightWhitespace } from "@codemirror/view";
+import { EditorView, keymap, highlightWhitespace, hoverTooltip } from "@codemirror/view";
 import { Compartment, EditorState } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { indentWithTab } from "@codemirror/commands";
 import { javascript } from "@codemirror/lang-javascript";
+import { linter, type Diagnostic as CmDiagnostic, forceLinting } from "@codemirror/lint";
+import type { LspDiagnostic, RpcClient, LspHoverResult, LspDefinitionResult } from "@zero/protocol";
 import { ghostText } from "./ghostText";
+
+function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnostic[]): CmDiagnostic[] {
+  return diagnostics.map((d) => {
+    const fromLine = doc.line(Math.min(d.range.start.line + 1, doc.lines));
+    const toLine = doc.line(Math.min(d.range.end.line + 1, doc.lines));
+    const from = Math.min(fromLine.from + d.range.start.character, doc.length);
+    const to = Math.min(toLine.from + d.range.end.character, doc.length);
+    const severity = d.severity === 1 ? "error" : d.severity === 2 ? "warning" : "info";
+    return { from, to: Math.max(to, from), severity, message: d.message, source: d.source };
+  });
+}
 
 // Gutter/selection colors aren't reachable via CSS custom properties (CodeMirror
 // renders them through CSSStyleSheet objects, not the document's cascade), so
@@ -44,9 +57,14 @@ const editorTheme = {
 };
 
 const fontTheme = EditorView.theme({
+  // CodeMirror's ".cm-editor" root defaults to height:auto, so without an
+  // explicit height the editor grows to fit its full content instead of
+  // scrolling internally - the surrounding page scrolls instead.
   "&": {
     fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
+    height: "100%",
   },
+  ".cm-scroller": { overflow: "auto" },
   ".cm-content": {
     fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
     // font-feature-settings alone (not font-variant-ligatures) is what VS
@@ -73,6 +91,9 @@ export function Editor(props: {
   requestCompletion?: (s: { prefix: string; suffix: string }) => void;
   onViewChange?: (view: EditorView | undefined) => void;
   onCursorChange?: (pos: { line: number; column: number }) => void;
+  diagnostics?: LspDiagnostic[];
+  client: RpcClient;
+  onGoToDefinition?: (path: string, line: number, character: number) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>();
@@ -86,6 +107,19 @@ export function Editor(props: {
   const propsRef = useRef(props);
   propsRef.current = props;
   const loadedPathRef = useRef<string | null>(null);
+
+  async function goToDefinition(doc: EditorState["doc"], pos: number, line: ReturnType<EditorState["doc"]["lineAt"]>): Promise<void> {
+    const position = { line: line.number - 1, character: pos - line.from };
+    let result: LspDefinitionResult;
+    try {
+      result = await propsRef.current.client.request<LspDefinitionResult>(
+        "lsp/definition", { path: propsRef.current.path, position });
+    } catch {
+      return;
+    }
+    const target = result.locations[0];
+    if (target) propsRef.current.onGoToDefinition?.(target.path, target.range.start.line, target.range.start.character);
+  }
 
   // Create the view once per file. Switching files (path changes) is a full
   // rebuild, which is correct: cursor/selection/undo history from file A
@@ -109,9 +143,53 @@ export function Editor(props: {
               preventDefault: true,
               run: (v) => { propsRef.current.onSave(v.state.doc.toString()); return true; },
             },
+            {
+              key: "F12",
+              preventDefault: true,
+              run: (v) => {
+                const pos = v.state.selection.main.head;
+                const line = v.state.doc.lineAt(pos);
+                void goToDefinition(v.state.doc, pos, line);
+                return true;
+              },
+            },
             indentWithTab,
           ]),
           ghostText((s) => propsRef.current.requestCompletion?.(s)),
+          linter(() => toCmDiagnostics(view.current!.state.doc, propsRef.current.diagnostics ?? [])),
+          hoverTooltip(async (view, pos) => {
+            const line = view.state.doc.lineAt(pos);
+            const position = { line: line.number - 1, character: pos - line.from };
+            let result: LspHoverResult;
+            try {
+              result = await propsRef.current.client.request<LspHoverResult>(
+                "lsp/hover", { path: propsRef.current.path, position });
+            } catch {
+              return null;
+            }
+            if (!result.contents) return null;
+            return {
+              pos, end: pos,
+              above: true,
+              create: () => {
+                const dom = document.createElement("div");
+                dom.className = "cm-tooltip-zero-hover";
+                dom.textContent = result.contents;
+                dom.style.cssText = "max-width: 480px; white-space: pre-wrap; padding: 6px 8px; font-size: 13px;";
+                return { dom };
+              },
+            };
+          }),
+          EditorView.domEventHandlers({
+            mousedown(event, view) {
+              if (!(event.metaKey || event.ctrlKey)) return false;
+              const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+              if (pos === null) return false;
+              event.preventDefault();
+              void goToDefinition(view.state.doc, pos, view.state.doc.lineAt(pos));
+              return true;
+            },
+          }),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) propsRef.current.onChange?.(u.state.doc.toString());
             if (u.selectionSet || u.docChanged) {
@@ -158,6 +236,13 @@ export function Editor(props: {
       effects: themeCompartment.current.reconfigure(editorTheme[props.theme ?? "light"]),
     });
   }, [props.theme]);
+
+  // The linter extension above only re-runs on doc changes by default; force
+  // a re-lint when diagnostics for the open file change externally (an
+  // lsp/diagnostics push unrelated to any local edit).
+  useEffect(() => {
+    if (view.current) forceLinting(view.current);
+  }, [props.diagnostics]);
 
   return <div ref={host} style={{ height: "100%" }} />;
 }

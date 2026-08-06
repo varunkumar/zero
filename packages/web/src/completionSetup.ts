@@ -1,9 +1,10 @@
-import { CompletionEngine, CompletionScheduler, BufferContext,
+import { CompletionEngine, CompletionScheduler, BufferContext, LspContext,
   ChromeNanoProvider, OpenAICompatProvider, type NanoApi } from "@zero/core";
 import type { EditorView } from "@codemirror/view";
+import type { RpcClient } from "@zero/protocol";
 import { setSuggestion } from "./ghostText";
 
-export function createCompletion(getView: () => EditorView | undefined, path: () => string) {
+export function createCompletion(client: RpcClient, getView: () => EditorView | undefined, path: () => string) {
   const nanoApi = (globalThis as { LanguageModel?: NanoApi }).LanguageModel;
   const buffers = new BufferContext();
   const engine = new CompletionEngine({
@@ -14,7 +15,7 @@ export function createCompletion(getView: () => EditorView | undefined, path: ()
         model: localStorage.getItem("zero.ollamaModel") ?? "qwen2.5-coder:1.5b",
       }),
     ],
-    context: [buffers],
+    context: [buffers, new LspContext(client)],
   });
 
   let latest = { prefix: "", suffix: "" };
