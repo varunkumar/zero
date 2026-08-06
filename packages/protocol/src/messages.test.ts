@@ -70,3 +70,32 @@ test("graph and plugin types are plain JSON-serializable shapes", () => {
   };
   expect(JSON.parse(JSON.stringify({ ctx, q, st, pl }))).toEqual({ ctx, q, st, pl });
 });
+
+import type {
+  ChatMessage, ChatCreateParams, ChatCreateResult, ChatListResult,
+  ChatGetResult, ChatAppendParams, ChatRenameParams,
+} from "./messages";
+
+test("chat message shapes are plain JSON-serializable", () => {
+  const msg: ChatMessage = {
+    role: "assistant",
+    content: "Reading the file now.",
+    toolCalls: [{ id: "call_1", name: "fs_read", args: { path: "a.ts" } }],
+    createdAt: 1000,
+  };
+  const toolResult: ChatMessage = {
+    role: "tool", content: "export const a = 1;", toolCallId: "call_1", toolName: "fs_read", createdAt: 1001,
+  };
+  expect(JSON.parse(JSON.stringify(msg))).toEqual(msg);
+  expect(JSON.parse(JSON.stringify(toolResult))).toEqual(toolResult);
+
+  const create: ChatCreateParams = { title: "Refactor plan" };
+  const createResult: ChatCreateResult = { id: "abc" };
+  const list: ChatListResult = { sessions: [{ id: "abc", title: "Refactor plan", updatedAt: 1000, messageCount: 2 }] };
+  const get: ChatGetResult = { id: "abc", title: "Refactor plan", messages: [msg, toolResult] };
+  const append: ChatAppendParams = { id: "abc", messages: [msg] };
+  const rename: ChatRenameParams = { id: "abc", title: "New title" };
+  for (const shape of [create, createResult, list, get, append, rename]) {
+    expect(JSON.parse(JSON.stringify(shape))).toEqual(shape);
+  }
+});

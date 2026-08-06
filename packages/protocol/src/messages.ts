@@ -117,3 +117,23 @@ export interface PluginHealthResult {
   ok: boolean;
   plugins: Record<string, PluginHealthInfo>;
 }
+
+export interface ChatToolCall { id: string; name: string; args: unknown }
+export interface ChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  toolCalls?: ChatToolCall[];
+  toolCallId?: string;
+  toolName?: string;
+  createdAt: number;
+}
+export interface ChatSessionSummary { id: string; title: string; updatedAt: number; messageCount: number }
+
+export interface ChatCreateParams { title?: string }
+export interface ChatCreateResult { id: string }
+export interface ChatListResult { sessions: ChatSessionSummary[] }
+export interface ChatGetParams { id: string }
+export interface ChatGetResult { id: string; title: string; messages: ChatMessage[] }
+export interface ChatAppendParams { id: string; messages: ChatMessage[] }
+export interface ChatRenameParams { id: string; title: string }
+export interface ChatDeleteParams { id: string }
