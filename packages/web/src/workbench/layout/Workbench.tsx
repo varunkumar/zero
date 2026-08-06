@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import type { EditorView } from "@codemirror/view";
-import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult } from "@zero/protocol";
+import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult } from "@zero/protocol";
 import { Editor } from "../../Editor";
 import { createCompletion } from "../../completionSetup";
 import { CommandRegistry } from "../commands/registry";
@@ -15,10 +15,14 @@ import { FileOpener } from "../palette/FileOpener";
 import { SearchPanel } from "../search/SearchPanel";
 import { StatusBar } from "../StatusBar";
 import { SettingsPanel } from "../settings/SettingsPanel";
+import { PtyStore } from "../terminal/store";
+import { TerminalPanel } from "../terminal/TerminalPanel";
 import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
 
 const SIDEBAR_PANEL_ID = "sidebar";
+const TERMINAL_PANEL_ID = "terminal";
+const TERMINAL_SESSIONS_KEY = "zero.terminal.sessionIds";
 /** How long a transient status-bar message stays up. */
 const STATUS_MESSAGE_MS = 8000;
 /** Trailing debounce on tree refreshes: a build or branch switch fires a
@@ -69,6 +73,7 @@ interface WorkbenchContextValue {
    * therefore re-renders every panel. */
   tabsVersion: number;
   theme: "light" | "dark";
+  ptyStore: PtyStore;
 }
 
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
@@ -205,9 +210,14 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
   );
 }
 
+function BottomTerminalPanel() {
+  const w = useWorkbench();
+  return <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />;
+}
+
 /** Stable component map — see the note on WorkbenchContextValue for why this
  * must not be rebuilt per render. */
-const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel };
+const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel, terminal: BottomTerminalPanel };
 
 /** Ref that initialises exactly once, unlike `useRef(new X())` which
  * constructs a throwaway on every render. */
@@ -222,6 +232,7 @@ export function Workbench(props: { client: RpcClient }) {
   const registry = useConst(() => new CommandRegistry());
   const tabStore = useConst(() => new TabStore());
   const settingsStore = useConst(() => new SettingsStore(client, window.localStorage));
+  const ptyStore = useConst(() => new PtyStore());
 
   const [settings, setSettings] = useState(() => settingsStore.getSnapshot());
   const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
@@ -314,6 +325,16 @@ export function Workbench(props: { client: RpcClient }) {
   // consumer of daemon notifications fans out from right here.
   useEffect(() => {
     client.onNotification((method, params) => {
+      if (method === "pty/output") {
+        const { sessionId, data } = params as PtyOutputEvent;
+        ptyStore.handleOutput(sessionId, data);
+        return;
+      }
+      if (method === "pty/exit") {
+        const { sessionId } = params as PtyExitEvent;
+        ptyStore.handleExit(sessionId);
+        return;
+      }
       if (method !== "fs/changed") return;
       const { path } = params as FsChangedEvent;
       clearTimeout(treeDebounceRef.current);
@@ -341,7 +362,7 @@ export function Workbench(props: { client: RpcClient }) {
         })
         .catch((e: unknown) => reportRef.current(`Could not reload ${path}: ${errorText(e)}`));
     });
-  }, [client, tabStore]);
+  }, [client, tabStore, ptyStore]);
 
   // Path list backing the fuzzy file opener, refreshed whenever the tree does.
   useEffect(() => {
@@ -361,6 +382,37 @@ export function Workbench(props: { client: RpcClient }) {
       cancelled = true;
     };
   }, [client, treeRefreshToken]);
+
+  // Reattach on mount: ask the daemon which pty sessions are still alive,
+  // keep only the ones this browser previously knew about (persisted below),
+  // and reveal the terminal panel if any were restored.
+  useEffect(() => {
+    let cancelled = false;
+    void client.request<PtyListResult>("pty/list").then((res) => {
+      if (cancelled) return;
+      const persisted = new Set(JSON.parse(window.localStorage.getItem(TERMINAL_SESSIONS_KEY) ?? "[]") as string[]);
+      let restored = false;
+      for (const session of res.sessions) {
+        if (persisted.has(session.sessionId)) {
+          ptyStore.addSession(session);
+          restored = true;
+        }
+      }
+      if (restored) actionsRef.current.showTerminalPanel();
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client]);
+
+  // Persist the session id list on every PtyStore mutation (new terminal,
+  // closed terminal, exited terminal) so the reattach effect above can find
+  // them again after a reload.
+  useEffect(() => ptyStore.subscribe(() => {
+    const ids = ptyStore.getSessions().map((s) => s.sessionId);
+    window.localStorage.setItem(TERMINAL_SESSIONS_KEY, JSON.stringify(ids));
+  }), [ptyStore]);
 
   // Every open buffer is completion context.
   useEffect(() => {
@@ -508,6 +560,28 @@ export function Workbench(props: { client: RpcClient }) {
     toggleSidebar,
     splitEditor,
     closeEditorGroup,
+    showTerminalPanel: () => {
+      const api = dockApi.current;
+      if (!api || api.getPanel(TERMINAL_PANEL_ID)) return;
+      api.addPanel({
+        id: TERMINAL_PANEL_ID, component: "terminal", params: {},
+        position: { direction: "below" },
+        initialHeight: 240,
+      });
+    },
+    toggleTerminal: () => {
+      const api = dockApi.current;
+      if (!api) return;
+      const panel = api.getPanel(TERMINAL_PANEL_ID);
+      if (panel) { api.removePanel(panel); return; }
+      actionsRef.current.showTerminalPanel();
+    },
+    newTerminal: () => {
+      actionsRef.current.showTerminalPanel();
+      void client.request<{ sessionId: string; shell: string }>("pty/open", { cols: 80, rows: 24 })
+        .then((s) => ptyStore.addSession(s))
+        .catch((e: unknown) => reportRef.current(`Could not open terminal: ${errorText(e)}`));
+    },
   };
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -528,6 +602,8 @@ export function Workbench(props: { client: RpcClient }) {
       { id: "view.closeEditorGroup", title: "Close Editor Group", run: () => actionsRef.current.closeEditorGroup(), keybinding: "$mod+Shift+Backslash" },
       { id: "view.toggleTheme", title: "Toggle Theme", run: () => actionsRef.current.toggleTheme() },
       { id: "preferences.open", title: "Preferences: Open Settings", run: () => actionsRef.current.openSettings() },
+      { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleTerminal(), keybinding: "Control+Backquote" },
+      { id: "terminal.new", title: "New Terminal", run: () => actionsRef.current.newTerminal() },
     ];
     for (const command of commands) registry.register(command);
     const detach = attachKeybindings(registry);
@@ -601,6 +677,7 @@ export function Workbench(props: { client: RpcClient }) {
     treeRefreshToken,
     tabsVersion,
     theme,
+    ptyStore,
   };
 
   return (
