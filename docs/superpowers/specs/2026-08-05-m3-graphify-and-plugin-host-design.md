@@ -1,7 +1,7 @@
 # M3 Graphify and Plugin Host — Design
 
 Date: 2026-08-05
-Status: Draft for review
+Status: Approved
 Branch / worktree: `worktree-m3-graphify-and-plugin-host` under
 `.claude/worktrees/m3-graphify-and-plugin-host`
 
