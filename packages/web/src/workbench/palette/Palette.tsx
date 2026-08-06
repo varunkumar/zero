@@ -1,4 +1,5 @@
 import { Command } from "cmdk";
+import { ZERO_MONO_FONT } from "../theme/fonts";
 
 export function Palette<T>(props: {
   open: boolean;
@@ -38,6 +39,7 @@ export function Palette<T>(props: {
           borderRadius: 8,
           border: "1px solid var(--zero-border)",
           overflow: "hidden",
+          fontFamily: ZERO_MONO_FONT,
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -55,6 +57,7 @@ export function Palette<T>(props: {
               color: "inherit",
               outline: "none",
               boxSizing: "border-box",
+              fontFamily: ZERO_MONO_FONT,
             }}
           />
           <Command.List style={{ maxHeight: "50vh", overflow: "auto", padding: 4 }}>

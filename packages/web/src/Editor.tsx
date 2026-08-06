@@ -7,6 +7,7 @@ import { javascript } from "@codemirror/lang-javascript";
 import { linter, type Diagnostic as CmDiagnostic, forceLinting } from "@codemirror/lint";
 import type { LspDiagnostic, RpcClient, LspHoverResult, LspDefinitionResult } from "@zero/protocol";
 import { ghostText } from "./ghostText";
+import { ZERO_MONO_FONT } from "./workbench/theme/fonts";
 
 function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnostic[]): CmDiagnostic[] {
   return diagnostics.map((d) => {
@@ -61,12 +62,12 @@ const fontTheme = EditorView.theme({
   // explicit height the editor grows to fit its full content instead of
   // scrolling internally - the surrounding page scrolls instead.
   "&": {
-    fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
+    fontFamily: ZERO_MONO_FONT,
     height: "100%",
   },
   ".cm-scroller": { overflow: "auto" },
   ".cm-content": {
-    fontFamily: "'FiraCode Nerd Font', 'Fira Code', monospace",
+    fontFamily: ZERO_MONO_FONT,
     // font-feature-settings alone (not font-variant-ligatures) is what VS
     // Code's "font ligatures" setting uses too: font-variant-ligatures
     // triggers the browser's text-shaping ligature path, which merges
