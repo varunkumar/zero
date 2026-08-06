@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import commandScore from "command-score";
 import { Palette } from "./Palette";
+import { iconFor } from "../icons/iconFor";
 
 /** A workspace can hold tens of thousands of files; every item rendered here
  * is a mounted `<Command.Item>` that cmdk re-scores on each keystroke. Rank
@@ -41,6 +42,9 @@ export function FileOpener(props: { paths: string[]; open: boolean; onClose: () 
       placeholder="Go to file…"
       onQueryChange={setQuery}
       filter={false}
+      renderIcon={(path) => (
+        <img src={iconFor(path.split("/").at(-1)!, false)} alt="" width={16} height={16} style={{ flexShrink: 0 }} />
+      )}
     />
   );
 }

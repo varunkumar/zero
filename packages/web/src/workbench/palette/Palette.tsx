@@ -1,4 +1,5 @@
 import { Command } from "cmdk";
+import type { ReactNode } from "react";
 import { ZERO_MONO_FONT } from "../theme/fonts";
 
 export function Palette<T>(props: {
@@ -14,6 +15,8 @@ export function Palette<T>(props: {
    * ranks with `command-score` and caps the list); cmdk would otherwise
    * re-filter and could drop already-ranked entries. */
   filter?: boolean;
+  /** Optional per-item leading icon, rendered before the label. */
+  renderIcon?: (item: T) => ReactNode;
 }) {
   if (!props.open) return null;
   return (
@@ -77,8 +80,9 @@ export function Palette<T>(props: {
                   props.onSelect(item);
                   props.onClose();
                 }}
-                style={{ padding: "8px 12px", borderRadius: 4, cursor: "pointer" }}
+                style={{ padding: "8px 12px", borderRadius: 4, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}
               >
+                {props.renderIcon?.(item)}
                 {props.getLabel(item)}
               </Command.Item>
             ))}
