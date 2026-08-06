@@ -9,6 +9,7 @@ import type { LspDiagnostic, RpcClient, LspHoverResult, LspDefinitionResult } fr
 import { ghostText } from "./ghostText";
 import { ZERO_MONO_FONT } from "./workbench/theme/fonts";
 import { ZERO_COLORS } from "./workbench/theme/colors";
+import { zeroSyntaxHighlighting } from "./workbench/theme/syntaxHighlighting";
 
 export function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnostic[]): CmDiagnostic[] {
   return diagnostics.map((d) => {
@@ -35,27 +36,33 @@ export function toCmDiagnostics(doc: EditorState["doc"], diagnostics: LspDiagnos
 // occlude anything. Fix: make the active-line wash translucent so it blends
 // with (rather than paints over) whatever's beneath it.
 const editorTheme = {
-  light: EditorView.theme({
-    "&": { fontSize: "15px" },
-    ".cm-gutters": { backgroundColor: ZERO_COLORS.light.gutterBg, color: ZERO_COLORS.light.gutterFg, border: "none" },
-    ".cm-activeLineGutter": { backgroundColor: ZERO_COLORS.light.activeLineGutterBg },
-    ".cm-activeLine": { backgroundColor: "rgba(0, 0, 0, 0.035)" },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "rgba(0, 122, 255, 0.28) !important" },
-    // highlightWhitespace() renders dots via a radial-gradient background
-    // image (not a styleable :before), so the fade has to go into the
-    // gradient's color/opacity and a smaller circle, not a color/opacity rule.
-    ".cm-highlightSpace": { backgroundImage: "radial-gradient(circle at 50% 55%, rgba(60, 60, 67, 0.25) 12%, transparent 5%)" },
-  }),
-  dark: EditorView.theme({
-    "&": { fontSize: "15px", backgroundColor: ZERO_COLORS.dark.editorBg, color: ZERO_COLORS.dark.editorFg },
-    ".cm-content": { caretColor: ZERO_COLORS.dark.cursor },
-    ".cm-gutters": { backgroundColor: ZERO_COLORS.dark.gutterBg, color: ZERO_COLORS.dark.gutterFg, border: "none" },
-    ".cm-activeLineGutter": { backgroundColor: ZERO_COLORS.dark.activeLineGutterBg },
-    ".cm-activeLine": { backgroundColor: "rgba(255, 255, 255, 0.045)" },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "rgba(116, 199, 236, 0.32) !important" },
-    ".cm-cursor": { borderLeftColor: ZERO_COLORS.dark.cursor },
-    ".cm-highlightSpace": { backgroundImage: "radial-gradient(circle at 50% 55%, rgba(205, 214, 244, 0.22) 12%, transparent 5%)" },
-  }, { dark: true }),
+  light: [
+    EditorView.theme({
+      "&": { fontSize: "15px" },
+      ".cm-gutters": { backgroundColor: ZERO_COLORS.light.gutterBg, color: ZERO_COLORS.light.gutterFg, border: "none" },
+      ".cm-activeLineGutter": { backgroundColor: ZERO_COLORS.light.activeLineGutterBg },
+      ".cm-activeLine": { backgroundColor: "rgba(0, 0, 0, 0.035)" },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "rgba(0, 122, 255, 0.28) !important" },
+      // highlightWhitespace() renders dots via a radial-gradient background
+      // image (not a styleable :before), so the fade has to go into the
+      // gradient's color/opacity and a smaller circle, not a color/opacity rule.
+      ".cm-highlightSpace": { backgroundImage: "radial-gradient(circle at 50% 55%, rgba(60, 60, 67, 0.25) 12%, transparent 5%)" },
+    }),
+    zeroSyntaxHighlighting("light"),
+  ],
+  dark: [
+    EditorView.theme({
+      "&": { fontSize: "15px", backgroundColor: ZERO_COLORS.dark.editorBg, color: ZERO_COLORS.dark.editorFg },
+      ".cm-content": { caretColor: ZERO_COLORS.dark.cursor },
+      ".cm-gutters": { backgroundColor: ZERO_COLORS.dark.gutterBg, color: ZERO_COLORS.dark.gutterFg, border: "none" },
+      ".cm-activeLineGutter": { backgroundColor: ZERO_COLORS.dark.activeLineGutterBg },
+      ".cm-activeLine": { backgroundColor: "rgba(255, 255, 255, 0.045)" },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "rgba(116, 199, 236, 0.32) !important" },
+      ".cm-cursor": { borderLeftColor: ZERO_COLORS.dark.cursor },
+      ".cm-highlightSpace": { backgroundImage: "radial-gradient(circle at 50% 55%, rgba(205, 214, 244, 0.22) 12%, transparent 5%)" },
+    }, { dark: true }),
+    zeroSyntaxHighlighting("dark"),
+  ],
 };
 
 // CodeMirror's ".cm-editor" root defaults to height:auto, so without an
