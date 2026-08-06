@@ -7,6 +7,7 @@ import { DEFAULT_LSP_SERVERS, type LspServerConfig } from "./lsp/registry";
 import { PluginHost } from "./plugins/host";
 import { createGraphify } from "./plugins/graphify";
 import { SessionStore } from "./sessions";
+import type { ChatMessage } from "@zero/protocol";
 
 export async function startZero(opts: DaemonOptions) {
   const daemon = createDaemon(opts);
@@ -77,7 +78,7 @@ export async function startZero(opts: DaemonOptions) {
       return s;
     });
   daemon.rpc.register("chat/append", z.object({ id: z.string(), messages: z.array(chatMessage) }),
-    async (p) => { await sessions.append(p.id, p.messages); return {}; });
+    async (p) => { await sessions.append(p.id, p.messages as ChatMessage[]); return {}; });
   daemon.rpc.register("chat/rename", z.object({ id: z.string(), title: z.string() }),
     async (p) => { await sessions.rename(p.id, p.title); return {}; });
   daemon.rpc.register("chat/delete", z.object({ id: z.string() }),

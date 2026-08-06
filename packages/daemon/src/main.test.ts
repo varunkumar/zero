@@ -167,11 +167,11 @@ test("chat/* RPCs over the wire", async () => {
   const client = new RpcClient(wsAdapter(ws));
 
   const { id } = await client.request<{ id: string }>("chat/create", { title: "Test chat" });
-  expect((await client.request<{ sessions: { id: string; title: string }[] }>("chat/list")).sessions)
+  expect((await client.request<{ sessions: { id: string; title: string; updatedAt: number; messageCount: number }[] }>("chat/list")).sessions)
     .toEqual([{ id, title: "Test chat", updatedAt: expect.any(Number), messageCount: 0 }]);
 
   await client.request("chat/append", { id, messages: [{ role: "user", content: "hi", createdAt: 1 }] });
-  expect(await client.request("chat/get", { id })).toEqual({
+  expect(await client.request<{ id: string; title: string; messages: { role: string; content: string; createdAt: number }[] }>("chat/get", { id })).toEqual({
     id, title: "Test chat", messages: [{ role: "user", content: "hi", createdAt: 1 }],
   });
 
