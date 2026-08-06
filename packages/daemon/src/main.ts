@@ -6,10 +6,13 @@ import { LspService } from "./lsp/service";
 import { DEFAULT_LSP_SERVERS, type LspServerConfig } from "./lsp/registry";
 import { PluginHost } from "./plugins/host";
 import { createGraphify } from "./plugins/graphify";
+import { SessionStore } from "./sessions";
+import type { ChatMessage } from "@zero/protocol";
 
 export async function startZero(opts: DaemonOptions) {
   const daemon = createDaemon(opts);
   const ws = new Workspace(opts.root);
+  const sessions = new SessionStore(ws);
   const pty = new PtyService(
     opts.root,
     (sessionId, data) => daemon.broadcast("pty/output", { sessionId, data }),
@@ -54,6 +57,32 @@ export async function startZero(opts: DaemonOptions) {
     async (p) => ({ locations: await lsp.definition(p.path, p.position) }));
   daemon.rpc.register("lsp/contextAt", z.object({ path: z.string(), position: lspPosition }),
     async (p) => ({ chunks: await lsp.contextAt(p.path, p.position) }));
+
+  const chatToolCall = z.object({ id: z.string(), name: z.string(), args: z.unknown() });
+  const chatMessage = z.object({
+    role: z.enum(["system", "user", "assistant", "tool"]),
+    content: z.string(),
+    toolCalls: z.array(chatToolCall).optional(),
+    toolCallId: z.string().optional(),
+    toolName: z.string().optional(),
+    createdAt: z.number(),
+  });
+  daemon.rpc.register("chat/create", z.object({ title: z.string().optional() }),
+    async (p) => ({ id: await sessions.create(p.title) }));
+  daemon.rpc.register("chat/list", z.object({}).optional().transform(() => ({})),
+    async () => ({ sessions: await sessions.list() }));
+  daemon.rpc.register("chat/get", z.object({ id: z.string() }),
+    async (p) => {
+      const s = await sessions.get(p.id);
+      if (!s) throw new Error(`no such session: ${p.id}`);
+      return s;
+    });
+  daemon.rpc.register("chat/append", z.object({ id: z.string(), messages: z.array(chatMessage) }),
+    async (p) => { await sessions.append(p.id, p.messages as ChatMessage[]); return {}; });
+  daemon.rpc.register("chat/rename", z.object({ id: z.string(), title: z.string() }),
+    async (p) => { await sessions.rename(p.id, p.title); return {}; });
+  daemon.rpc.register("chat/delete", z.object({ id: z.string() }),
+    async (p) => { await sessions.delete(p.id); return {}; });
 
   const graphify = createGraphify();
   const host = new PluginHost({

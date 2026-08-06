@@ -1,0 +1,203 @@
+import { useEffect, useRef, useState } from "react";
+import type { RpcClient, ChatSessionSummary } from "@zero/protocol";
+import type { AgentRuntime, AgentRuntimeStatus, ChatMessage } from "@zero/core";
+import type { ChatStore } from "./store";
+
+function ChatStatusPill(props: { runtime: AgentRuntime }) {
+  const [status, setStatus] = useState<AgentRuntimeStatus>(() => props.runtime.status());
+  useEffect(() => {
+    setStatus(props.runtime.status());
+    return props.runtime.onStatusChange(setStatus);
+  }, [props.runtime]);
+  const active = status.activeModel !== null;
+  return (
+    <div
+      title={status.reason ?? undefined}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 8px", borderRadius: 12,
+        border: "1px solid var(--zero-border)", fontSize: 14, color: "var(--zero-statusbar-fg)",
+      }}
+    >
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: active ? "#2ecc71" : "#999", flexShrink: 0 }} />
+      {status.activeModel ?? "no chat model"}
+    </div>
+  );
+}
+
+export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; chatStore: ChatStore }) {
+  const { client, runtime, chatStore } = props;
+  const [, setVersion] = useState(0);
+  useEffect(() => chatStore.subscribe(() => setVersion((v) => v + 1)), [chatStore]);
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [streaming, setStreaming] = useState("");
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [banner, setBanner] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const sessions = chatStore.getSessions();
+  const activeId = chatStore.getActiveId();
+
+  function reportError(message: string): void {
+    setBanner(message);
+  }
+
+  useEffect(() => {
+    client.request<{ sessions: ChatSessionSummary[] }>("chat/list")
+      .then((r) => chatStore.setSessions(r.sessions))
+      .catch((e) => reportError(`failed to load chats: ${e instanceof Error ? e.message : String(e)}`));
+  }, [client, chatStore]);
+
+  // Fix #1 & #2: Clean up previous session's in-flight turn and streaming text when switching sessions
+  useEffect(() => {
+    abortRef.current?.abort();
+    setStreaming("");
+  }, [activeId]);
+
+  // Fix #3: Guard against stale responses for out-of-order chat/get calls
+  useEffect(() => {
+    if (!activeId) { setMessages([]); return; }
+    const id = activeId;
+    let cancelled = false;
+    client.request<{ messages: ChatMessage[] }>("chat/get", { id }).then((r) => {
+      if (!cancelled) {
+        setMessages(r.messages);
+      }
+    }).catch((e) => {
+      if (!cancelled) reportError(`failed to load chat: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    return () => { cancelled = true; };
+  }, [client, activeId]);
+
+  // Fix #4: Cleanup on unmount - stop any in-flight turn
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  async function newSession(): Promise<void> {
+    try {
+      const { id } = await client.request<{ id: string }>("chat/create", {});
+      chatStore.addSession({ id, title: "New chat", updatedAt: Date.now(), messageCount: 0 });
+    } catch (e) {
+      reportError(`failed to create chat: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  function closeSession(id: string): void {
+    // Fix #2b: If closing the active session, abort any in-flight turn
+    if (id === activeId) {
+      abortRef.current?.abort();
+    }
+    void client.request("chat/delete", { id });
+    chatStore.removeSession(id);
+  }
+
+  async function send(): Promise<void> {
+    if (!activeId || !input.trim() || busy) return;
+    const sessionId = activeId;
+    const text = input;
+    const isFirstExchange = messages.length === 0;
+    setInput("");
+    setMessages((m) => [...m, { role: "user", content: text, createdAt: Date.now() }]);
+    setStreaming("");
+    setBusy(true);
+    const ctl = new AbortController();
+    abortRef.current = ctl;
+    try {
+      for await (const event of runtime.sendMessage(sessionId, text, ctl.signal)) {
+        if (ctl.signal.aborted) break;
+        if (event.type === "text") {
+          setStreaming((s) => s + event.delta);
+        } else if (event.type === "toolResult") {
+          setMessages((m) => [...m, { role: "tool", content: event.result, toolName: event.call.name, createdAt: Date.now() }]);
+        } else if (event.type === "error") {
+          setMessages((m) => [...m, { role: "tool", content: event.message, toolName: "error", createdAt: Date.now() }]);
+        } else if (event.type === "done") {
+          setMessages((m) => [...m, event.message]);
+          setStreaming("");
+          const current = chatStore.getSessions().find((s) => s.id === sessionId);
+          if (isFirstExchange && current?.title === "New chat") {
+            const title = text.trim().slice(0, 40) + (text.trim().length > 40 ? "…" : "");
+            chatStore.touchSession(sessionId, title);
+            client.request("chat/rename", { id: sessionId, title }).catch(() => {
+              // Non-fatal: local title already updated, persistence can be retried later.
+            });
+          }
+        }
+      }
+    } finally {
+      setBusy(false);
+      chatStore.touchSession(sessionId);
+    }
+  }
+
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)" }}>
+      <div className="zero-tabstrip" role="tablist">
+        {sessions.map((s) => (
+          <div key={s.id} className="zero-tab" role="tab" aria-selected={s.id === activeId} onClick={() => chatStore.setActive(s.id)}>
+            <span>{s.title}</span>
+            <button className="zero-tab-close" aria-label={`Close chat ${s.title}`}
+              onClick={(e) => { e.stopPropagation(); closeSession(s.id); }}>
+              ×
+            </button>
+          </div>
+        ))}
+        <button aria-label="New chat" onClick={() => void newSession()} style={{ marginLeft: 4 }}>+</button>
+        <div style={{ marginLeft: "auto", padding: "4px 8px" }}>
+          <ChatStatusPill runtime={runtime} />
+        </div>
+      </div>
+      {banner && (
+        <div
+          style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "4px 8px", background: "#5a1f1f", color: "#fff", fontSize: 13,
+          }}
+        >
+          <span>⚠ {banner}</span>
+          <button onClick={() => setBanner(null)} aria-label="Dismiss error">×</button>
+        </div>
+      )}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 8 }}>
+        {!activeId ? (
+          <div style={{ padding: 16, opacity: 0.6 }}>No chat open</div>
+        ) : (
+          <>
+            {messages.filter((m) => m.role !== "system").map((m, i) => (
+              <div key={i} style={{ marginBottom: 8 }}>
+                <strong>{m.role === "tool" ? `tool:${m.toolName}` : m.role}</strong>
+                <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+              </div>
+            ))}
+            {streaming && (
+              <div style={{ marginBottom: 8 }}>
+                <strong>assistant</strong>
+                <div style={{ whiteSpace: "pre-wrap" }}>{streaming}</div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 4, padding: 8, borderTop: "1px solid var(--zero-border)" }}>
+        <input
+          style={{ flex: 1 }}
+          value={input}
+          disabled={!activeId || busy}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
+          placeholder={activeId ? "Ask Zero..." : "Open a chat to start"}
+        />
+        <button
+          onClick={() => (busy ? abortRef.current?.abort() : void send())}
+          disabled={!activeId || (!busy && !input.trim())}
+        >
+          {busy ? "Stop" : "Send"}
+        </button>
+      </div>
+    </div>
+  );
+}

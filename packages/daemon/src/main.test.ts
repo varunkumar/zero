@@ -156,3 +156,30 @@ test("plugin/list and graph/status over the wire", async () => {
   ws.close();
   d.stop();
 }, 60_000);
+
+test("chat/* RPCs over the wire", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const { id } = await client.request<{ id: string }>("chat/create", { title: "Test chat" });
+  expect((await client.request<{ sessions: { id: string; title: string; updatedAt: number; messageCount: number }[] }>("chat/list")).sessions)
+    .toEqual([{ id, title: "Test chat", updatedAt: expect.any(Number), messageCount: 0 }]);
+
+  await client.request("chat/append", { id, messages: [{ role: "user", content: "hi", createdAt: 1 }] });
+  expect(await client.request<{ id: string; title: string; messages: { role: string; content: string; createdAt: number }[] }>("chat/get", { id })).toEqual({
+    id, title: "Test chat", messages: [{ role: "user", content: "hi", createdAt: 1 }],
+  });
+
+  await client.request("chat/rename", { id, title: "Renamed" });
+  expect((await client.request<{ title: string }>("chat/get", { id })).title).toBe("Renamed");
+
+  await client.request("chat/delete", { id });
+  expect((await client.request<{ sessions: unknown[] }>("chat/list")).sessions).toEqual([]);
+
+  ws.close(); d.stop();
+});

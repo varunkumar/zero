@@ -25,7 +25,7 @@ Full design and roadmap:
 
 ## Status
 
-M0–M3 are implemented on `main`:
+M0–M4 are implemented on `main`:
 
 - **M0** skeleton (daemon-served editor with save)
 - **M1** offline copilot (Chrome Nano + Ollama-compatible fallback)
@@ -33,14 +33,18 @@ M0–M3 are implemented on `main`:
 - **M2** terminal (PTY) and LSP (diagnostics, hover, go-to-definition)
 - **M3** Graphify and plugin host (in-process built-ins, tree-sitter index,
   `graph/*` RPC, `.zero/graph.json` cache, `GraphContext` for completions)
+- **M4** chat / AgentRuntime (turn loop, layered system prompt, session
+  persistence, token ledger, pruning/compaction, read-only tool calling,
+  chat panel) — completes v1 scope
 
 Design and plugin docs:
 
 - [M3 design](docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md)
+- [M4 design](docs/superpowers/specs/2026-08-06-m4-chat-agentruntime-design.md)
 - [Plugins](docs/plugins.md)
 
-See the roadmap in the design spec for what follows (chat/AgentRuntime, Zero
-Agents, Zero Lite, Claude plugin, Zero IDE).
+See the roadmap in the design spec for what follows (Zero Agents, Zero Lite,
+Claude plugin, Zero IDE).
 
 ## Architecture
 
