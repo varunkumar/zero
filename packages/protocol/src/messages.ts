@@ -60,3 +60,60 @@ export interface LspDefinitionResult { locations: LspDefinitionLocation[] }
 export interface LspContextAtParams { path: string; position: LspPosition }
 export interface LspContextChunk { text: string; score: number }
 export interface LspContextAtResult { chunks: LspContextChunk[] }
+
+/** 0-based line/character (LSP-style). */
+export interface GraphPosition { line: number; character: number }
+
+export interface GraphContextAtParams {
+  path: string;
+  position: GraphPosition;
+  maxChunks?: number;
+}
+export interface GraphContextChunk { text: string; score: number; source?: string }
+export interface GraphContextAtResult { chunks: GraphContextChunk[]; ready: boolean }
+
+export interface GraphQueryParams {
+  q: string;
+  mode?: "neighbors" | "symbol" | "path";
+  budgetTokens?: number;
+}
+export interface GraphQueryResult {
+  nodes: { id: string; label: string; source_file?: string; kind?: string }[];
+  edges: { source: string; target: string; relation: string }[];
+  text: string;
+}
+
+export interface GraphStatusResult {
+  ready: boolean;
+  indexing: boolean;
+  fileCount: number;
+  nodeCount: number;
+  edgeCount: number;
+  lastError?: string;
+  languages: string[];
+}
+export interface GraphStatusEvent {
+  ready: boolean;
+  indexing: boolean;
+  nodeCount?: number;
+  edgeCount?: number;
+}
+
+export interface PluginHealthInfo { ok: boolean; detail?: string }
+export interface PluginListEntry {
+  id: string;
+  name: string;
+  version: string;
+  health: PluginHealthInfo;
+  contributions: {
+    rpcMethods?: string[];
+    contextProviders?: string[];
+    tools?: string[];
+    commands?: string[];
+  };
+}
+export interface PluginListResult { plugins: PluginListEntry[] }
+export interface PluginHealthResult {
+  ok: boolean;
+  plugins: Record<string, PluginHealthInfo>;
+}
