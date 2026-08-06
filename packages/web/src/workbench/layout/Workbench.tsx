@@ -262,6 +262,12 @@ export function Workbench(props: { client: RpcClient }) {
   const [tabsVersion, setTabsVersion] = useState(0);
   const [confirmingTabId, setConfirmingTabId] = useState<string | null>(null);
   const [diagnosticsByPath, setDiagnosticsByPath] = useState<Map<string, LspDiagnostic[]>>(new Map());
+  // Whether the language server responsible for a given path has failed
+  // (spawn error, init timeout, crash). An empty diagnostics list looks
+  // identical whether the file is clean or the server never came up at
+  // all, so this is tracked separately to give the status bar something
+  // to show for the latter ("LSP unavailable" vs. no problems found).
+  const [lspFailedByPath, setLspFailedByPath] = useState<Map<string, boolean>>(new Map());
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -466,12 +472,23 @@ export function Workbench(props: { client: RpcClient }) {
     if (!activeTab) return;
     clearTimeout(lspSyncDebounceRef.current);
     lspSyncDebounceRef.current = setTimeout(() => {
-      void client.request("lsp/sync", { path: activeTab.path, content: activeTab.content }).catch(() => {
-        // A missing/unconfigured language server for this file is expected
-        // and silent — lsp/sync degrades to a no-op daemon-side (Task 6).
-        // A genuine RPC failure here must not surface as a blocking error;
-        // diagnostics simply stay stale until the next successful sync.
-      });
+      const path = activeTab.path;
+      void client.request<{ failed: boolean }>("lsp/sync", { path, content: activeTab.content })
+        .then((res) => {
+          setLspFailedByPath((prev) => {
+            if (prev.get(path) === res.failed) return prev;
+            const next = new Map(prev);
+            next.set(path, res.failed);
+            return next;
+          });
+        })
+        .catch(() => {
+          // A missing/unconfigured language server for this file is expected
+          // and silent — lsp/sync degrades to a no-op daemon-side (Task 6).
+          // A genuine RPC failure here must not surface as a blocking error;
+          // diagnostics and failed-status simply stay stale until the next
+          // successful sync.
+        });
     }, LSP_SYNC_DEBOUNCE_MS);
     return () => clearTimeout(lspSyncDebounceRef.current);
     // activeTab.content is the trigger; activeTab itself changes identity on
@@ -759,7 +776,9 @@ export function Workbench(props: { client: RpcClient }) {
             theme={theme}
             onToggleTheme={() => registry.run("view.toggleTheme")}
             message={statusMessage}
-            lspStatus={activePath ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length } : null}
+            lspStatus={activePath
+              ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length, failed: lspFailedByPath.get(activePath) ?? false }
+              : null}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
