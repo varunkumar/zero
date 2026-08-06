@@ -25,11 +25,17 @@ Full design and roadmap:
 
 ## Status
 
-M0 (skeleton: daemon-served browser editor with save), M1 (offline copilot:
-Chrome Nano completions with an Ollama-compatible fallback), and M2
-(terminal via PTY, LSP diagnostics/hover/go-to-definition) are implemented.
-See the roadmap in the design spec for what's next (Graphify, chat/
-AgentRuntime, Zero Agents, Zero Lite, the Claude plugin, Zero IDE).
+M0 (skeleton), M1 (offline copilot), M1.5 (editor shell), and M2 (terminal
+and LSP) are implemented. M3 (Graphify and plugin host) is in progress on
+this branch.
+
+- **M3 design:**
+  [`docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md`](docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md)
+- **Plugins (daemon plugin host + Graphify):**
+  [`docs/plugins.md`](docs/plugins.md)
+
+See the roadmap in the design spec for what follows (chat/AgentRuntime, Zero
+Agents, Zero Lite, Claude plugin, Zero IDE).
 
 ## Architecture
 
@@ -54,8 +60,8 @@ Everything works with the network unplugged.
   (from `@zero/core`), chat panel, xterm.js terminal UI, settings, and the
   Chrome Nano provider.
 - **Daemon**: file system, project watching, PTY sessions, LSP server
-  management, Graphify indexer, plugin host, session store, and static
-  serving of the client.
+  management, **plugin host** (built-ins first; Graphify indexer), session
+  store, and static serving of the client. See [`docs/plugins.md`](docs/plugins.md).
 
 ## Development
 
