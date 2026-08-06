@@ -6,7 +6,9 @@ import {
   type GrammarSettings,
 } from "./grammars";
 import { extractFromSource } from "./extract";
-import type { GraphStore } from "./store";
+import type { GraphDocument, GraphStore } from "./store";
+
+const GRAPH_CACHE_PATH = ".zero/graph.json";
 
 export class GraphIndexer {
   #workspace: Workspace;
@@ -42,6 +44,26 @@ export class GraphIndexer {
     };
   }
 
+  /** Load warm graph from `.zero/graph.json` if present. Sets ready when non-empty. */
+  async loadCacheIfPresent(): Promise<void> {
+    try {
+      const raw = await this.#workspace.read(GRAPH_CACHE_PATH);
+      const doc = JSON.parse(raw) as GraphDocument;
+      this.#store.loadJSON(doc);
+      if (this.#store.nodeCount > 0) this.#ready = true;
+    } catch {
+      // Missing or corrupt cache is fine; full index will rebuild.
+    }
+  }
+
+  /** Persist current graph to `.zero/graph.json` (creates `.zero` if needed). */
+  async saveCache(): Promise<void> {
+    await this.#workspace.write(
+      GRAPH_CACHE_PATH,
+      JSON.stringify(this.#store.toJSON()),
+    );
+  }
+
   startFullIndex(): void {
     void this.runFullIndex();
   }
@@ -74,6 +96,11 @@ export class GraphIndexer {
       }
       this.#ready = true;
       this.#lastError = undefined;
+      try {
+        await this.saveCache();
+      } catch {
+        // Cache write is best-effort; index itself succeeded.
+      }
     } catch (e) {
       this.#lastError = e instanceof Error ? e.message : String(e);
       this.#ready = this.#store.nodeCount > 0;

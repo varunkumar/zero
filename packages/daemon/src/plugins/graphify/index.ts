@@ -73,6 +73,7 @@ export function createGraphify(): {
           }),
           async (p) => queryGraph(store, p),
         );
+        await indexer!.loadCacheIfPresent();
         indexer!.startFullIndex();
       },
       health() {
