@@ -54,9 +54,11 @@ export class SessionStore {
     } catch {
       return [];
     }
-    const sessions = await Promise.all(
-      files.filter((f) => f.endsWith(".json")).map((f) => this.#read(f.slice(0, -".json".length))),
-    );
+    const ids = files
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => f.slice(0, -".json".length))
+      .filter((id) => UUID_RE.test(id));
+    const sessions = await Promise.all(ids.map((id) => this.#read(id)));
     return sessions
       .filter((s): s is StoredSession => s !== null)
       .sort((a, b) => {
@@ -78,7 +80,8 @@ export class SessionStore {
    * dumb persistence layer with no opinion on that. */
   async append(id: string, messages: ChatMessage[]): Promise<void> {
     const existing = await this.#read(id);
-    await this.#write({ id, title: existing?.title ?? "New chat", updatedAt: Date.now(), messages, seq: 0 });
+    if (!existing) return; // session was deleted (or never existed): don't resurrect it
+    await this.#write({ id, title: existing.title, updatedAt: Date.now(), messages, seq: 0 });
   }
 
   async rename(id: string, title: string): Promise<void> {

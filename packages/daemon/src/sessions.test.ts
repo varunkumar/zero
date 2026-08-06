@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdtempSync, existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace } from "./workspace";
@@ -69,4 +70,22 @@ test("get/append/rename/delete reject non-UUID ids to block path traversal", asy
 test("list on a workspace with no sessions yet returns empty, not an error", async () => {
   const store = makeStore();
   expect(await store.list()).toEqual([]);
+});
+
+test("list skips a stray non-UUID filename instead of failing entirely", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const store = new SessionStore(new Workspace(root));
+  const id = await store.create("Valid session");
+  const dir = join(root, ".zero", "sessions");
+  await writeFile(join(dir, "not-a-uuid.json"), "{}", "utf8");
+  const list = await store.list();
+  expect(list.map((s) => s.id)).toEqual([id]);
+});
+
+test("append on a deleted session is a no-op and does not recreate it", async () => {
+  const store = makeStore();
+  const id = await store.create("Gone");
+  await store.delete(id);
+  await store.append(id, [{ role: "user", content: "hi", createdAt: 1 }]);
+  expect(await store.get(id)).toBeNull();
 });
