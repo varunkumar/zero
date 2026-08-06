@@ -68,6 +68,29 @@ test("chat() makes a single non-streaming request and returns tool calls when to
   expect(capturedBody?.tools).toEqual([{ type: "function", function: { name: "fs_read", description: "Read a file.", parameters: { type: "object" } } }]);
 });
 
+test("chat() serializes outbound tool_calls and tool_call_id for assistant/tool-role messages", async () => {
+  let capturedBody: { messages?: { role: string; tool_calls?: unknown; tool_call_id?: string }[] } | undefined;
+  const provider = new OpenAICompatProvider({
+    baseUrl: "http://x/v1", model: "qwen",
+    fetchImpl: async (_url, init) => {
+      capturedBody = JSON.parse(init!.body as string);
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
+    },
+  });
+  const history = [
+    { role: "user" as const, content: "read a.ts", createdAt: 0 },
+    { role: "assistant" as const, content: "", toolCalls: [{ id: "c1", name: "fs_read", args: { path: "a.ts" } }], createdAt: 1 },
+    { role: "tool" as const, content: "export const a = 1;", toolCallId: "c1", toolName: "fs_read", createdAt: 2 },
+  ];
+  const tools = [{ name: "fs_read", description: "Read a file.", schema: { type: "object" } }];
+  for await (const _d of provider.chat(history, tools, new AbortController().signal)) { /* drain */ }
+
+  const assistantMsg = capturedBody?.messages?.find((m) => m.role === "assistant");
+  expect(assistantMsg?.tool_calls).toEqual([{ id: "c1", type: "function", function: { name: "fs_read", arguments: '{"path":"a.ts"}' } }]);
+  const toolMsg = capturedBody?.messages?.find((m) => m.role === "tool");
+  expect(toolMsg?.tool_call_id).toBe("c1");
+});
+
 test("supportsTools() is true", () => {
   const provider = new OpenAICompatProvider({ baseUrl: "http://x/v1", model: "qwen" });
   expect(provider.supportsTools()).toBe(true);
