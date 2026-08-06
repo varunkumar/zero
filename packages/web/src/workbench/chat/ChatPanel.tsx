@@ -42,10 +42,31 @@ export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; cha
     client.request<{ sessions: ChatSessionSummary[] }>("chat/list").then((r) => chatStore.setSessions(r.sessions));
   }, [client, chatStore]);
 
+  // Fix #1 & #2: Clean up previous session's in-flight turn and streaming text when switching sessions
+  useEffect(() => {
+    abortRef.current?.abort();
+    setStreaming("");
+  }, [activeId]);
+
+  // Fix #3: Guard against stale responses for out-of-order chat/get calls
   useEffect(() => {
     if (!activeId) { setMessages([]); return; }
-    client.request<{ messages: ChatMessage[] }>("chat/get", { id: activeId }).then((r) => setMessages(r.messages));
+    const id = activeId;
+    let cancelled = false;
+    client.request<{ messages: ChatMessage[] }>("chat/get", { id }).then((r) => {
+      if (!cancelled) {
+        setMessages(r.messages);
+      }
+    });
+    return () => { cancelled = true; };
   }, [client, activeId]);
+
+  // Fix #4: Cleanup on unmount - stop any in-flight turn
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   async function newSession(): Promise<void> {
     const { id } = await client.request<{ id: string }>("chat/create", {});
@@ -53,6 +74,10 @@ export function ChatPanel(props: { client: RpcClient; runtime: AgentRuntime; cha
   }
 
   function closeSession(id: string): void {
+    // Fix #2b: If closing the active session, abort any in-flight turn
+    if (id === activeId) {
+      abortRef.current?.abort();
+    }
     void client.request("chat/delete", { id });
     chatStore.removeSession(id);
   }
