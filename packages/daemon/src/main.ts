@@ -16,7 +16,7 @@ export async function startZero(opts: DaemonOptions) {
 
   const userServers = (await ws.readSetting("lsp.servers")) as Record<string, LspServerConfig> | undefined;
   const servers = { ...DEFAULT_LSP_SERVERS, ...(userServers ?? {}) };
-  const lsp = new LspService(opts.root, servers,
+  const lsp = new LspService(ws, servers,
     (path, diagnostics) => daemon.broadcast("lsp/diagnostics", { path, diagnostics }));
 
   daemon.rpc.register("fs/read", z.object({ path: z.string() }),
@@ -45,7 +45,7 @@ export async function startZero(opts: DaemonOptions) {
 
   const lspPosition = z.object({ line: z.number(), character: z.number() });
   daemon.rpc.register("lsp/sync", z.object({ path: z.string(), content: z.string() }),
-    async (p) => { await lsp.sync(p.path, p.content); return {}; });
+    async (p) => { await lsp.sync(p.path, p.content); return { failed: await lsp.isFailed(p.path) }; });
   daemon.rpc.register("lsp/hover", z.object({ path: z.string(), position: lspPosition }),
     async (p) => ({ contents: await lsp.hover(p.path, p.position) }));
   daemon.rpc.register("lsp/definition", z.object({ path: z.string(), position: lspPosition }),
