@@ -8,7 +8,9 @@ export class InvalidSessionIdError extends Error {}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-interface StoredSession { id: string; title: string; updatedAt: number; messages: ChatMessage[] }
+interface StoredSession { id: string; title: string; updatedAt: number; messages: ChatMessage[]; seq: number }
+
+let writeCounter = 0;
 
 export class SessionStore {
   constructor(private workspace: Workspace) {}
@@ -25,13 +27,15 @@ export class SessionStore {
   async #read(id: string): Promise<StoredSession | null> {
     const path = this.#path(id);
     try {
-      return JSON.parse(await fs.readFile(path, "utf8")) as StoredSession;
+      const data = JSON.parse(await fs.readFile(path, "utf8")) as StoredSession;
+      return { ...data, seq: data.seq ?? 0 };
     } catch {
       return null;
     }
   }
 
   async #write(session: StoredSession): Promise<void> {
+    session.seq = ++writeCounter;
     const path = this.#path(session.id);
     await fs.mkdir(this.#dir(), { recursive: true });
     await fs.writeFile(path, JSON.stringify(session, null, 2), "utf8");
@@ -39,7 +43,7 @@ export class SessionStore {
 
   async create(title?: string): Promise<string> {
     const id = randomUUID();
-    await this.#write({ id, title: title ?? "New chat", updatedAt: Date.now(), messages: [] });
+    await this.#write({ id, title: title ?? "New chat", updatedAt: Date.now(), messages: [], seq: 0 });
     return id;
   }
 
@@ -55,8 +59,12 @@ export class SessionStore {
     );
     return sessions
       .filter((s): s is StoredSession => s !== null)
-      .map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt, messageCount: s.messages.length }))
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+      .sort((a, b) => {
+        const timeDiff = b.updatedAt - a.updatedAt;
+        if (timeDiff !== 0) return timeDiff;
+        return b.seq - a.seq;
+      })
+      .map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt, messageCount: s.messages.length }));
   }
 
   async get(id: string): Promise<{ id: string; title: string; messages: ChatMessage[] } | null> {
@@ -70,7 +78,7 @@ export class SessionStore {
    * dumb persistence layer with no opinion on that. */
   async append(id: string, messages: ChatMessage[]): Promise<void> {
     const existing = await this.#read(id);
-    await this.#write({ id, title: existing?.title ?? "New chat", updatedAt: Date.now(), messages });
+    await this.#write({ id, title: existing?.title ?? "New chat", updatedAt: Date.now(), messages, seq: 0 });
   }
 
   async rename(id: string, title: string): Promise<void> {
