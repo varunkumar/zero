@@ -36,6 +36,18 @@ export class PtyService {
     });
     this.#worker.on("exit", () => {
       this.#dead = true;
+      // The worker process itself died (crash, OOM, etc.), not an
+      // individual PTY session inside it. Without this, #sessions still
+      // reports every session as alive: list() keeps reporting them (so a
+      // page reload reattaches phantom tabs), input()/resize() silently
+      // no-op forever (they pass the #sessions.has() check, then #send
+      // degrades quietly since #dead is now true), and no pty/exit ever
+      // reaches clients. Drain the map and report every session as exited,
+      // same as a single session's own natural-exit path above.
+      for (const id of [...this.#sessions.keys()]) {
+        this.#sessions.delete(id);
+        this.onExit(id, 1);
+      }
     });
     // A broken stdin pipe (e.g. after the worker has already died) would
     // otherwise also throw as an unhandled 'error' event.
@@ -94,6 +106,14 @@ export class PtyService {
 
   list(): PtySessionInfo[] {
     return [...this.#sessions.values()].map((s) => ({ sessionId: s.sessionId, shell: s.shell }));
+  }
+
+  /** The bridge worker's own pid (see the constructor comment for why a
+   * worker exists at all). Exposed for tests that need to simulate the
+   * worker itself crashing, distinct from an individual PTY session
+   * exiting. */
+  get workerPid(): number | undefined {
+    return this.#worker.pid;
   }
 
   closeAll(): void {

@@ -81,6 +81,37 @@ test("input/resize/close on an unknown sessionId is a silent no-op", () => {
   service.closeAll();
 });
 
+test("a worker crash drains all sessions and fires onExit for each", async () => {
+  const exits: { sessionId: string; exitCode: number }[] = [];
+  const service = new PtyService(
+    process.cwd(),
+    () => {},
+    (sessionId, exitCode) => exits.push({ sessionId, exitCode }),
+  );
+
+  const a = service.open("/bin/bash", 80, 24).sessionId;
+  const b = service.open("/bin/bash", 80, 24).sessionId;
+  expect(service.list().length).toBe(2);
+
+  const pid = service.workerPid;
+  expect(pid).toBeDefined();
+  process.kill(pid!, "SIGKILL");
+
+  await new Promise<void>((resolve) => {
+    const check = setInterval(() => {
+      if (exits.length >= 2) { clearInterval(check); resolve(); }
+    }, 20);
+  });
+
+  expect(exits.map((e) => e.sessionId).sort()).toEqual([a, b].sort());
+  // No phantom "live" sessions survive the worker's death: list() must
+  // reflect the crash immediately, not keep reporting stale sessions that
+  // silently swallow input/resize forever (the bug this test guards).
+  expect(service.list()).toEqual([]);
+
+  service.closeAll();
+});
+
 test("closeAll clears the session list synchronously", () => {
   const service = new PtyService(process.cwd(), () => {}, () => {});
   const a = service.open("/bin/bash", 80, 24).sessionId;
