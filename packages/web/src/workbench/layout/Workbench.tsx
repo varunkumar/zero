@@ -29,6 +29,9 @@ const STATUS_MESSAGE_MS = 8000;
  * burst of fs/changed events, and each bump costs two full fs/tree round
  * trips (file tree + file-opener path list). */
 const TREE_REFRESH_DEBOUNCE_MS = 250;
+/** Trailing debounce on lsp/sync: keeps the spawned language server current
+ * with the buffer as the user types, without a round trip per keystroke. */
+const LSP_SYNC_DEBOUNCE_MS = 300;
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -276,6 +279,7 @@ export function Workbench(props: { client: RpcClient }) {
   const lastWriteRef = useRef<{ path: string; content: string } | null>(null);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const treeDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const lspSyncDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   /** Surface an RPC failure in the status bar. Silence is the worst outcome
    * here: a failed fs/write otherwise leaves a tab looking merely dirty. */
@@ -290,6 +294,7 @@ export function Workbench(props: { client: RpcClient }) {
   useEffect(() => () => {
     clearTimeout(statusTimerRef.current);
     clearTimeout(treeDebounceRef.current);
+    clearTimeout(lspSyncDebounceRef.current);
   }, []);
 
   const completion = useConst(() =>
@@ -452,6 +457,29 @@ export function Workbench(props: { client: RpcClient }) {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completion, tabStore, tabsVersion]);
+
+  // Keep the daemon's spawned language server current with what the user
+  // sees, not just what's on disk: debounce-sync the active buffer on every
+  // edit (and, via the tabsVersion dependency, immediately on openFile and
+  // saveTab too).
+  useEffect(() => {
+    if (!activeTab) return;
+    clearTimeout(lspSyncDebounceRef.current);
+    lspSyncDebounceRef.current = setTimeout(() => {
+      void client.request("lsp/sync", { path: activeTab.path, content: activeTab.content }).catch(() => {
+        // A missing/unconfigured language server for this file is expected
+        // and silent — lsp/sync degrades to a no-op daemon-side (Task 6).
+        // A genuine RPC failure here must not surface as a blocking error;
+        // diagnostics simply stay stale until the next successful sync.
+      });
+    }, LSP_SYNC_DEBOUNCE_MS);
+    return () => clearTimeout(lspSyncDebounceRef.current);
+    // activeTab.content is the trigger; activeTab itself changes identity on
+    // every keystroke (TabStore mutates in place but bumps tabsVersion), so
+    // depending on tabsVersion + activeTab?.path avoids re-debouncing on
+    // unrelated state changes elsewhere in the tree.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, activeTab?.path, activeTab?.content]);
 
   function openFile(path: string): void {
     void client
