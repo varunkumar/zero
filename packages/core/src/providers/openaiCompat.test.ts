@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { OpenAICompatProvider } from "./openaiCompat";
+import type { ChatToolSpec } from "../chatTypes";
 
 function sseResponse(lines: string[]): Response {
   const body = new ReadableStream({
@@ -28,4 +29,46 @@ test("available() false when endpoint down", async () => {
     fetchImpl: async () => { throw new Error("refused"); },
   });
   expect(await provider.available()).toBe(false);
+});
+
+test("chat() streams plain text via SSE when no tools are offered", async () => {
+  const provider = new OpenAICompatProvider({
+    baseUrl: "http://x/v1", model: "qwen",
+    fetchImpl: async () => sseResponse([
+      'data: {"choices":[{"delta":{"content":"hel"}}]}',
+      'data: {"choices":[{"delta":{"content":"lo"}}]}',
+      "data: [DONE]",
+    ]),
+  });
+  let out = "";
+  for await (const delta of provider.chat([{ role: "user", content: "hi", createdAt: 0 }], [], new AbortController().signal)) {
+    if (delta.text) out += delta.text;
+  }
+  expect(out).toBe("hello");
+});
+
+test("chat() makes a single non-streaming request and returns tool calls when tools are offered", async () => {
+  let capturedBody: { stream?: boolean; tools?: unknown } | undefined;
+  const provider = new OpenAICompatProvider({
+    baseUrl: "http://x/v1", model: "qwen",
+    fetchImpl: async (_url, init) => {
+      capturedBody = JSON.parse(init!.body as string);
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: null, tool_calls: [{ id: "c1", function: { name: "fs_read", arguments: '{"path":"a.ts"}' } }] } }],
+      }), { status: 200 });
+    },
+  });
+  const tools: ChatToolSpec[] = [{ name: "fs_read", description: "Read a file.", schema: { type: "object" } }];
+  const deltas = [];
+  for await (const d of provider.chat([{ role: "user", content: "read a.ts", createdAt: 0 }], tools, new AbortController().signal)) {
+    deltas.push(d);
+  }
+  expect(deltas).toEqual([{ text: undefined, toolCalls: [{ id: "c1", name: "fs_read", args: { path: "a.ts" } }] }]);
+  expect(capturedBody?.stream).toBe(false);
+  expect(capturedBody?.tools).toEqual([{ type: "function", function: { name: "fs_read", description: "Read a file.", parameters: { type: "object" } } }]);
+});
+
+test("supportsTools() is true", () => {
+  const provider = new OpenAICompatProvider({ baseUrl: "http://x/v1", model: "qwen" });
+  expect(provider.supportsTools()).toBe(true);
 });
