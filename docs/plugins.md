@@ -77,9 +77,9 @@ without redesigning this protocol.
 
 ## Adding a language grammar (settings)
 
-Grammars are not hard-coded beyond the TS/JS defaults. Example settings
-entry (exact key finalized in implementation; stored via existing
-`settings/get` / `settings/set` → `.zero/settings.json`):
+Grammars are not hard-coded beyond the TS/JS defaults. Settings key
+`graphify.grammars` (via `settings/get` / `settings/set` →
+`.zero/settings.json`):
 
 ```json
 {

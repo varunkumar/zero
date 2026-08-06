@@ -25,12 +25,14 @@ Full design and roadmap:
 
 ## Status
 
-M0 (skeleton), M1 (offline copilot), M1.5 (editor shell), and M2 (terminal
-and LSP) are implemented. M3 (Graphify and plugin host) is in progress on
-this branch.
+M0–M2 are on `main` (skeleton, offline copilot, editor shell, terminal and
+LSP). **M3 (Graphify and plugin host) is implemented** on this branch: in-process
+plugin host, Graphify indexer (`graph/*` RPC, `.zero/graph.json` cache,
+`graphify.grammars`), `GraphContext` for completions, and status/settings UI.
 
 - **M3 design:**
   [`docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md`](docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md)
+  (Status: Approved)
 - **Plugins (daemon plugin host + Graphify):**
   [`docs/plugins.md`](docs/plugins.md)
 
