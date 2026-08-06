@@ -388,18 +388,27 @@ export function Workbench(props: { client: RpcClient }) {
   // and reveal the terminal panel if any were restored.
   useEffect(() => {
     let cancelled = false;
-    void client.request<PtyListResult>("pty/list").then((res) => {
-      if (cancelled) return;
-      const persisted = new Set(JSON.parse(window.localStorage.getItem(TERMINAL_SESSIONS_KEY) ?? "[]") as string[]);
-      let restored = false;
-      for (const session of res.sessions) {
-        if (persisted.has(session.sessionId)) {
-          ptyStore.addSession(session);
-          restored = true;
+    void client
+      .request<PtyListResult>("pty/list")
+      .then((res) => {
+        if (cancelled) return;
+        let persistedIds: string[] = [];
+        try {
+          persistedIds = JSON.parse(window.localStorage.getItem(TERMINAL_SESSIONS_KEY) ?? "[]") as string[];
+        } catch {
+          persistedIds = [];
         }
-      }
-      if (restored) actionsRef.current.showTerminalPanel();
-    });
+        const persisted = new Set(persistedIds);
+        let restored = false;
+        for (const session of res.sessions) {
+          if (persisted.has(session.sessionId)) {
+            ptyStore.addSession(session);
+            restored = true;
+          }
+        }
+        if (restored) actionsRef.current.showTerminalPanel();
+      })
+      .catch((e: unknown) => reportRef.current(`Could not restore terminals: ${errorText(e)}`));
     return () => {
       cancelled = true;
     };
