@@ -270,6 +270,7 @@ export function Workbench(props: { client: RpcClient }) {
 
   const completion = useConst(() =>
     createCompletion(
+      client,
       () => views.get(activeGroupIdRef.current),
       () => activePathRef.current ?? "",
     ),
