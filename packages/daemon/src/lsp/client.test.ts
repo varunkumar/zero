@@ -28,6 +28,16 @@ test("sync produces diagnostics, hover and definition resolve", async () => {
   writeFileSync(filePath, validContent);
   await client.sync(filePath, validContent, "typescript");
 
+  // Fixing the error and re-syncing must clear the diagnostic, not just
+  // leave the stale one in place (the "fix and save" half of the manual
+  // smoke test: the marker and status-bar count are expected to clear).
+  await new Promise<void>((resolve) => {
+    const check = setInterval(() => {
+      if (diagnosticsByPath.get(filePath)?.length === 0) { clearInterval(check); resolve(); }
+    }, 50);
+  });
+  expect(diagnosticsByPath.get(filePath)).toEqual([]);
+
   const hover = await client.hover(filePath, { line: 0, character: 6 });
   expect(hover).toBeTruthy();
   expect(hover!.toLowerCase()).toContain("greeting");
