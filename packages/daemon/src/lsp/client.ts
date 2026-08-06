@@ -16,7 +16,12 @@ function pathUri(path: string): string {
 }
 
 function fileUriToPath(uri: string): string {
-  return new URL(uri).pathname;
+  // NOT `new URL(uri).pathname`: that leaves percent-encoding intact, so a
+  // workspace path with spaces or non-ASCII characters (e.g.
+  // "/Users/me/my project/") comes back as "/Users/me/my%20project/", which
+  // then fails to relative()-match the real workspace root and silently
+  // kills diagnostics for that file. fileURLToPath decodes correctly.
+  return fileURLToPath(uri);
 }
 
 function toLspDiagnostic(d: ProtoDiagnostic): LspDiagnostic {
@@ -47,6 +52,14 @@ export class LspClient {
   #versions = new Map<string, number>();
   #ready: Promise<void>;
   #failed = false;
+
+  /** Whether this client's language server has failed to spawn, timed out
+   * on initialize, or died mid-session. Exposed read-only so LspService can
+   * surface a "language server unavailable" signal to callers without
+   * LspService needing to reimplement this state. */
+  get failed(): boolean {
+    return this.#failed;
+  }
 
   constructor(
     command: string, args: string[], rootPath: string,

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LspClient } from "./client";
@@ -69,3 +69,32 @@ test("a process that spawns, reads stdin, but never writes a response forces the
 
   client.dispose();
 }, 15000);
+
+test("diagnostics path-match a workspace root containing spaces", async () => {
+  // new URL(uri).pathname leaves percent-encoding intact, so a root like
+  // ".../my project/" would come back from the server as ".../my%20project/a.ts"
+  // and never match the real on-disk path below — silently dropping
+  // diagnostics with zero error signal. fileURLToPath decodes correctly.
+  const root = mkdtempSync(join(tmpdir(), "zero-lsp-"));
+  const projectDir = join(root, "my project");
+  mkdirSync(projectDir);
+  const filePath = join(projectDir, "a.ts");
+  writeFileSync(filePath, "const greeting: string = 42;\n");
+
+  const diagnosticsByPath = new Map<string, LspDiagnostic[]>();
+  const client = new LspClient("typescript-language-server", ["--stdio"], projectDir,
+    (path, diagnostics) => diagnosticsByPath.set(path, diagnostics));
+
+  await client.sync(filePath, "const greeting: string = 42;\n", "typescript");
+
+  await new Promise<void>((resolve) => {
+    const check = setInterval(() => {
+      if (diagnosticsByPath.has(filePath)) { clearInterval(check); resolve(); }
+    }, 50);
+  });
+  expect(diagnosticsByPath.get(filePath)!.length).toBeGreaterThan(0);
+  // The reported key must be the literal, non-percent-encoded path.
+  expect([...diagnosticsByPath.keys()].some((p) => p.includes("%20"))).toBe(false);
+
+  client.dispose();
+}, 20000);
