@@ -17,7 +17,7 @@ export class GitCheckpoint {
   constructor(private root: string) {}
 
   #indexFile(sessionId: string): string {
-    return join(this.root, ".zero", "checkpoints", sessionId, "index");
+    return join(this.root, ".git", "zero-checkpoints", sessionId, "index");
   }
 
   #branchRef(sessionId: string): string {
@@ -35,7 +35,7 @@ export class GitCheckpoint {
       const isRepo = await git(this.root, ["rev-parse", "--is-inside-work-tree"]);
       if (isRepo.exitCode !== 0) return this.#warn("not a git repository");
 
-      await mkdir(join(this.root, ".zero", "checkpoints", sessionId), { recursive: true });
+      await mkdir(join(this.root, ".git", "zero-checkpoints", sessionId), { recursive: true });
       const indexFile = this.#indexFile(sessionId);
       const env = { GIT_INDEX_FILE: indexFile };
 

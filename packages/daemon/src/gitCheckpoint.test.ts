@@ -9,7 +9,6 @@ async function initRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "zero-checkpoint-"));
   await execCommand("git init -q && git config user.email t@t.com && git config user.name t", dir);
   await writeFile(join(dir, "a.txt"), "one\n");
-  await writeFile(join(dir, ".gitignore"), ".zero/\n");
   await execCommand("git add -A && git commit -q -m init", dir);
   return dir;
 }
@@ -49,6 +48,25 @@ test("no-op when nothing changed", async () => {
   await gc.checkpoint("session-1", "noop");
   const exists = await execCommand("git rev-parse --verify refs/heads/zero/agent-checkpoints/session-1", dir);
   expect(exists.exitCode).not.toBe(0); // shadow branch was never created
+});
+
+test("second checkpoint with no changes respects no-op guard (index file isolation)", async () => {
+  const dir = await initRepo();
+  const gc = new GitCheckpoint(dir);
+  await writeFile(join(dir, "a.txt"), "two\n");
+  await gc.checkpoint("session-1", "first");
+
+  // Reset working tree to clean
+  await writeFile(join(dir, "a.txt"), "one\n");
+
+  // Second checkpoint with no changes - should be a no-op
+  await gc.checkpoint("session-1", "noop");
+
+  const shadowLog = await execCommand("git log --oneline refs/heads/zero/agent-checkpoints/session-1", dir);
+  const lines = shadowLog.output.trim().split("\n");
+  expect(lines.length).toBe(2); // init + first, NOT three with an extra noop commit
+  const userStatus = await execCommand("git status --porcelain", dir);
+  expect(userStatus.output.trim()).toBe(""); // no leftover files from index operations in .git/
 });
 
 test("degrades to a no-op when the workspace is not a git repo", async () => {
