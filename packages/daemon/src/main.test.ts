@@ -212,3 +212,54 @@ test("chat/turn streams events and persists the turn (no tools, stub provider un
   expect(events).toEqual([{ type: "error", message: "no chat model available" }]);
   ws.close(); d.stop();
 });
+
+test("a second chat/turn for a session with an already-active turn is rejected, not raced", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+  const { id } = await client.request<{ id: string }>("chat/create", {});
+
+  const turnEvents: { turnId: string; event: { type: string } }[] = [];
+  client.onNotification((method, params) => {
+    if (method === "chat/turnEvent") turnEvents.push(params as { turnId: string; event: { type: string } });
+  });
+
+  // Fire two chat/turn RPCs back-to-back, without awaiting the first, so
+  // both requests are in flight on the daemon at the same time - this is
+  // the exact race window the activeTurns check-and-reserve guard closes:
+  // without it, both would pass the "is a turn already running" check
+  // before either recorded itself, and both would proceed to call
+  // runtimeFor/sendMessage concurrently against the same session.
+  const results = await Promise.allSettled([
+    client.request<{ turnId: string }>("chat/turn", { sessionId: id, userText: "first" }),
+    client.request<{ turnId: string }>("chat/turn", { sessionId: id, userText: "second" }),
+  ]);
+
+  const fulfilled = results.filter((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ turnId: string }>[];
+  const rejected = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+  expect(fulfilled).toHaveLength(1);
+  expect(rejected).toHaveLength(1);
+  expect(String(rejected[0].reason)).toContain("a turn is already in progress for this session");
+
+  // Give the surviving turn's detached IIFE a moment to reach its "no chat
+  // model available" error event (no Ollama server is running in tests).
+  const deadline = Date.now() + 5000;
+  while (!turnEvents.some((e) => e.event.type === "error") && Date.now() < deadline) {
+    await Bun.sleep(20);
+  }
+
+  // Only the one turn that was actually allowed to start ever produced
+  // events - proving the second request never raced a concurrent turn
+  // against the same session (which would otherwise show up as either a
+  // second distinct turnId's events, or two overlapping streams).
+  const turnIds = new Set(turnEvents.map((e) => e.turnId));
+  expect(turnIds.size).toBe(1);
+  expect([...turnIds][0]).toBe(fulfilled[0].value.turnId);
+  expect(turnEvents.map((e) => e.event)).toEqual([{ type: "error", message: "no chat model available" }]);
+
+  ws.close(); d.stop();
+});

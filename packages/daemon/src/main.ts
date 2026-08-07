@@ -11,6 +11,7 @@ import type { ChatMessage } from "@zero/protocol";
 import { AgentRuntime, ProviderGateway, OpenAICompatProvider } from "@zero/core";
 import { createChatTools } from "./chatTools";
 import { createAgentRuntimeClient } from "./agentClient";
+import { createRuntimePool } from "./agentRuntimePool";
 import { GitCheckpoint } from "./gitCheckpoint";
 import { execCommand } from "./execCommand";
 
@@ -103,33 +104,51 @@ export async function startZero(opts: DaemonOptions) {
 
   const graphify = createGraphify();
 
-  const agentRuntimes = new Map<string, AgentRuntime>();
   const activeTurns = new Map<string, { sessionId: string; controller: AbortController }>();
 
-  async function runtimeFor(sessionId: string): Promise<AgentRuntime> {
-    let rt = agentRuntimes.get(sessionId);
-    if (rt) return rt;
+  // createRuntimePool memoizes the *construction Promise* per session (not
+  // just the resolved value), so concurrent callers for a session with no
+  // cached runtime yet converge on the same in-flight construction instead
+  // of racing to build - and orphan - separate AgentRuntime instances.
+  const runtimeFor = createRuntimePool(async (sessionId) => {
     const providers = await buildProviders();
     const tools = createChatTools({
       sessionId, ws, lsp, checkpoint, execCommand,
       graphQuery: (p) => graphify.getIndexer() ? graphify.query(p) : { text: "graph not ready" },
     });
-    rt = new AgentRuntime({ providers, tools, client: agentClient, workspace: () => ({}) });
-    agentRuntimes.set(sessionId, rt);
-    return rt;
-  }
+    return new AgentRuntime({ providers, tools, client: agentClient, workspace: () => ({}) });
+  });
 
   daemon.rpc.register("chat/turn", z.object({ sessionId: z.string(), userText: z.string() }),
     async (p) => {
-      const rt = await runtimeFor(p.sessionId);
+      // Check-and-reserve must happen synchronously (no `await` between the
+      // loop and the `.set()` below) so two chat/turn calls racing for the
+      // same session can't both pass the check before either reserves a
+      // slot - otherwise both would proceed concurrently against the same
+      // AgentRuntime and their final chat/append calls would clobber each
+      // other's persisted history (last-writer-wins).
+      for (const t of activeTurns.values()) {
+        if (t.sessionId === p.sessionId) {
+          throw new Error("a turn is already in progress for this session");
+        }
+      }
       const controller = new AbortController();
       const turnId = crypto.randomUUID();
       activeTurns.set(turnId, { sessionId: p.sessionId, controller });
       (async () => {
         try {
+          const rt = await runtimeFor(p.sessionId);
           for await (const event of rt.sendMessage(p.sessionId, p.userText, controller.signal)) {
             daemon.broadcast("chat/turnEvent", { turnId, event });
           }
+        } catch (e) {
+          // Defense-in-depth: AgentRuntime.sendMessage never throws today
+          // (it degrades to an "error" TurnEvent internally), but that's an
+          // implicit invariant living in another file - don't let a future
+          // change there silently drop the turn instead of surfacing it.
+          daemon.broadcast("chat/turnEvent", {
+            turnId, event: { type: "error", message: e instanceof Error ? e.message : String(e) },
+          });
         } finally {
           activeTurns.delete(turnId);
         }
