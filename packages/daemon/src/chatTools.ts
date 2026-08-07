@@ -84,7 +84,8 @@ export function createChatTools(deps: ChatToolsDeps): ToolProvider[] {
       preview: async (args: { path: string; oldText: string; newText: string }) => {
         const content = await readOrEmpty(ws, args.path);
         const count = content.split(args.oldText).length - 1;
-        if (count !== 1) return `error: oldText matches ${count} locations in ${args.path}; must be unique`;
+        if (count === 0) throw new Error(`oldText not found in ${args.path}`);
+        if (count > 1) throw new Error(`oldText matches ${count} locations in ${args.path}; must be unique`);
         return diffPreview(content, content.replace(args.oldText, args.newText));
       },
       execute: async (args: { path: string; oldText: string; newText: string }) => {

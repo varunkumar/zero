@@ -62,6 +62,10 @@ test("fs_edit replaces a unique match and errors on an ambiguous one", async () 
   deps._files.set("b.ts", "x x");
   const ambiguous = await fsEdit.execute({ path: "b.ts", oldText: "x", newText: "y" }).catch((e: unknown) => e);
   expect(String(ambiguous)).toContain("2 locations");
+
+  // Verify preview() also throws on ambiguous match, not returning an error string
+  const previewError = await fsEdit.preview!({ path: "b.ts", oldText: "x", newText: "y" }).catch((e: unknown) => e);
+  expect(String(previewError)).toContain("2 locations");
 });
 
 test("run_command requires approval and checkpoints when it changes files", async () => {
