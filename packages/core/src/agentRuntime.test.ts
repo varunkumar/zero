@@ -451,3 +451,26 @@ test("aborting while an approval is pending resolves it as denied and stops the 
   expect(events.map((e) => e.type)).toEqual(["toolCall", "approvalRequest"]);
   expect(tool.calls).toBe(0);
 });
+
+test("aborting before the approval request (during preview) terminates the turn promptly", async () => {
+  const controller = new AbortController();
+  const provider = fakeProvider({
+    id: "m",
+    reply: () => ({ toolCalls: [{ id: "c1", name: "fs_write", args: { path: "x.ts" } }] }),
+  });
+  const tool = gatedTool(async () => "wrote x.ts");
+  const runtime = new AgentRuntime({ providers: [provider], tools: [tool], client: fakeClient(), workspace: () => ({}) });
+
+  const iter = runtime.sendMessage("s1", "write x.ts", controller.signal)[Symbol.asyncIterator]();
+  const events: TurnEvent[] = [];
+  for (;;) {
+    const { value, done } = await iter.next();
+    if (done) break;
+    events.push(value);
+    // Abort immediately after the toolCall event, before approvalRequest can be processed
+    if (value.type === "toolCall") controller.abort();
+  }
+  // Should terminate after toolCall without hanging; no approvalRequest, no tool execution
+  expect(events.map((e) => e.type)).toEqual(["toolCall"]);
+  expect(tool.calls).toBe(0);
+});

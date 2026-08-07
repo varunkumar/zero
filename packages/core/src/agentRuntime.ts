@@ -64,6 +64,7 @@ export class AgentRuntime {
   }
 
   #awaitApproval(callId: string, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
       this.#pendingApprovals.set(callId, resolve);
       signal.addEventListener("abort", () => {
@@ -150,6 +151,7 @@ export class AgentRuntime {
       for (const call of toolCalls) {
         if (signal.aborted) return;
         yield { type: "toolCall", call };
+        if (signal.aborted) return;
         const tool = this.#tools.find((t) => t.name === call.name);
 
         if (tool?.needsApproval) {
