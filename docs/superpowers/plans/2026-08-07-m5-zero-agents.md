@@ -729,13 +729,14 @@ async function initRepo(): Promise<string> {
 
 test("commits the current working tree onto a shadow branch without touching HEAD", async () => {
   const dir = await initRepo();
+  const branchBefore = (await execCommand("git rev-parse --abbrev-ref HEAD", dir)).output.trim();
   const gc = new GitCheckpoint(dir);
   await writeFile(join(dir, "a.txt"), "two\n");
 
   await gc.checkpoint("session-1", "agent: edit a.txt");
 
   const branch = await execCommand("git rev-parse --abbrev-ref HEAD", dir);
-  expect(branch.output.trim()).toBe("master".length ? branch.output.trim() : "master"); // still on the user's branch
+  expect(branch.output.trim()).toBe(branchBefore); // still on the user's branch, whatever it's named
   const shadowLog = await execCommand("git log --oneline refs/heads/zero/agent-checkpoints/session-1", dir);
   expect(shadowLog.output).toContain("agent: edit a.txt");
   const userStatus = await execCommand("git status --porcelain", dir);
@@ -853,7 +854,7 @@ export class GitCheckpoint {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `bun test packages/daemon/src/gitCheckpoint.test.ts`
-Expected: PASS. Note: the first test asserts the current branch name loosely (`master` or `main` depending on the test runner's git config default) — if it fails on your machine's git default branch name, adjust the assertion to read `git symbolic-ref --short HEAD` once before checkpointing and compare against that captured value instead of a literal.
+Expected: PASS
 
 - [ ] **Step 5: Commit**
 
