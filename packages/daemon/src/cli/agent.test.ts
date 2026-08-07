@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { runAgentCli, positionalArgs } from "./agent";
+import { Workspace } from "../workspace";
+import { SessionStore } from "../sessions";
 import type { ChatCapableProvider } from "@zero/core";
 
 function stubProvider(reply: string): ChatCapableProvider {
@@ -44,19 +46,27 @@ test("positionalArgs extracts task and path correctly", () => {
   expect(positionalArgs(["task", "--session", "id"])).toEqual(["task"]);
 });
 
-test("--session <id> resume path reuses existing session", async () => {
+test("bin/zero.ts's path extraction via positionalArgs(rest)[1] correctly gets the path, not the task", () => {
+  // This mirrors bin/zero.ts's exact call site: const path = positionalArgs(rest)[1];
+  // Ensures that when a task and path are both provided, we extract the path (2nd positional),
+  // not the task (1st positional), fixing the original bug.
+  const rest = ["some task text", "/some/project/path", "--yes"];
+  const path = positionalArgs(rest)[1];
+  expect(path).toBe("/some/project/path");
+  expect(path).not.toBe("some task text");
+});
+
+test("--session <id> resumes an existing session instead of creating a new one", async () => {
   const dir = await mkdtemp(join(tmpdir(), "zero-agent-cli-"));
-  const provider = stubProvider("response1");
+  const ws = new Workspace(dir);
+  const sessions = new SessionStore(ws);
+  const existingId = await sessions.create("existing task");
 
-  // First invocation without --session creates a new session
-  const exitCode1 = await runAgentCli(["first task", "--yes"], dir, { providers: [provider] });
-  expect(exitCode1).toBe(0);
+  await runAgentCli(["second message", "--session", existingId, "--yes"], dir, { providers: [stubProvider("hello!")] });
 
-  // To verify --session works, we'd need access to SessionStore internals, which we avoid in tests.
-  // Instead, we verify positionalArgs correctly extracts the session id when provided
-  const args = ["second task", "--session", "test-session-123", "--yes"];
-  const positionals = positionalArgs(args);
-  expect(positionals).toEqual(["second task"]); // --session's value should not appear in positionals
+  const list = await sessions.list();
+  expect(list).toHaveLength(1); // no new session was created
+  expect(list[0]!.id).toBe(existingId);
 });
 
 test("fails gracefully when task is missing", async () => {
