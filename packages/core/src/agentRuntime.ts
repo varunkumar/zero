@@ -1,6 +1,7 @@
 import type { ChatCapableProvider, ChatMessage, ChatToolCall, ChatToolSpec, ToolProvider } from "./chatTypes";
 import { capToolOutput, needsCompaction, selectForCompaction, COMPACTION_SYSTEM_PROMPT } from "./tokenLedger";
 import { buildSystemPrompt, type WorkspaceInfo } from "./systemPrompt";
+import { ProviderGateway } from "./providerGateway";
 
 export type TurnEvent =
   | { type: "text"; delta: string }
@@ -25,7 +26,7 @@ export interface AgentRuntimeOpts {
 const MAX_TOOL_ROUNDS = 8;
 
 export class AgentRuntime {
-  #providers: ChatCapableProvider[];
+  #gateway: ProviderGateway;
   #tools: ToolProvider[];
   #client: AgentRuntimeClient;
   #workspace: () => WorkspaceInfo;
@@ -33,7 +34,7 @@ export class AgentRuntime {
   #listeners = new Set<(s: AgentRuntimeStatus) => void>();
 
   constructor(opts: AgentRuntimeOpts) {
-    this.#providers = opts.providers;
+    this.#gateway = new ProviderGateway(opts.providers);
     this.#tools = opts.tools;
     this.#client = opts.client;
     this.#workspace = opts.workspace;
@@ -54,11 +55,7 @@ export class AgentRuntime {
   }
 
   async #pick(): Promise<ChatCapableProvider | null> {
-    const available: ChatCapableProvider[] = [];
-    for (const p of this.#providers) {
-      if (await p.available().catch(() => false)) available.push(p);
-    }
-    return available.find((p) => p.supportsTools()) ?? available[0] ?? null;
+    return this.#gateway.pick();
   }
 
   async *sendMessage(sessionId: string, userText: string, signal: AbortSignal): AsyncIterable<TurnEvent> {
