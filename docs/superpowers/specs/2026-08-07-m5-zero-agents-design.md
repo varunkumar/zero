@@ -95,26 +95,45 @@ New `packages/daemon/src/gitCheckpoint.ts`, shelling out to the `git`
 binary (no library dependency, consistent with how `pty.ts` already shells
 out rather than wrapping a PTY library).
 
-- On the first checkpoint in a workspace/session, ensures a shadow branch
-  `zero/agent-checkpoints/<sessionId>` exists (branched from `HEAD` at
-  session start) and a hidden linked worktree at
-  `.zero/checkpoints/<sessionId>/` checked out to it (`git worktree add`).
-  Using a separate worktree, rather than committing on the user's
-  checked-out branch, means agent commits never touch the files the user
-  has open in the editor or the branch they're on.
-- After each **approved** write/command tool call that changed files (`
-  fs_write`, `fs_edit` unconditionally; `run_command` only if `git status`
-  in the worktree shows changes), the daemon commits in that worktree with
-  a message like `agent: fs_edit src/foo.ts (turn <n>, call <m>)`.
+A linked `git worktree` was considered and rejected: a worktree has its own
+separate working directory, so committing there would never see the files
+write tools actually change in the real workspace root. Instead this uses
+git plumbing against the main repo with an **alternate index file**, which
+commits the real working tree's current state onto a shadow branch without
+ever touching the user's `HEAD`, checked-out branch, or staging area:
+
+- On the first checkpoint in a session, if `.git` doesn't exist at the
+  workspace root, checkpointing is disabled for the session (see
+  degradation below) — no `git init` is performed, this only checkpoints
+  workspaces that are already git repos.
+- Each checkpoint runs, with `GIT_INDEX_FILE` pointed at a private index
+  under `.zero/checkpoints/<sessionId>/index` (so the user's real staging
+  area is never touched) and `GIT_DIR`/working directory set to the
+  workspace root:
+  1. `git add -A` — stages the current working tree into the alternate
+     index.
+  2. `git write-tree` — writes a tree object for that index, independent
+     of any branch.
+  3. `git commit-tree <tree> -p <parent> -m <message>` — creates a commit
+     object with `<parent>` being the shadow branch's previous commit
+     (`refs/heads/zero/agent-checkpoints/<sessionId>`), or the workspace's
+     `HEAD` at session start if this is the first checkpoint.
+  4. `git update-ref refs/heads/zero/agent-checkpoints/<sessionId>
+     <commit>` — moves the shadow branch to the new commit. `HEAD` and the
+     user's actual branch/index are never touched by any of these steps.
+- Runs after each **approved** write/command tool call that changed files
+  (`fs_write`, `fs_edit` unconditionally; `run_command` only if step 1's
+  `git add -A` actually staged something), with a message like `agent:
+  fs_edit src/foo.ts (turn <n>, call <m>)`.
 - Purely a safety net for M5 — no UI to browse or restore checkpoints.
-  Recoverable via plain `git log` / `git checkout` against the shadow
-  branch if needed. Checkpoint browsing/restore UI is explicitly deferred
-  to a later milestone.
-- If the worktree can't be created (git missing, `.zero/checkpoints` not
-  writable), checkpointing degrades to a no-op with a one-time logged
-  warning — write tools keep working, per the project's "degrade the
-  failing subsystem only" constraint (write tools are not gated on git
-  being available).
+  Recoverable via `git log`/`git checkout` against the shadow branch (a
+  normal branch, browsable with any git tool) if needed. Checkpoint
+  browsing/restore UI is explicitly deferred to a later milestone.
+- If git is missing, `.zero/checkpoints` isn't writable, or the workspace
+  isn't a git repo, checkpointing degrades to a no-op with a one-time
+  logged warning — write tools keep working regardless, per the project's
+  "degrade the failing subsystem only" constraint (write tools are never
+  gated on git being available).
 
 ## 4. Headless CLI: `zero agent "task"`
 
