@@ -1,12 +1,12 @@
 import { resolve } from "node:path";
 import { startZero } from "../src/main";
-import { runAgentCli } from "../src/cli/agent";
+import { runAgentCli, positionalArgs } from "../src/cli/agent";
 
 const [cmd, ...rest] = process.argv.slice(2);
 
 if (cmd === "agent") {
-  const pathArg = rest.find((a, i) => !a.startsWith("--") && rest[i - 1] !== "--session");
-  const root = resolve(pathArg ?? ".");
+  const path = positionalArgs(rest)[1]; // [0] is the task, [1] (if present) is the optional path
+  const root = resolve(path ?? ".");
   const exitCode = await runAgentCli(rest, root);
   process.exit(exitCode);
 } else {
