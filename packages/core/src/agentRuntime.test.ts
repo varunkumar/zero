@@ -365,3 +365,89 @@ test("chat/get rejecting yields an error event instead of an unhandled rejection
   const events = await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
   expect(events).toEqual([{ type: "error", message: expect.stringContaining("disk error") }]);
 });
+
+function gatedTool(execute: () => Promise<string>): ToolProvider & { calls: number } {
+  const t = {
+    name: "fs_write", description: "Write a file.", schema: {}, needsApproval: true,
+    preview: async () => "+hello",
+    calls: 0,
+    execute: async () => { t.calls++; return execute(); },
+  };
+  return t;
+}
+
+test("a gated tool call yields approvalRequest and waits for resolveApproval before executing", async () => {
+  let round = 0;
+  const provider = fakeProvider({
+    id: "m",
+    reply: (messages) => {
+      round++;
+      if (round === 1) return { toolCalls: [{ id: "c1", name: "fs_write", args: { path: "a.ts" } }] };
+      return { text: "done" };
+    },
+  });
+  const tool = gatedTool(async () => "wrote a.ts");
+  const runtime = new AgentRuntime({ providers: [provider], tools: [tool], client: fakeClient(), workspace: () => ({}) });
+
+  const iter = runtime.sendMessage("s1", "write a.ts", new AbortController().signal)[Symbol.asyncIterator]();
+  const events: TurnEvent[] = [];
+  for (;;) {
+    const { value, done } = await iter.next();
+    if (done) break;
+    events.push(value);
+    if (value.type === "approvalRequest") {
+      expect(tool.calls).toBe(0);
+      runtime.resolveApproval(value.call.id, true);
+    }
+  }
+  expect(events.map((e) => e.type)).toEqual(["toolCall", "approvalRequest", "toolResult", "text", "done"]);
+  expect((events[2] as { type: "toolResult"; result: string }).result).toBe("wrote a.ts");
+  expect(tool.calls).toBe(1);
+});
+
+test("denying a gated tool call feeds back a denial without executing it", async () => {
+  let round = 0;
+  const provider = fakeProvider({
+    id: "m",
+    reply: (messages) => {
+      round++;
+      if (round === 1) return { toolCalls: [{ id: "c1", name: "fs_write", args: {} }] };
+      expect(messages.some((m) => m.role === "tool" && m.content === "denied by user")).toBe(true);
+      return { text: "ok, skipping" };
+    },
+  });
+  const tool = gatedTool(async () => "wrote a.ts");
+  const runtime = new AgentRuntime({ providers: [provider], tools: [tool], client: fakeClient(), workspace: () => ({}) });
+
+  const iter = runtime.sendMessage("s1", "write a.ts", new AbortController().signal)[Symbol.asyncIterator]();
+  const events: TurnEvent[] = [];
+  for (;;) {
+    const { value, done } = await iter.next();
+    if (done) break;
+    events.push(value);
+    if (value.type === "approvalRequest") runtime.resolveApproval(value.call.id, false);
+  }
+  expect((events[2] as { type: "toolResult"; result: string }).result).toBe("denied by user");
+  expect(tool.calls).toBe(0);
+});
+
+test("aborting while an approval is pending resolves it as denied and stops the turn", async () => {
+  const provider = fakeProvider({
+    id: "m",
+    reply: () => ({ toolCalls: [{ id: "c1", name: "fs_write", args: {} }] }),
+  });
+  const tool = gatedTool(async () => "wrote a.ts");
+  const controller = new AbortController();
+  const runtime = new AgentRuntime({ providers: [provider], tools: [tool], client: fakeClient(), workspace: () => ({}) });
+
+  const iter = runtime.sendMessage("s1", "write a.ts", controller.signal)[Symbol.asyncIterator]();
+  const events: TurnEvent[] = [];
+  for (;;) {
+    const { value, done } = await iter.next();
+    if (done) break;
+    events.push(value);
+    if (value.type === "approvalRequest") controller.abort();
+  }
+  expect(events.map((e) => e.type)).toEqual(["toolCall", "approvalRequest"]);
+  expect(tool.calls).toBe(0);
+});

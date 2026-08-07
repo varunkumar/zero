@@ -7,6 +7,7 @@ export type TurnEvent =
   | { type: "text"; delta: string }
   | { type: "toolCall"; call: ChatToolCall }
   | { type: "toolResult"; call: ChatToolCall; result: string }
+  | { type: "approvalRequest"; call: ChatToolCall; preview: string }
   | { type: "done"; message: ChatMessage }
   | { type: "error"; message: string };
 
@@ -32,6 +33,7 @@ export class AgentRuntime {
   #workspace: () => WorkspaceInfo;
   #status: AgentRuntimeStatus = { activeModel: null, reason: null };
   #listeners = new Set<(s: AgentRuntimeStatus) => void>();
+  #pendingApprovals = new Map<string, (approved: boolean) => void>();
 
   constructor(opts: AgentRuntimeOpts) {
     this.#gateway = new ProviderGateway(opts.providers);
@@ -52,6 +54,23 @@ export class AgentRuntime {
   #setStatus(s: AgentRuntimeStatus): void {
     this.#status = s;
     for (const fn of this.#listeners) fn(s);
+  }
+
+  resolveApproval(callId: string, approved: boolean): void {
+    const resolve = this.#pendingApprovals.get(callId);
+    if (!resolve) return;
+    this.#pendingApprovals.delete(callId);
+    resolve(approved);
+  }
+
+  #awaitApproval(callId: string, signal: AbortSignal): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      this.#pendingApprovals.set(callId, resolve);
+      signal.addEventListener("abort", () => {
+        this.#pendingApprovals.delete(callId);
+        resolve(false);
+      }, { once: true });
+    });
   }
 
   async #pick(): Promise<ChatCapableProvider | null> {
@@ -132,6 +151,21 @@ export class AgentRuntime {
         if (signal.aborted) return;
         yield { type: "toolCall", call };
         const tool = this.#tools.find((t) => t.name === call.name);
+
+        if (tool?.needsApproval) {
+          const preview = tool.preview ? await tool.preview(call.args).catch(() => "") : "";
+          const approvalPromise = this.#awaitApproval(call.id, signal);
+          yield { type: "approvalRequest", call, preview };
+          const approved = await approvalPromise;
+          if (signal.aborted) return;
+          if (!approved) {
+            const result = "denied by user";
+            history = [...history, { role: "tool", content: result, toolCallId: call.id, toolName: call.name, createdAt: Date.now() }];
+            yield { type: "toolResult", call, result };
+            continue;
+          }
+        }
+
         const rawResult = tool
           ? await tool.execute(call.args).catch((e: unknown) => `error: ${e instanceof Error ? e.message : String(e)}`)
           : `error: unknown tool ${call.name}`;
