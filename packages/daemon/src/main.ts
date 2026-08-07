@@ -8,11 +8,28 @@ import { PluginHost } from "./plugins/host";
 import { createGraphify } from "./plugins/graphify";
 import { SessionStore } from "./sessions";
 import type { ChatMessage } from "@zero/protocol";
+import { AgentRuntime, ProviderGateway, OpenAICompatProvider } from "@zero/core";
+import { createChatTools } from "./chatTools";
+import { createAgentRuntimeClient } from "./agentClient";
+import { GitCheckpoint } from "./gitCheckpoint";
+import { execCommand } from "./execCommand";
 
 export async function startZero(opts: DaemonOptions) {
   const daemon = createDaemon(opts);
   const ws = new Workspace(opts.root);
   const sessions = new SessionStore(ws);
+  const checkpoint = new GitCheckpoint(opts.root);
+  const agentClient = createAgentRuntimeClient(sessions);
+
+  async function buildProviders() {
+    const baseUrl = (await ws.readSetting("zero.ollamaUrl")) as string | undefined ?? "http://127.0.0.1:11434/v1";
+    const model = (await ws.readSetting("zero.ollamaChatModel")) as string | undefined ?? "qwen2.5-coder:7b";
+    // Nano is deliberately excluded here: it requires a browser's
+    // window.LanguageModel global, which does not exist in the daemon
+    // process. Nano-backed daemon-side runs are M7 (Nano bridge) scope.
+    return [new OpenAICompatProvider({ baseUrl, model })];
+  }
+
   const pty = new PtyService(
     opts.root,
     (sessionId, data) => daemon.broadcast("pty/output", { sessionId, data }),
@@ -85,6 +102,52 @@ export async function startZero(opts: DaemonOptions) {
     async (p) => { await sessions.delete(p.id); return {}; });
 
   const graphify = createGraphify();
+
+  const agentRuntimes = new Map<string, AgentRuntime>();
+  const activeTurns = new Map<string, { sessionId: string; controller: AbortController }>();
+
+  async function runtimeFor(sessionId: string): Promise<AgentRuntime> {
+    let rt = agentRuntimes.get(sessionId);
+    if (rt) return rt;
+    const providers = await buildProviders();
+    const tools = createChatTools({
+      sessionId, ws, lsp, checkpoint, execCommand,
+      graphQuery: (p) => graphify.getIndexer() ? graphify.query(p) : { text: "graph not ready" },
+    });
+    rt = new AgentRuntime({ providers, tools, client: agentClient, workspace: () => ({}) });
+    agentRuntimes.set(sessionId, rt);
+    return rt;
+  }
+
+  daemon.rpc.register("chat/turn", z.object({ sessionId: z.string(), userText: z.string() }),
+    async (p) => {
+      const rt = await runtimeFor(p.sessionId);
+      const controller = new AbortController();
+      const turnId = crypto.randomUUID();
+      activeTurns.set(turnId, { sessionId: p.sessionId, controller });
+      (async () => {
+        try {
+          for await (const event of rt.sendMessage(p.sessionId, p.userText, controller.signal)) {
+            daemon.broadcast("chat/turnEvent", { turnId, event });
+          }
+        } finally {
+          activeTurns.delete(turnId);
+        }
+      })();
+      return { turnId };
+    });
+  daemon.rpc.register("chat/approve", z.object({ turnId: z.string(), callId: z.string(), approved: z.boolean() }),
+    async (p) => {
+      const turn = activeTurns.get(p.turnId);
+      if (!turn) return {};
+      (await runtimeFor(turn.sessionId)).resolveApproval(p.callId, p.approved);
+      return {};
+    });
+  daemon.rpc.register("chat/abort", z.object({ turnId: z.string() }),
+    async (p) => { activeTurns.get(p.turnId)?.controller.abort(); return {}; });
+  daemon.rpc.register("chat/status", z.object({ sessionId: z.string() }),
+    async (p) => (await runtimeFor(p.sessionId)).status());
+
   const host = new PluginHost({
     rpc: daemon.rpc,
     workspace: ws,

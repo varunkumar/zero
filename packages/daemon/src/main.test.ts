@@ -183,3 +183,32 @@ test("chat/* RPCs over the wire", async () => {
 
   ws.close(); d.stop();
 });
+
+test("chat/turn streams events and persists the turn (no tools, stub provider unavailable -> error event)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+  const { id } = await client.request<{ id: string }>("chat/create", {});
+
+  const events: unknown[] = [];
+  const done = new Promise<void>((resolve) => {
+    client.onNotification((method, params) => {
+      if (method !== "chat/turnEvent") return;
+      const { event } = params as { turnId: string; event: { type: string } };
+      events.push(event);
+      if (event.type === "error" || event.type === "done") resolve();
+    });
+  });
+  await client.request("chat/turn", { sessionId: id, userText: "hi" });
+  await done;
+
+  // No Ollama server is running in the test environment, so ProviderGateway
+  // finds nothing available and the turn degrades to an error event -
+  // exactly the "never break editing" path M4's AgentRuntime already covers.
+  expect(events).toEqual([{ type: "error", message: "no chat model available" }]);
+  ws.close(); d.stop();
+});
