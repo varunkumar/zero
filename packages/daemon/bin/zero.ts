@@ -14,7 +14,7 @@ if (cmd === "agent") {
   const path = positionalArgs(argv)[0];
   const root = resolve(path ?? ".");
   const webDist = new URL("../../web/dist", import.meta.url).pathname;
-  const parsedGatewayPort = parseGatewayPort(rest);
+  const parsedGatewayPort = parseGatewayPort(argv);
   if (parsedGatewayPort === "invalid") {
     console.error("error: --gateway-port requires a numeric value");
     process.exit(1);
