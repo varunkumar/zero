@@ -43,7 +43,7 @@ export async function runAgentCli(argv: string[], root: string, opts: AgentCliOp
       new OpenAICompatProvider({ baseUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5-coder:7b" }),
     ];
     const tools = createChatTools({
-      sessionId, ws, lsp, checkpoint, execCommand,
+      sessionId, root: ws.root, ws, lsp, checkpoint, execCommand,
       graphQuery: (p) => graphify.query(p),
     });
     const runtime = new AgentRuntime({

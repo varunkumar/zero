@@ -116,7 +116,7 @@ export async function startZero(opts: DaemonOptions) {
   const runtimeFor = createRuntimePool(async (sessionId) => {
     const providers = await buildProviders();
     const tools = createChatTools({
-      sessionId, ws, lsp, checkpoint, execCommand,
+      sessionId, root: ws.root, ws, lsp, checkpoint, execCommand,
       graphQuery: (p) => graphify.getIndexer() ? graphify.query(p) : { text: "graph not ready" },
     });
     return new AgentRuntime({ providers, tools, client: agentClient, workspace: () => ({}) });

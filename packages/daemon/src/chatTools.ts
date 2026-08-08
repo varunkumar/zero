@@ -1,3 +1,4 @@
+import { resolve, sep } from "node:path";
 import type { ToolProvider } from "@zero/core";
 import type { Workspace } from "./workspace";
 import type { LspService } from "./lsp/service";
@@ -7,11 +8,20 @@ import { diffPreview } from "./diffPreview";
 
 export interface ChatToolsDeps {
   sessionId: string;
+  root: string;
   ws: Pick<Workspace, "read" | "write" | "tree" | "search">;
   lsp: Pick<LspService, "hover" | "definition">;
   graphQuery: (p: { q: string; mode?: "neighbors" | "symbol" | "path"; budgetTokens?: number }) => unknown;
   execCommand: typeof execCommandFn;
   checkpoint: Pick<GitCheckpoint, "checkpoint">;
+}
+
+function resolveCwd(root: string, cwd: string | undefined): string {
+  const resolved = resolve(root, cwd ?? ".");
+  if (resolved !== root && !resolved.startsWith(root + sep)) {
+    throw new Error(`cwd escapes workspace root: ${cwd}`);
+  }
+  return resolved;
 }
 
 function tool(opts: {
@@ -30,7 +40,7 @@ async function readOrEmpty(ws: ChatToolsDeps["ws"], path: string): Promise<strin
 }
 
 export function createChatTools(deps: ChatToolsDeps): ToolProvider[] {
-  const { sessionId, ws, lsp, graphQuery, execCommand, checkpoint } = deps;
+  const { sessionId, root, ws, lsp, graphQuery, execCommand, checkpoint } = deps;
 
   return [
     tool({
@@ -102,9 +112,11 @@ export function createChatTools(deps: ChatToolsDeps): ToolProvider[] {
       name: "run_command", description: "Run a shell command in the workspace and return its combined output. Requires approval.",
       schema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" } }, required: ["command"] },
       needsApproval: true,
-      preview: async (args: { command: string }) => args.command,
+      preview: async (args: { command: string; cwd?: string }) =>
+        `${args.cwd ? `(in ${args.cwd}) ` : ""}${args.command}`,
       execute: async (args: { command: string; cwd?: string }) => {
-        const { exitCode, output } = await execCommand(args.command, args.cwd ?? ".");
+        const cwd = resolveCwd(root, args.cwd);
+        const { exitCode, output } = await execCommand(args.command, cwd);
         const summary = `exit ${exitCode}\n${output}`;
         // Reuse fs write's checkpoint precondition (diffPreview on the workspace
         // root is not applicable to a command; checkpoint() itself no-ops if

@@ -4,8 +4,10 @@ import { createChatTools } from "./chatTools";
 function fakeDeps(overrides: Partial<Parameters<typeof createChatTools>[0]> = {}) {
   const files = new Map<string, string>([["a.ts", "export const a = 1;"]]);
   const checkpoints: string[] = [];
+  const execCwds: string[] = [];
   return {
     sessionId: "s1",
+    root: "/workspace",
     ws: {
       read: async (p: string) => { const c = files.get(p); if (c === undefined) throw new Error("not found"); return c; },
       write: async (p: string, c: string) => { files.set(p, c); },
@@ -17,10 +19,11 @@ function fakeDeps(overrides: Partial<Parameters<typeof createChatTools>[0]> = {}
       definition: async () => [{ path: "a.ts", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } }],
     },
     graphQuery: () => ({ text: "graph result" }),
-    execCommand: async () => ({ exitCode: 0, output: "ran" }),
+    execCommand: async (_cmd: string, cwd: string) => { execCwds.push(cwd); return { exitCode: 0, output: "ran" }; },
     checkpoint: { checkpoint: async (_id: string, msg: string) => { checkpoints.push(msg); } },
     _files: files,
     _checkpoints: checkpoints,
+    _execCwds: execCwds,
     ...overrides,
   };
 }
@@ -78,6 +81,35 @@ test("run_command requires approval and checkpoints when it changes files", asyn
   const result = await runCmd.execute({ command: "echo hi" });
   expect(result).toContain("ran");
   expect(deps._checkpoints).toEqual(["agent: run_command echo hi"]);
+});
+
+test("run_command resolves cwd against the workspace root, not process.cwd()", async () => {
+  const deps = fakeDeps();
+  const tools = createChatTools(deps);
+  const runCmd = tools.find((t) => t.name === "run_command")!;
+
+  await runCmd.execute({ command: "echo hi" });
+  expect(deps._execCwds).toEqual(["/workspace"]);
+
+  await runCmd.execute({ command: "echo hi", cwd: "sub/dir" });
+  expect(deps._execCwds).toEqual(["/workspace", "/workspace/sub/dir"]);
+});
+
+test("run_command preview shows the resolved cwd alongside the command", async () => {
+  const deps = fakeDeps();
+  const tools = createChatTools(deps);
+  const runCmd = tools.find((t) => t.name === "run_command")!;
+
+  expect(await runCmd.preview!({ command: "echo hi", cwd: "sub/dir" })).toBe("(in sub/dir) echo hi");
+});
+
+test("run_command rejects an absolute cwd that escapes the workspace root", async () => {
+  const deps = fakeDeps();
+  const tools = createChatTools(deps);
+  const runCmd = tools.find((t) => t.name === "run_command")!;
+
+  await expect(runCmd.execute({ command: "rm -rf /", cwd: "/etc" })).rejects.toThrow("escapes workspace root");
+  expect(deps._execCwds).toEqual([]); // never actually ran
 });
 
 test("graph_query wraps Graphify's query()", async () => {
