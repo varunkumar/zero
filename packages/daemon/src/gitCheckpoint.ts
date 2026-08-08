@@ -39,10 +39,21 @@ export class GitCheckpoint {
       const indexFile = this.#indexFile(sessionId);
       const env = { GIT_INDEX_FILE: indexFile };
 
-      const added = await git(this.root, ["add", "-A"], env);
+      // Exclude .zero/ - it holds the gateway's live API key
+      // (.zero/gateway-key) and full chat transcripts (.zero/sessions/*.json).
+      // This repo's own .gitignore happens to already exclude .zero/, which
+      // is why nothing caught this in dogfooding, but an arbitrary user
+      // workspace the daemon is pointed at has no such guarantee - the
+      // exclusion must be enforced here, not left to the workspace's own
+      // .gitignore.
+      const added = await git(this.root, ["add", "-A", "--", ".", ":(exclude).zero"], env);
       if (added.exitCode !== 0) return this.#warn(added.output);
 
-      const status = await git(this.root, ["status", "--porcelain", "--", "."], env);
+      // Same .zero/ exclusion as the add above - otherwise a workspace
+      // where only .zero/ changed (e.g. a new session transcript) would be
+      // seen as "something changed" here even though nothing was actually
+      // staged, producing a spurious checkpoint commit with an unchanged tree.
+      const status = await git(this.root, ["status", "--porcelain", "--", ".", ":(exclude).zero"], env);
       if (!status.output) return; // nothing changed, no-op
 
       const tree = await git(this.root, ["write-tree"], env);

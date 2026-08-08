@@ -69,6 +69,44 @@ test("second checkpoint with no changes respects no-op guard (index file isolati
   expect(userStatus.output.trim()).toBe(""); // no leftover files from index operations in .git/
 });
 
+test("never stages .zero/ into the shadow branch, even when gateway-key and session transcripts exist", async () => {
+  const dir = await initRepo();
+  const gc = new GitCheckpoint(dir);
+
+  // Simulate a live gateway credential and chat transcripts sitting in
+  // .zero/ - this repo's own .gitignore happens to exclude .zero/, but an
+  // arbitrary user workspace has no such guarantee, so the exclusion must
+  // be enforced by GitCheckpoint itself, not inherited from the workspace's
+  // .gitignore.
+  await mkdir(join(dir, ".zero", "sessions"), { recursive: true });
+  await writeFile(join(dir, ".zero", "gateway-key"), "super-secret-live-key");
+  await writeFile(join(dir, ".zero", "sessions", "s1.json"), JSON.stringify({ messages: ["hi"] }));
+  await writeFile(join(dir, "a.txt"), "two\n");
+
+  await gc.checkpoint("session-1", "agent: edit a.txt");
+
+  const shadowRef = "refs/heads/zero/agent-checkpoints/session-1";
+  const showStat = await execCommand(`git show --stat ${shadowRef}`, dir);
+  expect(showStat.output).not.toContain(".zero");
+
+  const lsTree = await execCommand(`git ls-tree -r --name-only ${shadowRef}`, dir);
+  expect(lsTree.output.split("\n")).not.toContain(".zero/gateway-key");
+  expect(lsTree.output).not.toContain(".zero");
+});
+
+test("a workspace where only .zero/ changed is treated as a no-op, not a spurious checkpoint", async () => {
+  const dir = await initRepo();
+  const gc = new GitCheckpoint(dir);
+
+  await mkdir(join(dir, ".zero"), { recursive: true });
+  await writeFile(join(dir, ".zero", "gateway-key"), "super-secret-live-key");
+
+  await gc.checkpoint("session-1", "should be a no-op");
+
+  const exists = await execCommand("git rev-parse --verify refs/heads/zero/agent-checkpoints/session-1", dir);
+  expect(exists.exitCode).not.toBe(0); // shadow branch was never created
+});
+
 test("degrades to a no-op when the workspace is not a git repo", async () => {
   const dir = await mkdtemp(join(tmpdir(), "zero-checkpoint-nogit-"));
   await mkdir(dir, { recursive: true });
