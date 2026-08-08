@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { stat, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcClient, type SocketLike } from "@zero/protocol";
@@ -180,6 +181,219 @@ test("chat/* RPCs over the wire", async () => {
 
   await client.request("chat/delete", { id });
   expect((await client.request<{ sessions: unknown[] }>("chat/list")).sessions).toEqual([]);
+
+  ws.close(); d.stop();
+});
+
+test("gateway-key is written to a fresh workspace with no prior .zero/ directory, mode 0600", async () => {
+  // A genuinely fresh workspace has no .zero/ directory yet - it's created
+  // lazily elsewhere (SessionStore.create/writeSetting), so starting with
+  // --gateway-port and no prior session must not silently ENOENT.
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root, gatewayPort: 0 });
+
+  const keyPath = join(root, ".zero", "gateway-key");
+  const content = await readFile(keyPath, "utf8");
+  expect(content).toBe(d.gatewayInfo!.apiKey);
+
+  if (process.platform !== "win32") {
+    const st = await stat(keyPath);
+    expect(st.mode & 0o777).toBe(0o600);
+  }
+
+  d.stop();
+});
+
+test("chat/status doesn't construct a runtime for a never-turned session, and reflects the pool after chat/delete evicts it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+  const { id } = await client.request<{ id: string }>("chat/create", {});
+
+  // A session that has never had chat/turn called for it should report the
+  // neutral "no chat model" status without erroring or requiring a real
+  // provider - status checks must not be a side-effecting construction
+  // trigger (the web ChatPanel calls chat/status on every session switch).
+  const status = await client.request<{ activeModel: string | null; reason: string | null }>(
+    "chat/status", { sessionId: id },
+  );
+  expect(status).toEqual({ activeModel: null, reason: null });
+
+  // Start (and let finish) a turn so the pool actually has an entry for this
+  // session, then delete the session and confirm chat/status still degrades
+  // cleanly (deletion evicts the pool entry rather than leaking it forever).
+  const done = new Promise<void>((resolve) => {
+    client.onNotification((method, params) => {
+      if (method !== "chat/turnEvent") return;
+      const { event } = params as { event: { type: string } };
+      if (event.type === "error" || event.type === "done") resolve();
+    });
+  });
+  await client.request("chat/turn", { sessionId: id, userText: "hi" });
+  await done;
+
+  // Now that a turn has actually run, the pool has a real cached runtime
+  // for this session, and chat/status reflects its (non-neutral) status -
+  // distinguishing this from the "never constructed" neutral default above.
+  const statusAfterTurn = await client.request<{ activeModel: string | null; reason: string | null }>(
+    "chat/status", { sessionId: id },
+  );
+  expect(statusAfterTurn.reason).toBe("no chat model available");
+
+  await client.request("chat/delete", { id });
+  const statusAfterDelete = await client.request<{ activeModel: string | null; reason: string | null }>(
+    "chat/status", { sessionId: id },
+  );
+  expect(statusAfterDelete).toEqual({ activeModel: null, reason: null });
+
+  ws.close(); d.stop();
+});
+
+test("chat/turn streams events and persists the turn (no tools, stub provider unavailable -> error event)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+  const { id } = await client.request<{ id: string }>("chat/create", {});
+
+  const events: unknown[] = [];
+  const done = new Promise<void>((resolve) => {
+    client.onNotification((method, params) => {
+      if (method !== "chat/turnEvent") return;
+      const { event } = params as { turnId: string; event: { type: string } };
+      events.push(event);
+      if (event.type === "error" || event.type === "done") resolve();
+    });
+  });
+  await client.request("chat/turn", { sessionId: id, userText: "hi" });
+  await done;
+
+  // No Ollama server is running in the test environment, so ProviderGateway
+  // finds nothing available and the turn degrades to an error event -
+  // exactly the "never break editing" path M4's AgentRuntime already covers.
+  expect(events).toEqual([{ type: "error", message: "no chat model available" }]);
+  ws.close(); d.stop();
+});
+
+test("chat/abort still produces a terminal chat/turnEvent broadcast, not silence", async () => {
+  // AgentRuntime.sendMessage has early-return points on an aborted signal
+  // that end the generator without yielding a final done/error event. The
+  // daemon must still broadcast a synthetic terminal event so every
+  // consumer of chat/turnEvent sees a definitive close signal rather than
+  // the stream just stopping.
+  //
+  // To actually exercise that early-return path (rather than the unrelated
+  // "no chat model available" path that fires unconditionally when no
+  // provider is reachable), stand up a fake OpenAI-compatible server that
+  // reports itself available but hangs forever on the actual chat
+  // completion request. The only way this turn can ever end is via abort.
+  const fake = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(req) {
+      const url = new URL(req.url);
+      if (url.pathname.endsWith("/models")) {
+        return new Response(JSON.stringify({ data: [] }), { headers: { "content-type": "application/json" } });
+      }
+      if (url.pathname.endsWith("/chat/completions")) {
+        return new Promise<Response>(() => {}); // never resolves
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  try {
+    await client.request("settings/set", { key: "zero.ollamaUrl", value: `http://127.0.0.1:${fake.port}/v1` });
+    const { id } = await client.request<{ id: string }>("chat/create", {});
+
+    const events: { type: string }[] = [];
+    const done = new Promise<void>((resolve) => {
+      client.onNotification((method, params) => {
+        if (method !== "chat/turnEvent") return;
+        const { event } = params as { event: { type: string } };
+        events.push(event);
+        resolve();
+      });
+    });
+
+    const { turnId } = await client.request<{ turnId: string }>("chat/turn", { sessionId: id, userText: "hi" });
+    // Give the turn a brief moment to actually reach the hanging fetch
+    // before aborting, so this exercises a mid-flight abort (not just an
+    // already-aborted signal at the very top of sendMessage).
+    await Bun.sleep(50);
+    await client.request("chat/abort", { turnId });
+    await done;
+
+    expect(events).toEqual([{ type: "error", message: "aborted" }]);
+  } finally {
+    fake.stop(true);
+    ws.close();
+    d.stop();
+  }
+});
+
+test("a second chat/turn for a session with an already-active turn is rejected, not raced", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+  const { id } = await client.request<{ id: string }>("chat/create", {});
+
+  const turnEvents: { turnId: string; event: { type: string } }[] = [];
+  client.onNotification((method, params) => {
+    if (method === "chat/turnEvent") turnEvents.push(params as { turnId: string; event: { type: string } });
+  });
+
+  // Fire two chat/turn RPCs back-to-back, without awaiting the first, so
+  // both requests are in flight on the daemon at the same time - this is
+  // the exact race window the activeTurns check-and-reserve guard closes:
+  // without it, both would pass the "is a turn already running" check
+  // before either recorded itself, and both would proceed to call
+  // runtimeFor/sendMessage concurrently against the same session.
+  const results = await Promise.allSettled([
+    client.request<{ turnId: string }>("chat/turn", { sessionId: id, userText: "first" }),
+    client.request<{ turnId: string }>("chat/turn", { sessionId: id, userText: "second" }),
+  ]);
+
+  const fulfilled = results.filter((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ turnId: string }>[];
+  const rejected = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+  expect(fulfilled).toHaveLength(1);
+  expect(rejected).toHaveLength(1);
+  expect(String(rejected[0].reason)).toContain("a turn is already in progress for this session");
+
+  // Give the surviving turn's detached IIFE a moment to reach its "no chat
+  // model available" error event (no Ollama server is running in tests).
+  const deadline = Date.now() + 5000;
+  while (!turnEvents.some((e) => e.event.type === "error") && Date.now() < deadline) {
+    await Bun.sleep(20);
+  }
+
+  // Only the one turn that was actually allowed to start ever produced
+  // events - proving the second request never raced a concurrent turn
+  // against the same session (which would otherwise show up as either a
+  // second distinct turnId's events, or two overlapping streams).
+  const turnIds = new Set(turnEvents.map((e) => e.turnId));
+  expect(turnIds.size).toBe(1);
+  expect([...turnIds][0]).toBe(fulfilled[0].value.turnId);
+  expect(turnEvents.map((e) => e.event)).toEqual([{ type: "error", message: "no chat model available" }]);
 
   ws.close(); d.stop();
 });

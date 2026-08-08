@@ -99,3 +99,30 @@ test("chat message shapes are plain JSON-serializable", () => {
     expect(JSON.parse(JSON.stringify(shape))).toEqual(shape);
   }
 });
+
+import type {
+  ChatTurnEvent, ChatTurnParams, ChatTurnResult, ChatTurnEventPayload,
+  ChatApproveParams, ChatAbortParams, ChatStatusResult,
+} from "./messages";
+
+test("chat turn/approval wire shapes are plain JSON-serializable", () => {
+  const events: ChatTurnEvent[] = [
+    { type: "text", delta: "hi" },
+    { type: "toolCall", call: { id: "c1", name: "fs_write", args: { path: "a.ts" } } },
+    { type: "toolResult", call: { id: "c1", name: "fs_write", args: {} }, result: "wrote a.ts" },
+    { type: "approvalRequest", call: { id: "c1", name: "fs_write", args: {} }, preview: "+hello" },
+    { type: "done", message: { role: "assistant", content: "done", createdAt: 1 } },
+    { type: "error", message: "boom" },
+  ];
+  for (const event of events) expect(JSON.parse(JSON.stringify(event))).toEqual(event);
+
+  const turnParams: ChatTurnParams = { sessionId: "s1", userText: "hi" };
+  const turnResult: ChatTurnResult = { turnId: "t1" };
+  const payload: ChatTurnEventPayload = { turnId: "t1", event: events[0]! };
+  const approve: ChatApproveParams = { turnId: "t1", callId: "c1", approved: true };
+  const abort: ChatAbortParams = { turnId: "t1" };
+  const status: ChatStatusResult = { activeModel: "m", reason: null };
+  for (const shape of [turnParams, turnResult, payload, approve, abort, status]) {
+    expect(JSON.parse(JSON.stringify(shape))).toEqual(shape);
+  }
+});
