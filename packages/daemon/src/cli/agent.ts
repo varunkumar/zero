@@ -12,11 +12,26 @@ import { execCommand } from "../execCommand";
 
 export interface AgentCliOpts { providers?: ChatCapableProvider[] }
 
+// Flags that take a following value - that value must not be mistaken for a
+// positional argument (e.g. `zero --gateway-port 4000` must not treat "4000"
+// as the workspace path).
+const FLAGS_WITH_VALUE = new Set(["--session", "--gateway-port"]);
+
+/** Parses `--gateway-port <value>` out of argv. Returns `undefined` if the
+ * flag is absent, `"invalid"` if present but its value isn't a number (e.g.
+ * missing entirely, so `Number(undefined)` is NaN), or the parsed port. */
+export function parseGatewayPort(argv: string[]): number | "invalid" | undefined {
+  const idx = argv.indexOf("--gateway-port");
+  if (idx < 0) return undefined;
+  const n = Number(argv[idx + 1]);
+  return Number.isNaN(n) ? "invalid" : n;
+}
+
 export function positionalArgs(argv: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--session") { i++; continue; } // skip the flag and its value
+    if (FLAGS_WITH_VALUE.has(a)) { i++; continue; } // skip the flag and its value
     if (a.startsWith("--")) continue;
     out.push(a);
   }

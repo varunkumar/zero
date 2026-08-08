@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
-import { runAgentCli, positionalArgs } from "./agent";
+import { runAgentCli, positionalArgs, parseGatewayPort } from "./agent";
 import { Workspace } from "../workspace";
 import { SessionStore } from "../sessions";
 import type { ChatCapableProvider } from "@zero/core";
@@ -44,6 +44,23 @@ test("positionalArgs extracts task and path correctly", () => {
   expect(positionalArgs(["task", "--yes", "path"])).toEqual(["task", "path"]);
   expect(positionalArgs(["task", "--session", "id", "path"])).toEqual(["task", "path"]);
   expect(positionalArgs(["task", "--session", "id"])).toEqual(["task"]);
+});
+
+test("positionalArgs skips --gateway-port and its value, so bin/zero.ts's server-start branch doesn't mistake the port for the workspace path", () => {
+  // Mirrors bin/zero.ts's server-start branch: `positionalArgs(process.argv.slice(2))[0]`.
+  // A flag-only invocation like `zero --gateway-port 4000` (no explicit
+  // workspace path) must resolve to no positional args at all, not treat
+  // the string "--gateway-port" or its value "4000" as the workspace path.
+  expect(positionalArgs(["--gateway-port", "4000"])).toEqual([]);
+  expect(positionalArgs(["/some/project", "--gateway-port", "4000"])).toEqual(["/some/project"]);
+  expect(positionalArgs(["--gateway-port", "4000", "/some/project"])).toEqual(["/some/project"]);
+});
+
+test("parseGatewayPort parses a numeric --gateway-port value, and flags a missing/non-numeric one as invalid rather than passing NaN through", () => {
+  expect(parseGatewayPort([])).toBeUndefined();
+  expect(parseGatewayPort(["--gateway-port", "4000"])).toBe(4000);
+  expect(parseGatewayPort(["--gateway-port"])).toBe("invalid"); // no value follows
+  expect(parseGatewayPort(["--gateway-port", "not-a-number"])).toBe("invalid");
 });
 
 test("bin/zero.ts's path extraction via positionalArgs(rest)[1] correctly gets the path, not the task", () => {

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { startZero } from "../src/main";
-import { runAgentCli, positionalArgs } from "../src/cli/agent";
+import { runAgentCli, positionalArgs, parseGatewayPort } from "../src/cli/agent";
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -10,10 +10,16 @@ if (cmd === "agent") {
   const exitCode = await runAgentCli(rest, root);
   process.exit(exitCode);
 } else {
-  const root = resolve(cmd ?? ".");
+  const argv = process.argv.slice(2);
+  const path = positionalArgs(argv)[0];
+  const root = resolve(path ?? ".");
   const webDist = new URL("../../web/dist", import.meta.url).pathname;
-  const gatewayIdx = rest.indexOf("--gateway-port");
-  const gatewayPort = gatewayIdx >= 0 ? Number(rest[gatewayIdx + 1]) : undefined;
+  const parsedGatewayPort = parseGatewayPort(rest);
+  if (parsedGatewayPort === "invalid") {
+    console.error("error: --gateway-port requires a numeric value");
+    process.exit(1);
+  }
+  const gatewayPort = parsedGatewayPort;
   const d = await startZero({ root, port: 4820, webDist, gatewayPort });
   console.log(`zero ready: http://127.0.0.1:${d.port}/?token=${d.token}`);
   if (d.gatewayInfo) {
