@@ -25,7 +25,7 @@ Full design and roadmap:
 
 ## Status
 
-M0–M4 are implemented on `main`:
+M0–M5 are implemented on `main`:
 
 - **M0** skeleton (daemon-served editor with save)
 - **M1** offline copilot (Chrome Nano + Ollama-compatible fallback)
@@ -36,11 +36,17 @@ M0–M4 are implemented on `main`:
 - **M4** chat / AgentRuntime (turn loop, layered system prompt, session
   persistence, token ledger, pruning/compaction, read-only tool calling,
   chat panel) — completes v1 scope
+- **M5** Zero Agents (daemon-side AgentRuntime, approval-gated write tools
+  `fs_write`/`fs_edit`/`run_command`, git checkpointing to a shadow branch,
+  headless `zero agent "task"` CLI, Anthropic Messages API-compatible model
+  gateway) — Nano is not yet wired into daemon-side runs; that lands with
+  the M7 Nano bridge
 
 Design and plugin docs:
 
 - [M3 design](docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md)
 - [M4 design](docs/superpowers/specs/2026-08-06-m4-chat-agentruntime-design.md)
+- [M5 design](docs/superpowers/specs/2026-08-07-m5-zero-agents-design.md)
 - [Plugins](docs/plugins.md)
 
 See the roadmap in the design spec for what follows (Zero Agents, Zero Lite,
