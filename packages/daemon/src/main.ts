@@ -1,5 +1,8 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { z } from "zod";
 import { createDaemon, type DaemonOptions } from "./server";
+import { startModelGateway } from "./modelGateway";
 import { Workspace } from "./workspace";
 import { PtyService } from "./pty";
 import { LspService } from "./lsp/service";
@@ -187,14 +190,26 @@ export async function startZero(opts: DaemonOptions) {
     }
   });
 
+  let gatewayInfo: { port: number; apiKey: string } | undefined;
+  let stopGateway: (() => void) | undefined;
+  if (opts.gatewayPort !== undefined) {
+    const providers = await buildProviders();
+    const gw = startModelGateway({ port: opts.gatewayPort, gateway: new ProviderGateway(providers) });
+    gatewayInfo = { port: gw.port, apiKey: gw.apiKey };
+    stopGateway = gw.stop;
+    await writeFile(join(opts.root, ".zero", "gateway-key"), gw.apiKey, "utf8").catch(() => {});
+  }
+
   const stop = daemon.stop;
   return {
     ...daemon,
     pluginsReady,
+    gatewayInfo,
     stop: () => {
       unwatch();
       pty.closeAll();
       lsp.dispose();
+      stopGateway?.();
       stop();
     },
   };

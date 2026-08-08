@@ -12,6 +12,11 @@ if (cmd === "agent") {
 } else {
   const root = resolve(cmd ?? ".");
   const webDist = new URL("../../web/dist", import.meta.url).pathname;
-  const d = await startZero({ root, port: 4820, webDist });
+  const gatewayIdx = rest.indexOf("--gateway-port");
+  const gatewayPort = gatewayIdx >= 0 ? Number(rest[gatewayIdx + 1]) : undefined;
+  const d = await startZero({ root, port: 4820, webDist, gatewayPort });
   console.log(`zero ready: http://127.0.0.1:${d.port}/?token=${d.token}`);
+  if (d.gatewayInfo) {
+    console.log(`model gateway: http://127.0.0.1:${d.gatewayInfo.port}/v1/messages (ANTHROPIC_API_KEY=${d.gatewayInfo.apiKey})`);
+  }
 }
