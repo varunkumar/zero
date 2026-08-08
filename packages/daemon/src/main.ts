@@ -139,9 +139,11 @@ export async function startZero(opts: DaemonOptions) {
       const turnId = crypto.randomUUID();
       activeTurns.set(turnId, { sessionId: p.sessionId, controller });
       (async () => {
+        let sawTerminalEvent = false;
         try {
           const rt = await runtimeFor(p.sessionId);
           for await (const event of rt.sendMessage(p.sessionId, p.userText, controller.signal)) {
+            if (event.type === "done" || event.type === "error") sawTerminalEvent = true;
             daemon.broadcast("chat/turnEvent", { turnId, event });
           }
         } catch (e) {
@@ -149,10 +151,21 @@ export async function startZero(opts: DaemonOptions) {
           // (it degrades to an "error" TurnEvent internally), but that's an
           // implicit invariant living in another file - don't let a future
           // change there silently drop the turn instead of surfacing it.
+          sawTerminalEvent = true;
           daemon.broadcast("chat/turnEvent", {
             turnId, event: { type: "error", message: e instanceof Error ? e.message : String(e) },
           });
         } finally {
+          // AgentRuntime.sendMessage has several `if (signal.aborted) return;`
+          // early-return points that end the generator without yielding a
+          // final "done"/"error" event - this only happens when the turn was
+          // aborted. Broadcast a synthetic terminal event here so every
+          // consumer of the wire protocol (not just ChatPanel, which has its
+          // own local abort-handling workaround) sees a definitive close
+          // signal instead of the stream just silently stopping.
+          if (!sawTerminalEvent) {
+            daemon.broadcast("chat/turnEvent", { turnId, event: { type: "error", message: "aborted" } });
+          }
           activeTurns.delete(turnId);
         }
       })();

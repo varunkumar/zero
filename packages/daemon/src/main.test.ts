@@ -282,6 +282,71 @@ test("chat/turn streams events and persists the turn (no tools, stub provider un
   ws.close(); d.stop();
 });
 
+test("chat/abort still produces a terminal chat/turnEvent broadcast, not silence", async () => {
+  // AgentRuntime.sendMessage has early-return points on an aborted signal
+  // that end the generator without yielding a final done/error event. The
+  // daemon must still broadcast a synthetic terminal event so every
+  // consumer of chat/turnEvent sees a definitive close signal rather than
+  // the stream just stopping.
+  //
+  // To actually exercise that early-return path (rather than the unrelated
+  // "no chat model available" path that fires unconditionally when no
+  // provider is reachable), stand up a fake OpenAI-compatible server that
+  // reports itself available but hangs forever on the actual chat
+  // completion request. The only way this turn can ever end is via abort.
+  const fake = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(req) {
+      const url = new URL(req.url);
+      if (url.pathname.endsWith("/models")) {
+        return new Response(JSON.stringify({ data: [] }), { headers: { "content-type": "application/json" } });
+      }
+      if (url.pathname.endsWith("/chat/completions")) {
+        return new Promise<Response>(() => {}); // never resolves
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  try {
+    await client.request("settings/set", { key: "zero.ollamaUrl", value: `http://127.0.0.1:${fake.port}/v1` });
+    const { id } = await client.request<{ id: string }>("chat/create", {});
+
+    const events: { type: string }[] = [];
+    const done = new Promise<void>((resolve) => {
+      client.onNotification((method, params) => {
+        if (method !== "chat/turnEvent") return;
+        const { event } = params as { event: { type: string } };
+        events.push(event);
+        resolve();
+      });
+    });
+
+    const { turnId } = await client.request<{ turnId: string }>("chat/turn", { sessionId: id, userText: "hi" });
+    // Give the turn a brief moment to actually reach the hanging fetch
+    // before aborting, so this exercises a mid-flight abort (not just an
+    // already-aborted signal at the very top of sendMessage).
+    await Bun.sleep(50);
+    await client.request("chat/abort", { turnId });
+    await done;
+
+    expect(events).toEqual([{ type: "error", message: "aborted" }]);
+  } finally {
+    fake.stop(true);
+    ws.close();
+    d.stop();
+  }
+});
+
 test("a second chat/turn for a session with an already-active turn is rejected, not raced", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   const d = await startZero({ root });
