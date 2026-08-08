@@ -4,6 +4,7 @@ import { anthropicRequestToChat, chatDeltaToSseEvents, finalSseEvents, createSse
 
 export interface ModelGatewayOpts { port?: number; apiKey?: string; gateway: ProviderGateway }
 
+// SSE streaming only; non-streaming `stream:false` requests are not yet supported.
 export function startModelGateway(opts: ModelGatewayOpts): { port: number; apiKey: string; stop(): void } {
   const apiKey = opts.apiKey ?? randomBytes(16).toString("hex");
 
