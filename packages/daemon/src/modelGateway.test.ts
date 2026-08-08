@@ -37,6 +37,22 @@ test("streams an SSE response for a valid request with the api key", async () =>
   gw.stop();
 });
 
+test("returns 400 for an invalid request body", async () => {
+  const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([stubProvider("hi")]) });
+  const resInvalidJson = await fetch(`http://127.0.0.1:${gw.port}/v1/messages`, {
+    method: "POST", headers: { "x-api-key": gw.apiKey }, body: "not json",
+  });
+  expect(resInvalidJson.status).toBe(400);
+
+  const resMissingMessages = await fetch(`http://127.0.0.1:${gw.port}/v1/messages`, {
+    method: "POST",
+    headers: { "x-api-key": gw.apiKey, "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  expect(resMissingMessages.status).toBe(400);
+  gw.stop();
+});
+
 test("returns 503 when no provider is available", async () => {
   const unavailable = { ...stubProvider("x"), available: async () => false };
   const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([unavailable]) });

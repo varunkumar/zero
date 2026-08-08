@@ -22,8 +22,13 @@ export function startModelGateway(opts: ModelGatewayOpts): { port: number; apiKe
       const provider = await opts.gateway.pick();
       if (!provider) return new Response("no model available", { status: 503 });
 
-      const body = await req.json();
-      const { messages, tools } = anthropicRequestToChat(body);
+      let messages, tools;
+      try {
+        const body = await req.json();
+        ({ messages, tools } = anthropicRequestToChat(body));
+      } catch (e) {
+        return new Response(`invalid request body: ${e instanceof Error ? e.message : String(e)}`, { status: 400 });
+      }
       const state = createSseState(provider.id);
       const controller = new AbortController();
       req.signal.addEventListener("abort", () => controller.abort());
