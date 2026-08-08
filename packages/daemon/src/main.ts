@@ -103,7 +103,7 @@ export async function startZero(opts: DaemonOptions) {
   daemon.rpc.register("chat/rename", z.object({ id: z.string(), title: z.string() }),
     async (p) => { await sessions.rename(p.id, p.title); return {}; });
   daemon.rpc.register("chat/delete", z.object({ id: z.string() }),
-    async (p) => { await sessions.delete(p.id); return {}; });
+    async (p) => { await sessions.delete(p.id); runtimeFor.evict(p.id); return {}; });
 
   const graphify = createGraphify();
 
@@ -168,7 +168,18 @@ export async function startZero(opts: DaemonOptions) {
   daemon.rpc.register("chat/abort", z.object({ turnId: z.string() }),
     async (p) => { activeTurns.get(p.turnId)?.controller.abort(); return {}; });
   daemon.rpc.register("chat/status", z.object({ sessionId: z.string() }),
-    async (p) => (await runtimeFor(p.sessionId)).status());
+    async (p) => {
+      // Status checks must not be a side-effecting construction trigger: the
+      // web ChatPanel calls chat/status on every session switch, so
+      // unconditionally calling runtimeFor here would populate the pool for
+      // every session ever viewed (including deleted ones) and grow it
+      // unboundedly over a long-running daemon. A session gets a real
+      // runtime the first time chat/turn actually runs for it - that's the
+      // correct trigger point. Until then, report the neutral "no chat
+      // model" status without building anything.
+      if (!runtimeFor.has(p.sessionId)) return { activeModel: null, reason: null };
+      return (await runtimeFor(p.sessionId)).status();
+    });
 
   const host = new PluginHost({
     rpc: daemon.rpc,

@@ -184,6 +184,55 @@ test("chat/* RPCs over the wire", async () => {
   ws.close(); d.stop();
 });
 
+test("chat/status doesn't construct a runtime for a never-turned session, and reflects the pool after chat/delete evicts it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+  const { id } = await client.request<{ id: string }>("chat/create", {});
+
+  // A session that has never had chat/turn called for it should report the
+  // neutral "no chat model" status without erroring or requiring a real
+  // provider - status checks must not be a side-effecting construction
+  // trigger (the web ChatPanel calls chat/status on every session switch).
+  const status = await client.request<{ activeModel: string | null; reason: string | null }>(
+    "chat/status", { sessionId: id },
+  );
+  expect(status).toEqual({ activeModel: null, reason: null });
+
+  // Start (and let finish) a turn so the pool actually has an entry for this
+  // session, then delete the session and confirm chat/status still degrades
+  // cleanly (deletion evicts the pool entry rather than leaking it forever).
+  const done = new Promise<void>((resolve) => {
+    client.onNotification((method, params) => {
+      if (method !== "chat/turnEvent") return;
+      const { event } = params as { event: { type: string } };
+      if (event.type === "error" || event.type === "done") resolve();
+    });
+  });
+  await client.request("chat/turn", { sessionId: id, userText: "hi" });
+  await done;
+
+  // Now that a turn has actually run, the pool has a real cached runtime
+  // for this session, and chat/status reflects its (non-neutral) status -
+  // distinguishing this from the "never constructed" neutral default above.
+  const statusAfterTurn = await client.request<{ activeModel: string | null; reason: string | null }>(
+    "chat/status", { sessionId: id },
+  );
+  expect(statusAfterTurn.reason).toBe("no chat model available");
+
+  await client.request("chat/delete", { id });
+  const statusAfterDelete = await client.request<{ activeModel: string | null; reason: string | null }>(
+    "chat/status", { sessionId: id },
+  );
+  expect(statusAfterDelete).toEqual({ activeModel: null, reason: null });
+
+  ws.close(); d.stop();
+});
+
 test("chat/turn streams events and persists the turn (no tools, stub provider unavailable -> error event)", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   const d = await startZero({ root });

@@ -54,6 +54,28 @@ test("a failed construction is evicted, so a later call retries instead of re-re
   expect(buildCalls).toBe(2);
 });
 
+test("has() reports cached state without triggering a build, and evict() removes an entry so a later call rebuilds fresh", async () => {
+  let buildCalls = 0;
+  const runtimeFor = createRuntimePool(async (sessionId) => {
+    buildCalls++;
+    return { sessionId } as unknown as AgentRuntime;
+  });
+
+  expect(runtimeFor.has("s1")).toBe(false);
+  expect(buildCalls).toBe(0);
+
+  const a = await runtimeFor("s1");
+  expect(runtimeFor.has("s1")).toBe(true);
+  expect(buildCalls).toBe(1);
+
+  runtimeFor.evict("s1");
+  expect(runtimeFor.has("s1")).toBe(false);
+
+  const b = await runtimeFor("s1");
+  expect(buildCalls).toBe(2);
+  expect(b).not.toBe(a);
+});
+
 test("concurrent callers during a failed construction all see the same rejection (no separate builds)", async () => {
   let buildCalls = 0;
   const runtimeFor = createRuntimePool(async (sessionId) => {
