@@ -30,6 +30,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
     const turnId = turnIdRef.current;
     if (turnId) client.request("chat/abort", { turnId }).catch(() => {});
     finishTurnRef.current?.();
+    setPendingApproval(null);
   }
 
   const sessions = chatStore.getSessions();
