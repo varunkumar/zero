@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { stat, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcClient, type SocketLike } from "@zero/protocol";
@@ -182,6 +183,25 @@ test("chat/* RPCs over the wire", async () => {
   expect((await client.request<{ sessions: unknown[] }>("chat/list")).sessions).toEqual([]);
 
   ws.close(); d.stop();
+});
+
+test("gateway-key is written to a fresh workspace with no prior .zero/ directory, mode 0600", async () => {
+  // A genuinely fresh workspace has no .zero/ directory yet - it's created
+  // lazily elsewhere (SessionStore.create/writeSetting), so starting with
+  // --gateway-port and no prior session must not silently ENOENT.
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root, gatewayPort: 0 });
+
+  const keyPath = join(root, ".zero", "gateway-key");
+  const content = await readFile(keyPath, "utf8");
+  expect(content).toBe(d.gatewayInfo!.apiKey);
+
+  if (process.platform !== "win32") {
+    const st = await stat(keyPath);
+    expect(st.mode & 0o777).toBe(0o600);
+  }
+
+  d.stop();
 });
 
 test("chat/status doesn't construct a runtime for a never-turned session, and reflects the pool after chat/delete evicts it", async () => {

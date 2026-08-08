@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { createDaemon, type DaemonOptions } from "./server";
@@ -208,7 +208,9 @@ export async function startZero(opts: DaemonOptions) {
     const gw = startModelGateway({ port: opts.gatewayPort, gateway: new ProviderGateway(providers) });
     gatewayInfo = { port: gw.port, apiKey: gw.apiKey };
     stopGateway = gw.stop;
-    await writeFile(join(opts.root, ".zero", "gateway-key"), gw.apiKey, "utf8").catch(() => {});
+    await mkdir(join(opts.root, ".zero"), { recursive: true })
+      .then(() => writeFile(join(opts.root, ".zero", "gateway-key"), gw.apiKey, { encoding: "utf8", mode: 0o600 }))
+      .catch((e) => console.warn(`zero: failed to write .zero/gateway-key (${e instanceof Error ? e.message : String(e)})`));
   }
 
   const stop = daemon.stop;
