@@ -8,17 +8,19 @@ interface AnthropicMessage { role: "user" | "assistant"; content: string | Anthr
 interface AnthropicTool { name: string; description: string; input_schema: object }
 interface AnthropicRequest { system?: string; messages: AnthropicMessage[]; tools?: AnthropicTool[] }
 
-function blockText(content: string | AnthropicContentBlock[]): { text: string; toolCalls?: ChatToolCall[]; toolResult?: { id: string; content: string } } {
+interface ParsedBlock { text: string; toolCalls?: ChatToolCall[]; toolResults?: { id: string; content: string }[] }
+
+function blockText(content: string | AnthropicContentBlock[]): ParsedBlock {
   if (typeof content === "string") return { text: content };
   const toolCalls: ChatToolCall[] = [];
+  const toolResults: { id: string; content: string }[] = [];
   let text = "";
-  let toolResult: { id: string; content: string } | undefined;
   for (const block of content) {
     if (block.type === "text") text += block.text;
     else if (block.type === "tool_use") toolCalls.push({ id: block.id, name: block.name, args: block.input });
-    else if (block.type === "tool_result") toolResult = { id: block.tool_use_id, content: block.content };
+    else if (block.type === "tool_result") toolResults.push({ id: block.tool_use_id, content: block.content });
   }
-  return { text, toolCalls: toolCalls.length ? toolCalls : undefined, toolResult };
+  return { text, toolCalls: toolCalls.length ? toolCalls : undefined, toolResults: toolResults.length ? toolResults : undefined };
 }
 
 export function anthropicRequestToChat(body: unknown): { messages: ChatMessage[]; tools: ChatToolSpec[] } {
@@ -27,9 +29,11 @@ export function anthropicRequestToChat(body: unknown): { messages: ChatMessage[]
   if (req.system) messages.push({ role: "system", content: req.system, createdAt: Date.now() });
 
   for (const m of req.messages) {
-    const { text, toolCalls, toolResult } = blockText(m.content);
-    if (toolResult) {
-      messages.push({ role: "tool", content: toolResult.content, toolCallId: toolResult.id, createdAt: Date.now() });
+    const { text, toolCalls, toolResults } = blockText(m.content);
+    if (toolResults) {
+      for (const tr of toolResults) {
+        messages.push({ role: "tool", content: tr.content, toolCallId: tr.id, createdAt: Date.now() });
+      }
       continue;
     }
     messages.push({ role: m.role, content: text, toolCalls, createdAt: Date.now() });
@@ -39,10 +43,10 @@ export function anthropicRequestToChat(body: unknown): { messages: ChatMessage[]
   return { messages, tools };
 }
 
-export interface SseState { messageStarted: boolean; blockStarted: boolean; model: string; toolCallIndex: number }
+export interface SseState { messageStarted: boolean; textBlockIndex: number | null; nextIndex: number; model: string }
 
 export function createSseState(model: string): SseState {
-  return { messageStarted: false, blockStarted: false, model, toolCallIndex: 0 };
+  return { messageStarted: false, textBlockIndex: null, nextIndex: 0, model };
 }
 
 function sse(event: string, data: unknown): string {
@@ -59,15 +63,15 @@ export function chatDeltaToSseEvents(delta: ChatDelta, state: SseState): string[
     }));
   }
   if (delta.text) {
-    if (!state.blockStarted) {
-      state.blockStarted = true;
-      out.push(sse("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
+    if (state.textBlockIndex === null) {
+      state.textBlockIndex = state.nextIndex++;
+      out.push(sse("content_block_start", { type: "content_block_start", index: state.textBlockIndex, content_block: { type: "text", text: "" } }));
     }
-    out.push(sse("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: delta.text } }));
+    out.push(sse("content_block_delta", { type: "content_block_delta", index: state.textBlockIndex, delta: { type: "text_delta", text: delta.text } }));
   }
   if (delta.toolCalls) {
     for (const call of delta.toolCalls) {
-      const index = ++state.toolCallIndex;
+      const index = state.nextIndex++;
       out.push(sse("content_block_start", { type: "content_block_start", index, content_block: { type: "tool_use", id: call.id, name: call.name, input: {} } }));
       out.push(sse("content_block_delta", { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(call.args) } }));
       out.push(sse("content_block_stop", { type: "content_block_stop", index }));
@@ -78,7 +82,7 @@ export function chatDeltaToSseEvents(delta: ChatDelta, state: SseState): string[
 
 export function finalSseEvents(state: SseState, stopReason: "end_turn" | "tool_use"): string[] {
   const out: string[] = [];
-  if (state.blockStarted) out.push(sse("content_block_stop", { type: "content_block_stop", index: 0 }));
+  if (state.textBlockIndex !== null) out.push(sse("content_block_stop", { type: "content_block_stop", index: state.textBlockIndex }));
   out.push(sse("message_delta", { type: "message_delta", delta: { stop_reason: stopReason }, usage: { output_tokens: 0 } }));
   out.push(sse("message_stop", { type: "message_stop" }));
   return out;
