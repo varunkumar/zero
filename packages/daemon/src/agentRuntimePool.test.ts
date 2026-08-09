@@ -50,7 +50,7 @@ test("a failed construction is evicted, so a later call retries instead of re-re
   await Bun.sleep(0);
 
   const rt = await runtimeFor("s1");
-  expect(rt).toEqual({ sessionId: "s1" });
+  expect(rt).toEqual({ sessionId: "s1" } as unknown as AgentRuntime);
   expect(buildCalls).toBe(2);
 });
 

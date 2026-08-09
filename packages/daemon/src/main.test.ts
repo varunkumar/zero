@@ -321,11 +321,11 @@ test("chat/abort still produces a terminal chat/turnEvent broadcast, not silence
     await client.request("settings/set", { key: "zero.ollamaUrl", value: `http://127.0.0.1:${fake.port}/v1` });
     const { id } = await client.request<{ id: string }>("chat/create", {});
 
-    const events: { type: string }[] = [];
+    const events: { type: string; message?: string }[] = [];
     const done = new Promise<void>((resolve) => {
       client.onNotification((method, params) => {
         if (method !== "chat/turnEvent") return;
-        const { event } = params as { event: { type: string } };
+        const { event } = params as { event: { type: string; message?: string } };
         events.push(event);
         resolve();
       });
@@ -357,9 +357,9 @@ test("a second chat/turn for a session with an already-active turn is rejected, 
   const client = new RpcClient(wsAdapter(ws));
   const { id } = await client.request<{ id: string }>("chat/create", {});
 
-  const turnEvents: { turnId: string; event: { type: string } }[] = [];
+  const turnEvents: { turnId: string; event: { type: string; message?: string } }[] = [];
   client.onNotification((method, params) => {
-    if (method === "chat/turnEvent") turnEvents.push(params as { turnId: string; event: { type: string } });
+    if (method === "chat/turnEvent") turnEvents.push(params as { turnId: string; event: { type: string; message?: string } });
   });
 
   // Fire two chat/turn RPCs back-to-back, without awaiting the first, so
