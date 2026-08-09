@@ -63,6 +63,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const { theme, toggle: toggleTheme } = useTheme();
   const { stdout } = useStdout();
   const [rows, setRows] = useState(stdout.rows || 24);
+  const [columns, setColumns] = useState(stdout.columns || 80);
   const [lines, setLines] = useState<Line[]>(() => initialLines.map((text) => ({ id: nextLineId(), text })));
   const [streamingText, setStreamingText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -74,7 +75,10 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const hasSentRef = useRef(false);
 
   useEffect(() => {
-    const onResize = () => setRows(stdout.rows || 24);
+    const onResize = () => {
+      setRows(stdout.rows || 24);
+      setColumns(stdout.columns || 80);
+    };
     stdout.on("resize", onResize);
     return () => { stdout.off("resize", onResize); };
   }, [stdout]);
@@ -184,14 +188,44 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   // live region's computed height reaches stdout.rows. Reserving one row
   // keeps every render under that threshold.
   const totalHeight = Math.max(3, rows - 1);
-  const liveExtra = (busy && status ? 1 : 0) + (streamingText ? 1 : 0);
+  // Ink wraps Text content at the terminal width by default, so a single
+  // pushed "line" (e.g. a long assistant reply) can occupy several actual
+  // terminal rows. Slicing by array-index count alone under-counts that,
+  // letting the real rendered height creep past totalHeight until it
+  // reaches stdout.rows again - re-triggering Ink's full-clear-and-rewrite
+  // (this file's original bug) after enough long messages accumulate.
+  // Walk from the newest line backward, accounting for wrapped row height,
+  // so the slice always fits the actual space available.
+  const rowsForText = (text: string) => Math.max(1, Math.ceil((text.length || 1) / Math.max(1, columns)));
+  const streamingRows = streamingText ? rowsForText(streamingText) : 0;
+  const liveExtra = (busy && status ? 1 : 0) + streamingRows;
   const middleHeight = Math.max(0, totalHeight - HEADER_HEIGHT - footerHeight - liveExtra);
-  const visibleLines = lines.slice(-middleHeight);
+  const visibleLines: Line[] = [];
+  let usedRows = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    const rowsNeeded = rowsForText(line.text);
+    // A single message longer than the whole budget (e.g. one huge
+    // unbroken paragraph) would otherwise make the loop bail before
+    // adding anything, leaving the transcript blank. Always show at
+    // least the newest line - overflow="hidden" on the container clips
+    // any excess rather than pushing the header/footer around.
+    if (usedRows + rowsNeeded > middleHeight && visibleLines.length > 0) break;
+    usedRows += rowsNeeded;
+    visibleLines.unshift(line);
+    if (usedRows >= middleHeight) break;
+  }
 
   return (
     <Box flexDirection="column" height={totalHeight} overflow="hidden">
       <Banner cwd={cwd} version={version} subtitle="/exit to quit · esc cancels a turn · / for commands" />
-      <Box flexDirection="column" flexGrow={1} overflow="hidden">
+      {/* overflow="hidden" only clips painting - Yoga still sizes a
+          flexGrow box to fit its content unless height is pinned, which
+          let long-wrapped transcript content balloon past totalHeight and
+          squeeze the header/footer instead of being clipped. An explicit
+          height plus flexShrink=0 makes this box (and its siblings below)
+          immovable regardless of content length. */}
+      <Box flexDirection="column" height={middleHeight} flexShrink={0} overflow="hidden">
         {visibleLines.map((line) => (
           <Text key={line.id} color={line.color} bold={line.bold} dimColor={line.dim}>
             {line.text || " "}
@@ -203,7 +237,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       {pending ? (
         <ApprovalPrompt call={pending.call} preview={pending.preview} onResolve={onResolveApproval} />
       ) : (
-        <Box flexDirection="column">
+        <Box flexDirection="column" flexShrink={0}>
           <Box borderStyle="round" borderColor={theme.accent} paddingX={1}>
             <Text color={theme.accent}>{"> "}</Text>
             <TextInput value={input} onChange={setInput} onSubmit={onSubmit} focus={!busy} />

@@ -7,9 +7,7 @@ export interface Theme {
   name: ThemeName;
   /** Primary accent for borders, highlights, and the active prompt caret. */
   accent: string;
-  /** Color for the logo's dense "disc" fill (the "@" density class). */
-  logoBg: string;
-  /** Per-row colors for the logo's diagonal swoosh gradient, top -> bottom. */
+  /** Per-row colors for the logo's "Z" stroke gradient, top -> bottom. */
   logoColors: string[];
   /** Color for collapsed tool-call summary lines. */
   toolLine: string;
@@ -22,10 +20,6 @@ export interface Theme {
 const DARK: Theme = {
   name: "dark",
   accent: "cyan",
-  // Pure "black" would be invisible on a typical dark terminal background,
-  // so the disc uses a dim grey that still reads as "the dark part" next
-  // to the bright swoosh.
-  logoBg: "gray",
   logoColors: [
     "cyan", "cyan", "cyanBright", "blueBright", "blue", "blue",
     "magenta", "magenta", "magentaBright", "magentaBright", "magenta",
@@ -38,7 +32,6 @@ const DARK: Theme = {
 const LIGHT: Theme = {
   name: "light",
   accent: "blue",
-  logoBg: "black",
   // Bright cyan/blue wash out against a white background - the light
   // palette leans on darker, higher-contrast tones instead.
   logoColors: [

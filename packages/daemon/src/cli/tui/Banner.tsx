@@ -3,32 +3,32 @@ import React from "react";
 import { Box, Text } from "ink";
 import { useTheme, type Theme } from "./theme";
 
-// A shaded, circular ASCII rendition of the actual Zero mark (see
-// packages/web/public/zero-mark-*.png): a dark disc with a bright diagonal
-// "Z" swoosh cut through it, density-shaded like a halftone print rather
-// than solid block letters. "@" is the disc; "#"/"*"/"+"/"=" grade from
-// dim to bright along the swoosh.
+// A blocky ASCII rendition of the actual Zero mark (see
+// docs/assets/zero-logo-dark.png): a thick, rounded "Z" stroke - flat top
+// and bottom bars joined by a diagonal - shaded top-to-bottom along
+// theme.logoColors (cyan -> blue -> purple, matching the source mark's
+// gradient) rather than drawn as flat single-color block letters.
 const LOGO_SHAPE = [
-  "     #@@@@@      ",
-  "   ++*##@@@@@    ",
-  "  +==+**#@@@@@   ",
-  " **+==++*##@@@@  ",
-  " ##*++==+**#@@@  ",
-  "@@@#**+===+**#@@ ",
-  " @@@@#**+==++*#  ",
-  " @@@@@##*++==+*  ",
-  "  @@@@@@#**+==   ",
-  "   @@@@@@##*+    ",
-  "     @@@@@@      ",
+  "  ###############  ",
+  "  ###############  ",
+  "               ##  ",
+  "             ##    ",
+  "           ##      ",
+  "          ##       ",
+  "        ##         ",
+  "      ##           ",
+  "    ##             ",
+  "  ###############  ",
+  "  ###############  ",
 ];
 
 interface Run { text: string; color: string }
 
 function shadeRuns(theme: Theme, row: string, rowIndex: number): Run[] {
-  const swooshColor = theme.logoColors[rowIndex] ?? theme.accent;
+  const strokeColor = theme.logoColors[rowIndex] ?? theme.accent;
   const runs: Run[] = [];
   for (const ch of row) {
-    const color = ch === "@" ? theme.logoBg : ch === " " ? "" : swooshColor;
+    const color = ch === " " ? "" : strokeColor;
     const last = runs[runs.length - 1];
     if (last && last.color === color) last.text += ch;
     else runs.push({ text: ch, color });
@@ -46,7 +46,7 @@ export interface BannerProps {
 export function Banner({ cwd, version, subtitle }: BannerProps) {
   const { theme } = useTheme();
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.accent} paddingX={1} marginBottom={1}>
+    <Box flexDirection="column" flexShrink={0} borderStyle="round" borderColor={theme.accent} paddingX={1} marginBottom={1}>
       {LOGO_SHAPE.map((row, i) => (
         <Text key={i}>
           {shadeRuns(theme, row, i).map((run, j) => (

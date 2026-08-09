@@ -22,7 +22,7 @@ export function ApprovalPrompt({ call, preview, onResolve }: ApprovalPromptProps
   });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+    <Box flexDirection="column" flexShrink={0} borderStyle="round" borderColor="yellow" paddingX={1}>
       <Text color="yellow">approval requested: {call.name}</Text>
       <Text>{preview}</Text>
       <Box gap={2}>

@@ -61,6 +61,30 @@ test("header stays fully visible and the newest lines stay in view when the tran
   expect(frameHeight).toBeLessThan(24);
 });
 
+test("a long, unbroken assistant reply does not corrupt the header or footer layout", async () => {
+  const longText = "This is a very long assistant reply that wraps across several terminal rows because it exceeds the terminal width easily and keeps going on and on. ".repeat(3);
+  const runtime = fakeRuntime([
+    { type: "text", delta: longText },
+    { type: "done", message: { role: "assistant", content: longText, createdAt: 0 } },
+  ]);
+  const { stdin, lastFrame } = render(
+    <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  await typeAndSubmit(stdin, "hi");
+  await tick();
+  const frame = lastFrame() ?? "";
+  // The header banner must render intact (all border rows present, none
+  // squeezed out by the wrapped content below it)...
+  const borderTopCount = (frame.match(/╭/g) ?? []).length;
+  const borderBottomCount = (frame.match(/╰/g) ?? []).length;
+  expect(borderTopCount).toBe(borderBottomCount);
+  expect(frame).toContain("v0.0.0-test");
+  // ...and the footer's input box must render as its own clean bordered
+  // box, not merged with overflowing transcript text on the same line.
+  expect(frame).toMatch(/╰─+╯/);
+});
+
 test("submitting input streams assistant text into the transcript", async () => {
   const runtime = fakeRuntime([
     { type: "text", delta: "hi " },
