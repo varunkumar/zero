@@ -54,6 +54,16 @@ export async function startZero(opts: DaemonOptions) {
     async () => ({ entries: await ws.tree() }));
   daemon.rpc.register("fs/search", z.object({ query: z.string(), caseSensitive: z.boolean().optional() }),
     async (p) => ws.search(p.query, p.caseSensitive));
+  daemon.rpc.register("fs/create", z.object({ path: z.string(), kind: z.enum(["file", "dir"]) }),
+    async (p) => { await ws.create(p.path, p.kind); return {}; });
+  daemon.rpc.register("fs/rename", z.object({ path: z.string(), newPath: z.string() }),
+    async (p) => { await ws.rename(p.path, p.newPath); return {}; });
+  daemon.rpc.register("fs/delete", z.object({ path: z.string() }),
+    async (p) => { await ws.delete(p.path); return {}; });
+  daemon.rpc.register("fs/move", z.object({ path: z.string(), newPath: z.string() }),
+    async (p) => { await ws.move(p.path, p.newPath); return {}; });
+  daemon.rpc.register("fs/copy", z.object({ path: z.string(), newPath: z.string() }),
+    async (p) => { await ws.copy(p.path, p.newPath); return {}; });
   daemon.rpc.register("settings/get", z.object({ key: z.string() }),
     async (p) => ({ value: await ws.readSetting(p.key) }));
   daemon.rpc.register("settings/set", z.object({ key: z.string(), value: z.unknown() }),

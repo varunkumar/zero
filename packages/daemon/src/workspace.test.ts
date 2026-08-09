@@ -131,6 +131,83 @@ test("search skips binary files", async () => {
   expect(result.matches.some((m) => m.path === "bin.dat")).toBe(false);
 });
 
+test("create makes a file, and a directory", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.create("a.txt", "file");
+  expect(await ws.read("a.txt")).toBe("");
+  await ws.create("sub", "dir");
+  expect((await ws.tree()).some((e) => e.path === "sub" && e.kind === "dir")).toBe(true);
+});
+
+test("create rejects a path outside the workspace root", async () => {
+  const ws = new Workspace(makeProject());
+  await expect(ws.create("../escape.txt", "file")).rejects.toThrow(PathOutsideWorkspaceError);
+});
+
+test("rename moves a file to a new relative path", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.rename("a.txt", "b.txt");
+  expect(await ws.read("b.txt")).toBe("hi");
+  await expect(ws.read("a.txt")).rejects.toThrow();
+});
+
+test("delete removes a file", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.delete("a.txt");
+  await expect(ws.read("a.txt")).rejects.toThrow();
+});
+
+test("delete removes a directory recursively", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("dir/a.txt", "hi");
+  await ws.delete("dir");
+  expect((await ws.tree()).some((e) => e.path.startsWith("dir"))).toBe(false);
+});
+
+test("move relocates a file into another directory", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.create("dest", "dir");
+  await ws.move("a.txt", "dest/a.txt");
+  expect(await ws.read("dest/a.txt")).toBe("hi");
+});
+
+test("copy duplicates a file, leaving the original in place", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.copy("a.txt", "b.txt");
+  expect(await ws.read("a.txt")).toBe("hi");
+  expect(await ws.read("b.txt")).toBe("hi");
+});
+
+test("copy onto an existing path rejects rather than overwriting", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.write("b.txt", "existing");
+  await expect(ws.copy("a.txt", "b.txt")).rejects.toThrow();
+  expect(await ws.read("b.txt")).toBe("existing");
+});
+
+test("create rejects a file that already exists", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await expect(ws.create("a.txt", "file")).rejects.toThrow();
+  expect(await ws.read("a.txt")).toBe("hi");
+});
+
+test("delete rejects a path outside the workspace root", async () => {
+  const ws = new Workspace(makeProject());
+  await expect(ws.delete("../escape.txt")).rejects.toThrow(PathOutsideWorkspaceError);
+});
+
+test("rename rejects when destination is outside the workspace root", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await expect(ws.rename("a.txt", "../escape.txt")).rejects.toThrow(PathOutsideWorkspaceError);
+});
+
 test("readSetting returns undefined when nothing has been written", async () => {
   const ws = new Workspace(makeProject());
   expect(await ws.readSetting("workbench")).toBeUndefined();

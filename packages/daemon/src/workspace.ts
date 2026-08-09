@@ -70,6 +70,39 @@ export class Workspace {
     await fs.writeFile(await this.#resolveReal(rel), content, "utf8");
   }
 
+  async create(rel: string, kind: "file" | "dir"): Promise<void> {
+    const abs = this.#resolve(rel);
+    if (kind === "dir") {
+      await fs.mkdir(await this.#resolveReal(rel).catch(() => abs), { recursive: true });
+    } else {
+      await fs.mkdir(dirname(abs), { recursive: true });
+      await fs.writeFile(abs, "", { flag: "wx" });
+    }
+  }
+
+  async rename(rel: string, newRel: string): Promise<void> {
+    const from = await this.#resolveReal(rel);
+    const to = this.#resolve(newRel);
+    await fs.mkdir(dirname(to), { recursive: true });
+    await fs.rename(from, to);
+  }
+
+  async delete(rel: string): Promise<void> {
+    const abs = await this.#resolveReal(rel);
+    await fs.rm(abs, { recursive: true, force: false });
+  }
+
+  async move(rel: string, newRel: string): Promise<void> {
+    return this.rename(rel, newRel);
+  }
+
+  async copy(rel: string, newRel: string): Promise<void> {
+    const from = await this.#resolveReal(rel);
+    const to = this.#resolve(newRel);
+    await fs.mkdir(dirname(to), { recursive: true });
+    await fs.cp(from, to, { recursive: true, errorOnExist: true });
+  }
+
   async #ignorer(): Promise<Ignore> {
     const ig = ignore().add([".git", ".zero"]);
     try { ig.add(await fs.readFile(join(this.#root, ".gitignore"), "utf8")); } catch {}

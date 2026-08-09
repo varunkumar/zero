@@ -35,6 +35,29 @@ test("fs methods over the wire, watcher broadcasts", async () => {
   ws.close(); d.stop();
 });
 
+test("fs/create, fs/rename, fs/delete over the wire", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  await client.request("fs/create", { path: "a.txt", kind: "file" });
+  expect((await client.request<{ content: string }>("fs/read", { path: "a.txt" })).content).toBe("");
+
+  await client.request("fs/rename", { path: "a.txt", newPath: "b.txt" });
+  expect((await client.request<{ entries: { path: string }[] }>("fs/tree")).entries
+    .map((e) => e.path)).toContain("b.txt");
+
+  await client.request("fs/delete", { path: "b.txt" });
+  expect((await client.request<{ entries: { path: string }[] }>("fs/tree")).entries
+    .map((e) => e.path)).not.toContain("b.txt");
+
+  ws.close(); d.stop();
+});
+
 test("fs/search and settings RPCs over the wire", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   writeFileSync(join(root, "a.ts"), "const target = 1;\n");
