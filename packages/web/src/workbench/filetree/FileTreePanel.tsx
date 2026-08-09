@@ -159,6 +159,10 @@ function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
       }}
       onContextMenu={(e) => {
         e.preventDefault();
+        // Stop this from also reaching the container's own onContextMenu
+        // (the root-level "New File"/"New Folder" menu), which would
+        // otherwise fire right after this one for every row right-click.
+        e.stopPropagation();
         actions?.onContextMenu(e, node);
       }}
     >
@@ -191,7 +195,11 @@ export const FileTreePanel = forwardRef<
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 240, height: 500 });
-  const [menu, setMenu] = useState<{ x: number; y: number; node: NodeApi<Node> } | null>(null);
+  // `node: null` represents the root/empty-area menu (right-click below the
+  // last row, or on an empty tree) - it only offers New File/New Folder/
+  // Paste, targeting the workspace root, since there's no entry to rename,
+  // delete, cut, or copy.
+  const [menu, setMenu] = useState<{ x: number; y: number; node: NodeApi<Node> | null } | null>(null);
   const [clipboard, setClipboard] = useState<{ path: string; mode: "cut" | "copy" } | null>(null);
   // The last node selected in the tree (file or directory), independent of
   // `activePath` (which only tracks the *open* file) - keyboard-driven
@@ -301,6 +309,13 @@ export const FileTreePanel = forwardRef<
     <div
       ref={containerRef}
       style={{ height: "100%", width: "100%", background: "var(--zero-sidebar-bg)", color: "var(--zero-sidebar-fg)" }}
+      onContextMenu={(e) => {
+        // Only reached for right-clicks on empty space - any row's own
+        // onContextMenu already stopped propagation before this fires.
+        e.preventDefault();
+        setSelected(null);
+        setMenu({ x: e.clientX, y: e.clientY, node: null });
+      }}
     >
       {error && (
         <div role="alert" style={{ padding: 8, fontSize: 14, color: "var(--zero-error-fg, crimson)" }}>
@@ -341,26 +356,45 @@ export const FileTreePanel = forwardRef<
           }}
           onMouseLeave={() => setMenu(null)}
         >
-          {menu.node.data.kind === "dir" && (
-            <MenuItem onClick={() => { void handleCreate("file", menu.node.data.id); setMenu(null); }}>New File</MenuItem>
+          {menu.node === null ? (
+            <>
+              <MenuItem onClick={() => { void handleCreate("file", ""); setMenu(null); }}>New File</MenuItem>
+              <MenuItem onClick={() => { void handleCreate("dir", ""); setMenu(null); }}>New Folder</MenuItem>
+              <MenuItem
+                disabled={!clipboard}
+                onClick={() => {
+                  if (!clipboard) return;
+                  void handlePaste("");
+                  setMenu(null);
+                }}
+              >
+                Paste
+              </MenuItem>
+            </>
+          ) : (
+            <>
+              {menu.node.data.kind === "dir" && (
+                <MenuItem onClick={() => { void handleCreate("file", menu.node!.data.id); setMenu(null); }}>New File</MenuItem>
+              )}
+              {menu.node.data.kind === "dir" && (
+                <MenuItem onClick={() => { void handleCreate("dir", menu.node!.data.id); setMenu(null); }}>New Folder</MenuItem>
+              )}
+              <MenuItem onClick={() => { void handleRename(menu.node!.data.id); setMenu(null); }}>Rename</MenuItem>
+              <MenuItem onClick={() => { void handleDelete(menu.node!.data.id); setMenu(null); }}>Delete</MenuItem>
+              <MenuItem onClick={() => { setClipboard({ path: menu.node!.data.id, mode: "cut" }); setMenu(null); }}>Cut</MenuItem>
+              <MenuItem onClick={() => { setClipboard({ path: menu.node!.data.id, mode: "copy" }); setMenu(null); }}>Copy</MenuItem>
+              <MenuItem
+                disabled={!clipboard}
+                onClick={() => {
+                  if (!clipboard) return;
+                  void handlePaste(menu.node!.data.kind === "dir" ? menu.node!.data.id : containingDir(menu.node!.data.id, "file"));
+                  setMenu(null);
+                }}
+              >
+                Paste
+              </MenuItem>
+            </>
           )}
-          {menu.node.data.kind === "dir" && (
-            <MenuItem onClick={() => { void handleCreate("dir", menu.node.data.id); setMenu(null); }}>New Folder</MenuItem>
-          )}
-          <MenuItem onClick={() => { void handleRename(menu.node.data.id); setMenu(null); }}>Rename</MenuItem>
-          <MenuItem onClick={() => { void handleDelete(menu.node.data.id); setMenu(null); }}>Delete</MenuItem>
-          <MenuItem onClick={() => { setClipboard({ path: menu.node.data.id, mode: "cut" }); setMenu(null); }}>Cut</MenuItem>
-          <MenuItem onClick={() => { setClipboard({ path: menu.node.data.id, mode: "copy" }); setMenu(null); }}>Copy</MenuItem>
-          <MenuItem
-            disabled={!clipboard}
-            onClick={() => {
-              if (!clipboard) return;
-              void handlePaste(menu.node.data.kind === "dir" ? menu.node.data.id : containingDir(menu.node.data.id, "file"));
-              setMenu(null);
-            }}
-          >
-            Paste
-          </MenuItem>
         </div>
       )}
     </div>
