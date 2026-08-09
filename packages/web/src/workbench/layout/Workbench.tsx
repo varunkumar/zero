@@ -42,6 +42,18 @@ function errorText(e: unknown): string {
 
 const editorPanelId = (groupId: string) => `editor:${groupId}`;
 
+/** Decide what action to take on a bottom panel request, given the current state.
+ * Exported for testing in isolation without a real dockapi. */
+export function getBottomPanelAction(
+  panelExists: boolean,
+  currentView: "terminal" | "chat",
+  requestedView: "terminal" | "chat",
+): "add" | "remove" | "switch" | "none" {
+  if (!panelExists) return "add";
+  if (currentView === requestedView) return "remove";
+  return "switch";
+}
+
 /** Value shared with the dockview-hosted panels.
  *
  * dockview captures a panel's React component **once**, at `addPanel` time
@@ -760,7 +772,12 @@ export function Workbench(props: { client: RpcClient }) {
       const api = dockApi.current;
       if (!api) return;
       const panel = api.getPanel(BOTTOM_PANEL_ID);
-      if (panel && bottomView === view) { api.removePanel(panel); return; }
+      const action = getBottomPanelAction(!!panel, bottomView, view);
+      if (action === "remove" && panel) {
+        api.removePanel(panel);
+        return;
+      }
+      // action is "add" or "switch" — both lead to showing the panel with the requested view
       actionsRef.current.showBottomPanel(view);
     },
     newTerminal: () => {

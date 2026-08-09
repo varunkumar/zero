@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { RpcClient } from "@zero/protocol";
-import { BottomPanel, WorkbenchContext } from "./Workbench";
+import { BottomPanel, WorkbenchContext, getBottomPanelAction } from "./Workbench";
 import { PtyStore } from "../terminal/store";
 import { ChatStore } from "../chat/store";
 import { TurnStore } from "../chat/turnStore";
@@ -22,6 +22,8 @@ const fakeClient = {
 } as unknown as RpcClient;
 
 function renderBottomPanel(bottomView: "terminal" | "chat") {
+  // BottomPanel only reads these fields from context; the test doesn't need
+  // to provide or type-check the full WorkbenchContextValue.
   const contextValue = {
     client: fakeClient,
     ptyStore: new PtyStore(),
@@ -32,7 +34,7 @@ function renderBottomPanel(bottomView: "terminal" | "chat") {
     setBottomView: () => {},
   };
   return renderToStaticMarkup(
-    <WorkbenchContext.Provider value={contextValue as never}>
+    <WorkbenchContext.Provider value={contextValue as any}>
       <BottomPanel />
     </WorkbenchContext.Provider>,
   );
@@ -45,6 +47,9 @@ describe("BottomPanel", () => {
     expect(html).toContain(">Chat<");
     // An empty PtyStore renders TerminalPanel's empty state, not ChatPanel's.
     expect(html).toContain("No terminals open");
+    // Positive assertion: Terminal button should have aria-pressed="true"
+    expect(html).toContain("aria-pressed=\"true\">Terminal<");
+    // Negative assertion: Chat button should not have aria-pressed="true"
     expect(html).not.toContain("aria-pressed=\"true\">Chat<");
   });
 
@@ -56,5 +61,52 @@ describe("BottomPanel", () => {
     // SidebarPanel only ever mounts one of Files/Search at a time.
     expect(html).not.toContain("No terminals open");
     expect(html).toContain("aria-pressed=\"true\">Chat<");
+    // Also check that Terminal is not pressed in this state
+    expect(html).not.toContain("aria-pressed=\"true\">Terminal<");
+  });
+});
+
+describe("getBottomPanelAction", () => {
+  test("(a) opening terminal when nothing is open returns 'add'", () => {
+    const action = getBottomPanelAction(false, "terminal", "terminal");
+    expect(action).toBe("add");
+  });
+
+  test("(a) opening chat when nothing is open returns 'add'", () => {
+    const action = getBottomPanelAction(false, "terminal", "chat");
+    expect(action).toBe("add");
+  });
+
+  test("(b) toggling the same view again while open returns 'remove'", () => {
+    const action = getBottomPanelAction(true, "terminal", "terminal");
+    expect(action).toBe("remove");
+  });
+
+  test("(b) toggling chat when chat is already open returns 'remove'", () => {
+    const action = getBottomPanelAction(true, "chat", "chat");
+    expect(action).toBe("remove");
+  });
+
+  test("(c) switching from terminal to chat while already open returns 'switch'", () => {
+    const action = getBottomPanelAction(true, "terminal", "chat");
+    expect(action).toBe("switch");
+  });
+
+  test("(c) switching from chat to terminal while already open returns 'switch'", () => {
+    const action = getBottomPanelAction(true, "chat", "terminal");
+    expect(action).toBe("switch");
+  });
+
+  test("(d) calling the show action when panel already exists with same view returns 'remove'", () => {
+    // showBottomPanel doesn't remove panels directly, but the action tells us
+    // the panel already exists, so showBottomPanel won't call addPanel again
+    const action = getBottomPanelAction(true, "terminal", "terminal");
+    expect(action).toBe("remove");
+  });
+
+  test("(d) calling the show action when panel already exists with different view returns 'switch'", () => {
+    // showBottomPanel will update the view but won't add the panel again
+    const action = getBottomPanelAction(true, "terminal", "chat");
+    expect(action).toBe("switch");
   });
 });
