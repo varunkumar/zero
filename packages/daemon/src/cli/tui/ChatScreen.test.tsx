@@ -42,23 +42,26 @@ test("renders resumed transcript lines on mount", () => {
   expect(frame).toContain("hello there");
 });
 
-test("header stays fully visible and the newest lines stay in view when the transcript overflows the terminal height", async () => {
+test("the newest lines stay in view (header scrolled out) when the transcript overflows the terminal height, and scrolling all the way up brings the header back", async () => {
   const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
-  const { lastFrame } = render(
+  const { stdin, lastFrame } = render(
     <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={manyLines} cwd="/tmp/proj" version="0.0.0-test" />,
   );
   await tick();
   const frame = lastFrame() ?? "";
-  // The header (logo + version line) must never scroll out of view, no
-  // matter how long the transcript grows.
-  expect(frame).toContain("v0.0.0-test");
-  // The most recent message must be visible...
+  // Live tail: the most recent message is visible...
   expect(frame).toContain("line 39");
-  // ...and the oldest ones must be dropped from view rather than pushing
-  // the header/footer off-screen or growing the frame past the terminal.
+  // ...and the header - now just the oldest entry in the same scrollable
+  // list as everything else - has scrolled out of view along with the
+  // oldest messages, rather than staying pinned and squeezing them out.
+  expect(frame).not.toContain("v0.0.0-test");
   expect(frame).not.toContain("line 0 ");
   const frameHeight = frame.split("\n").length;
   expect(frameHeight).toBeLessThan(24);
+
+  // Scrolling all the way up reaches the header, same as any old content.
+  for (let i = 0; i < 10; i++) { stdin.write("\x1b[A"); await tick(); } // Up arrow
+  expect(lastFrame() ?? "").toContain("v0.0.0-test");
 });
 
 test("a long, unbroken assistant reply does not corrupt the header or footer layout", async () => {
@@ -74,18 +77,17 @@ test("a long, unbroken assistant reply does not corrupt the header or footer lay
   await typeAndSubmit(stdin, "hi");
   await tick();
   const frame = lastFrame() ?? "";
-  // The header banner must render intact (all border rows present, none
-  // squeezed out by the wrapped content below it)...
+  // No bordered box (footer input, or a code block if there were one)
+  // should render half-open - every top border must have a matching
+  // bottom border, not merged with overflowing transcript text.
   const borderTopCount = (frame.match(/╭/g) ?? []).length;
   const borderBottomCount = (frame.match(/╰/g) ?? []).length;
   expect(borderTopCount).toBe(borderBottomCount);
-  expect(frame).toContain("v0.0.0-test");
-  // ...and the footer's input box must render as its own clean bordered
-  // box, not merged with overflowing transcript text on the same line.
+  // The footer's input box must render as its own clean bordered box.
   expect(frame).toMatch(/╰─+╯/);
 });
 
-test("Ctrl+U scrolls the transcript into history, Ctrl+D returns to the live tail (no Page Up/Down needed)", async () => {
+test("Up arrow scrolls the transcript into history, Down arrow returns to the live tail (no Page Up/Down needed)", async () => {
   const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
   const { stdin, lastFrame } = render(
     <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={manyLines} cwd="/tmp/proj" version="0.0.0-test" />,
@@ -93,17 +95,32 @@ test("Ctrl+U scrolls the transcript into history, Ctrl+D returns to the live tai
   await tick();
   expect(lastFrame() ?? "").toContain("line 39");
 
-  stdin.write("\x15"); // Ctrl+U
+  stdin.write("\x1b[A"); // Up arrow
   await tick();
   let frame = lastFrame() ?? "";
   expect(frame).toContain("scrolled up");
   expect(frame).not.toContain("line 39");
 
-  stdin.write("\x04"); // Ctrl+D
+  stdin.write("\x1b[B"); // Down arrow
   await tick();
   frame = lastFrame() ?? "";
   expect(frame).toContain("line 39");
   expect(frame).not.toContain("scrolled up");
+});
+
+test("scrolling with Up/Down arrows never leaks keystrokes into the message input box", async () => {
+  const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+  const { stdin, lastFrame } = render(
+    <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={manyLines} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  for (let i = 0; i < 5; i++) { stdin.write("\x1b[A"); await tick(); } // Up arrow x5
+  for (let i = 0; i < 3; i++) { stdin.write("\x1b[B"); await tick(); } // Down arrow x3
+  const frame = lastFrame() ?? "";
+  // ink-text-input inserts any keystroke it doesn't special-case as
+  // literal text - the input box must still show only the placeholder
+  // prompt, not stray characters from the scroll keys.
+  expect(frame).toMatch(/│ >\s*│/);
 });
 
 test("a fenced code block renders as a bordered block with its language tag, not raw backtick fences", async () => {
@@ -133,6 +150,35 @@ test("a fenced code block renders as a bordered block with its language tag, not
   expect(frame).not.toContain("```");
 });
 
+test("a reply with two code blocks separated by prose renders both, splitting across scroll pages if needed rather than vanishing", async () => {
+  const reply = [
+    "First snippet:", "```js", "function one() {", "  return 1;", "}", "```",
+    "Second snippet:", "```py", "def two():", "    return 2", "```", "That's both.",
+  ].join("\n");
+  const runtime = fakeRuntime([
+    { type: "text", delta: reply },
+    { type: "done", message: { role: "assistant", content: reply, createdAt: 0 } },
+  ]);
+  const { stdin, lastFrame } = render(
+    <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  await typeAndSubmit(stdin, "show me");
+  await tick();
+  // Both blocks fit in the default test-terminal height (with the header
+  // now scrolled off, unlike before) - no scrolling needed to see them.
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("First snippet:");
+  expect(frame).toContain("function one() {");
+  expect(frame).toContain("Second snippet:");
+  expect(frame).toContain("def two():");
+  expect(frame).toContain("That's both.");
+  // Neither code block renders as a half-open box (no closing border).
+  const borderTopCount = (frame.match(/╭/g) ?? []).length;
+  const borderBottomCount = (frame.match(/╰/g) ?? []).length;
+  expect(borderTopCount).toBe(borderBottomCount);
+});
+
 test("resumed transcript distinguishes user and assistant turns", () => {
   const { lastFrame } = render(
     <ChatScreen
@@ -146,27 +192,6 @@ test("resumed transcript distinguishes user and assistant turns", () => {
   const frame = lastFrame() ?? "";
   expect(frame).toContain("> what is 2+2?");
   expect(frame).toContain("2+2 is 4.");
-});
-
-test("PageUp scrolls the transcript into history, PageDown returns to the live tail", async () => {
-  const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
-  const { stdin, lastFrame } = render(
-    <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={manyLines} cwd="/tmp/proj" version="0.0.0-test" />,
-  );
-  await tick();
-  expect(lastFrame() ?? "").toContain("line 39");
-
-  stdin.write("\x1b[5~"); // PageUp
-  await tick();
-  let frame = lastFrame() ?? "";
-  expect(frame).toContain("scrolled up");
-  expect(frame).not.toContain("line 39");
-
-  stdin.write("\x1b[6~"); // PageDown
-  await tick();
-  frame = lastFrame() ?? "";
-  expect(frame).toContain("line 39");
-  expect(frame).not.toContain("scrolled up");
 });
 
 test("submitting input streams assistant text into the transcript", async () => {

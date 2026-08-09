@@ -3,35 +3,52 @@ import React from "react";
 import { Box, Text } from "ink";
 import { useTheme, type Theme } from "./theme";
 
-// A blocky ASCII rendition of the actual Zero mark (see
-// docs/assets/zero-logo-dark.png): a thick, rounded "Z" stroke - flat top
-// and bottom bars joined by a diagonal - shaded top-to-bottom along
-// theme.logoColors (cyan -> blue -> purple, matching the source mark's
-// gradient) rather than drawn as flat single-color block letters.
+// A shaded ASCII rendition of the actual Zero mark (see
+// docs/assets/zero-logo-dark.png): a thick, rounded "Z" - flat top/bottom
+// bars joined by a diagonal - with the diagonal's edges anti-aliased via
+// density characters (light " .+*" -> heavy "#@") rather than a hard
+// single-character stair-step, echoing the soft, halftone-shaded style of
+// the reference art while keeping the actual Z's proportions. Generated
+// by supersampling coverage of the Z's geometric outline per cell (see
+// the generation script noted in git history for this file) rather than
+// hand-drawn, so the diagonal's curve is consistent top to bottom.
 const LOGO_SHAPE = [
-  "  ###############  ",
-  "  ###############  ",
-  "               ##  ",
-  "             ##    ",
-  "           ##      ",
-  "          ##       ",
-  "        ##         ",
-  "      ##           ",
-  "    ##             ",
-  "  ###############  ",
-  "  ###############  ",
+  "  @@@@@@@@@@@@@@@@@  ",
+  "  @@@@@@@@@@@@@@@@@  ",
+  "             +#@#.   ",
+  "           .*@@+     ",
+  "          *@@*       ",
+  "        .#@#.        ",
+  "       *@@*          ",
+  "     +@@*.           ",
+  "   .#@#+             ",
+  "  @@@@@@@@@@@@@@@@@  ",
+  "  @@@@@@@@@@@@@@@@@  ",
 ];
 
-interface Run { text: string; color: string }
+// Density -> weight along the light-to-heavy ramp used above, driving
+// bold/dim so the diagonal's anti-aliased edges read as a soft gradient
+// rather than flat single-weight strokes.
+const DENSITY_WEIGHT: Record<string, "dim" | "normal" | "bold"> = {
+  ".": "dim", "+": "dim", "*": "normal", "#": "bold", "@": "bold",
+};
+
+interface Run { text: string; color: string; weight: "dim" | "normal" | "bold" }
 
 function shadeRuns(theme: Theme, row: string, rowIndex: number): Run[] {
   const strokeColor = theme.logoColors[rowIndex] ?? theme.accent;
   const runs: Run[] = [];
   for (const ch of row) {
-    const color = ch === " " ? "" : strokeColor;
+    if (ch === " ") {
+      const last = runs[runs.length - 1];
+      if (last && last.color === "") last.text += ch;
+      else runs.push({ text: ch, color: "", weight: "normal" });
+      continue;
+    }
+    const weight = DENSITY_WEIGHT[ch] ?? "normal";
     const last = runs[runs.length - 1];
-    if (last && last.color === color) last.text += ch;
-    else runs.push({ text: ch, color });
+    if (last && last.color === strokeColor && last.weight === weight) last.text += ch;
+    else runs.push({ text: ch, color: strokeColor, weight });
   }
   return runs;
 }
@@ -50,7 +67,7 @@ export function Banner({ cwd, version, subtitle }: BannerProps) {
       {LOGO_SHAPE.map((row, i) => (
         <Text key={i}>
           {shadeRuns(theme, row, i).map((run, j) => (
-            <Text key={j} color={run.color || undefined} bold={run.color !== ""}>{run.text}</Text>
+            <Text key={j} color={run.color || undefined} bold={run.weight === "bold"} dimColor={run.weight === "dim"}>{run.text}</Text>
           ))}
         </Text>
       ))}

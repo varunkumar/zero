@@ -1,7 +1,7 @@
 // packages/daemon/src/cli/tui/MessageBlock.tsx
 import React from "react";
 import { Box, Text } from "ink";
-import { parseBlocks, type CodeBlock as CodeBlockData } from "./markdown";
+import type { CodeBlock as CodeBlockData } from "./markdown";
 import { highlightLine } from "./highlight";
 
 export interface MessageBlockLine {
@@ -13,7 +13,7 @@ export interface MessageBlockLine {
   spacer?: boolean;
 }
 
-function CodeBlockView({ block, borderColor }: { block: CodeBlockData; borderColor: string }) {
+export function CodeBlockView({ block, borderColor }: { block: CodeBlockData; borderColor: string }) {
   return (
     <Box flexDirection="column" flexShrink={0} borderStyle="round" borderColor={borderColor} paddingX={1}>
       {block.lang ? <Text dimColor>{block.lang}</Text> : null}
@@ -28,19 +28,10 @@ function CodeBlockView({ block, borderColor }: { block: CodeBlockData; borderCol
   );
 }
 
-export function MessageBlock({ line, codeBorderColor }: { line: MessageBlockLine; codeBorderColor: string }) {
-  const blocks = parseBlocks(line.text);
+export function TextBlockView({ content, line }: { content: string; line: MessageBlockLine }) {
   return (
-    <Box flexDirection="column" flexShrink={0} marginTop={line.spacer ? 1 : 0}>
-      {blocks.map((block, i) =>
-        block.kind === "code" ? (
-          <CodeBlockView key={i} block={block} borderColor={codeBorderColor} />
-        ) : (
-          <Text key={i} color={line.color} bold={line.bold} dimColor={line.dim}>
-            {block.content.replace(/\n+$/, "") || " "}
-          </Text>
-        ),
-      )}
-    </Box>
+    <Text color={line.color} bold={line.bold} dimColor={line.dim}>
+      {content.replace(/\n+$/, "") || " "}
+    </Text>
   );
 }

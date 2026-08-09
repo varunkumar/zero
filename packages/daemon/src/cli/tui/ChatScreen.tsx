@@ -4,10 +4,10 @@ import TextInput from "ink-text-input";
 import type { AgentRuntime, ChatToolCall } from "@zero/core";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { Banner } from "./Banner";
-import { MessageBlock } from "./MessageBlock";
+import { CodeBlockView, TextBlockView } from "./MessageBlock";
 import { Spinner } from "./Spinner";
 import { useTheme } from "./theme";
-import { estimateTextRows, parseBlocks } from "./markdown";
+import { estimateBlockRows, estimateTextRows, parseBlocks } from "./markdown";
 
 export interface ChatScreenProps {
   runtime: Pick<AgentRuntime, "sendMessage" | "resolveApproval">;
@@ -25,10 +25,12 @@ export interface ChatScreenProps {
 interface PendingApproval { call: ChatToolCall; preview: string }
 interface Line { id: string; text: string; bold?: boolean; dim?: boolean; color?: string; spacer?: boolean }
 
-// How many lines a PageUp/PageDown scroll step moves. Deliberately in
-// "lines" rather than "rows" - keeps the step size stable regardless of
-// how much of the visible content happens to be wrapped that render.
-const SCROLL_PAGE_LINES = 8;
+// How many transcript entries (each entry being one block: a text
+// paragraph, a whole code block, or the header) a scroll step moves.
+// Deliberately in "entries" rather than "rows" - keeps the step size
+// stable regardless of how much of the visible content happens to be
+// wrapped that render.
+const SCROLL_PAGE_ENTRIES = 8;
 
 let lineSeq = 0;
 function nextLineId(): string { return `line-${++lineSeq}`; }
@@ -76,14 +78,14 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   // convention runTurn below uses live), so that prefix is what
   // distinguishes them here. Without this, every resumed line rendered in
   // the same default color, making it impossible to tell who said what.
-  const [lines, setLines] = useState<Line[]>(() => initialLines.map((text, i) => {
+  const [lines, setLines] = useState<Line[]>(() => initialLines.map((text) => {
     const isUser = text.startsWith("> ");
     return {
       id: nextLineId(),
       text,
       color: isUser ? theme.userColor : theme.assistantColor,
       bold: isUser,
-      spacer: isUser && i > 0,
+      spacer: isUser,
     };
   }));
   const [streamingText, setStreamingText] = useState("");
@@ -92,8 +94,9 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [suggestionIndex, setSuggestionIndex] = useState(0);
-  // Number of newest *lines* (not rows) currently scrolled out of view
-  // below the visible window. 0 means pinned to the live tail.
+  // Number of newest *entries* (blocks, not rows - see `entries` below)
+  // currently scrolled out of view below the visible window. 0 means
+  // pinned to the live tail.
   const [scrollOffset, setScrollOffset] = useState(0);
   const controllerRef = useRef<AbortController | null>(null);
   const hasSentRef = useRef(false);
@@ -202,23 +205,26 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       if (key.upArrow) { setSuggestionIndex((i) => Math.max(0, i - 1)); return; }
       if (key.tab) { setInput(`${suggestions[activeSuggestion]!.name} `); setSuggestionIndex(0); return; }
     }
-    if (!pending) {
-      // Many Mac keyboards have no dedicated Page Up/Down keys, so Ctrl+U
-      // / Ctrl+D (the vim/less convention for half-page scroll) are the
-      // primary bindings; PageUp/PageDown still work for terminals/
-      // keyboards that do send them (e.g. via fn+Up/Down).
-      const scrollUp = key.pageUp || (key.ctrl && _input === "u");
-      const scrollDown = key.pageDown || (key.ctrl && _input === "d");
-      if (scrollUp) { setScrollOffset((o) => Math.min(Math.max(0, lines.length - 1), o + SCROLL_PAGE_LINES)); return; }
-      if (scrollDown) { setScrollOffset((o) => Math.max(0, o - SCROLL_PAGE_LINES)); return; }
+    if (!pending && suggestions.length === 0) {
+      // Plain arrow keys, not Page Up/Down or Ctrl+U/D: many Mac
+      // keyboards have no dedicated Page Up/Down, and - more importantly
+      // - ink-text-input inserts *any* key it doesn't explicitly special-
+      // case as literal text into the input box (it only ignores plain
+      // Up/Down/Tab/Ctrl+C/Return/Backspace/Delete), so Page Up/Down and
+      // Ctrl+U/D were leaking stray characters into whatever the user was
+      // typing. Up/Down are the one binding ink-text-input unconditionally
+      // ignores, and every keyboard has them.
+      if (key.upArrow) { setScrollOffset((o) => Math.min(Math.max(0, entries.length - 1), o + SCROLL_PAGE_ENTRIES)); return; }
+      if (key.downArrow) { setScrollOffset((o) => Math.max(0, o - SCROLL_PAGE_ENTRIES)); return; }
     }
   });
 
   // Footer height is computed synchronously from state rather than
-  // measured after render, for the same reason as HEADER_HEIGHT above:
-  // border box (3 rows: top/content/bottom) plus either the hint line (1),
-  // the autocomplete list (one row per suggestion), or nothing (the
-  // approval prompt's own fixed-size box replaces the input entirely).
+  // measured after render, for the same reason the transcript entries
+  // below carry their own precomputed row costs: border box (3 rows:
+  // top/content/bottom) plus either the hint line (1), the autocomplete
+  // list (one row per suggestion), or nothing (the approval prompt's own
+  // fixed-size box replaces the input entirely).
   const footerHeight = pending ? 6 : 3 + (suggestions.length > 0 ? suggestions.length : 1);
 
   // Total height is pinned strictly below the terminal's row count: Ink
@@ -227,65 +233,91 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   // live region's computed height reaches stdout.rows. Reserving one row
   // keeps every render under that threshold.
   const totalHeight = Math.max(3, rows - 1);
-  // Ink wraps Text content at the terminal width by default, and embedded
-  // "\n"s (multi-line replies, fenced code blocks) each force their own
-  // row, so a single pushed "line" can occupy several actual terminal
-  // rows. Slicing by array-index count alone under-counts that, letting
-  // the real rendered height creep past totalHeight until it reaches
-  // stdout.rows again - re-triggering Ink's full-clear-and-rewrite (this
-  // file's original bug) after enough long/multi-line messages
-  // accumulate. estimateTextRows (shared with MessageBlock's own
-  // rendering, so the two stay in sync) accounts for both. Walk from the
-  // newest line backward so the slice always fits the space available.
-  const rowsForText = (text: string) => estimateTextRows(text, columns);
-  const lineRowCost = (line: Line) => rowsForText(line.text) + (line.spacer ? 1 : 0);
-  const streamingRows = streamingText ? rowsForText(streamingText) : 0;
+
+  // The header is no longer pinned outside the scrollable area - it's the
+  // oldest entry in the same list as every message, so it scrolls out of
+  // view like any other old content and reappears when scrolling back to
+  // the very top. Each *block* (not each message) is its own entry so a
+  // reply with, say, two code blocks separated by prose can have one land
+  // on the current page and the other on the next, instead of the whole
+  // message being forced to appear atomically (which - given code blocks
+  // must never render partially, see below - meant a message taller than
+  // one full page could never be shown at all).
+  const entries: Array<{ id: string; rows: number; atomic: boolean; render: () => React.ReactNode }> = [
+    { id: "banner", rows: HEADER_HEIGHT, atomic: true, render: () => <Banner key="banner" cwd={cwd} version={version} subtitle="/exit to quit · esc cancels a turn · / for commands" /> },
+  ];
+  for (const line of lines) {
+    const blocks = parseBlocks(line.text);
+    blocks.forEach((block, i) => {
+      const spacerHere = i === 0 && line.spacer;
+      const rows = estimateBlockRows(block, columns) + (spacerHere ? 1 : 0);
+      const id = `${line.id}-b${i}`;
+      if (block.kind === "code") {
+        entries.push({
+          id, rows, atomic: true,
+          render: () => (
+            <Box key={id} flexDirection="column" flexShrink={0} marginTop={spacerHere ? 1 : 0}>
+              <CodeBlockView block={block} borderColor={theme.toolLine} />
+            </Box>
+          ),
+        });
+      } else {
+        entries.push({
+          id, rows, atomic: false,
+          render: () => (
+            <Box key={id} flexShrink={0} marginTop={spacerHere ? 1 : 0}>
+              <TextBlockView content={block.content} line={line} />
+            </Box>
+          ),
+        });
+      }
+    });
+  }
+
+  const streamingRows = streamingText ? estimateTextRows(streamingText, columns) : 0;
   const liveExtra = (busy && status ? 1 : 0) + streamingRows;
   // Conversations can run longer than the terminal - rather than only
-  // ever showing the live tail, PageUp/PageDown (see useInput above) walk
-  // scrollOffset back through older lines. clampedOffset keeps that in
-  // range as the transcript grows or shrinks (e.g. right after mount).
-  const clampedOffset = Math.min(scrollOffset, Math.max(0, lines.length - 1));
+  // ever showing the live tail, Up/Down arrows (see
+  // useInput above) walk scrollOffset back through older entries.
+  // clampedOffset keeps that in range as entries grow or shrink (e.g.
+  // right after mount).
+  const clampedOffset = Math.min(scrollOffset, Math.max(0, entries.length - 1));
   const isScrolled = clampedOffset > 0;
   // Reserve one row for the "scrolled up" indicator below so it never
-  // itself pushes a transcript line out of the fixed-height box.
-  const middleHeight = Math.max(0, totalHeight - HEADER_HEIGHT - footerHeight - liveExtra - (isScrolled ? 1 : 0));
-  const bottomIndex = lines.length - 1 - clampedOffset;
-  const visibleLines: Line[] = [];
+  // itself pushes a transcript entry out of the fixed-height box.
+  const scrollAreaHeight = Math.max(0, totalHeight - footerHeight - liveExtra - (isScrolled ? 1 : 0));
+  const bottomIndex = entries.length - 1 - clampedOffset;
+  const visibleEntries: typeof entries = [];
   let usedRows = 0;
   for (let i = bottomIndex; i >= 0; i--) {
-    const line = lines[i]!;
-    const rowsNeeded = lineRowCost(line);
-    if (usedRows + rowsNeeded > middleHeight) {
-      // A single plain-text message longer than the whole budget (e.g.
-      // one huge unbroken paragraph) would otherwise make the loop bail
+    const entry = entries[i]!;
+    if (usedRows + entry.rows > scrollAreaHeight) {
+      // A single plain-text entry longer than the whole budget (e.g. one
+      // huge unbroken paragraph) would otherwise make the loop bail
       // before adding anything, leaving the transcript blank - so it's
-      // still shown, letting overflow="hidden" clip the excess. A code
-      // block clipped mid-box instead leaves a dangling open border with
-      // no content or closing edge, which reads as broken rather than
-      // "trimmed" - so code-block messages only ever render whole.
-      const hasCodeBlock = parseBlocks(line.text).some((b) => b.kind === "code");
-      if (hasCodeBlock || visibleLines.length > 0) break;
+      // still shown, letting overflow="hidden" clip the excess. An atomic
+      // entry (a code block, or the header banner) clipped mid-box
+      // instead leaves a dangling open border with no content or closing
+      // edge, which reads as broken rather than "trimmed" - so those only
+      // ever render whole, on whichever page has room for them.
+      if (entry.atomic || visibleEntries.length > 0) break;
     }
-    usedRows += rowsNeeded;
-    visibleLines.unshift(line);
-    if (usedRows >= middleHeight) break;
+    usedRows += entry.rows;
+    visibleEntries.unshift(entry);
+    if (usedRows >= scrollAreaHeight) break;
   }
 
   return (
     <Box flexDirection="column" height={totalHeight} overflow="hidden">
-      <Banner cwd={cwd} version={version} subtitle="/exit to quit · esc cancels a turn · / for commands" />
       {/* overflow="hidden" only clips painting - Yoga still sizes a
           flexGrow box to fit its content unless height is pinned, which
           let long-wrapped transcript content balloon past totalHeight and
-          squeeze the header/footer instead of being clipped. An explicit
-          height plus flexShrink=0 makes this box (and its siblings below)
+          squeeze the footer instead of being clipped. An explicit height
+          plus flexShrink=0 makes this box (and its siblings below)
           immovable regardless of content length. */}
-      <Box flexDirection="column" height={middleHeight + (isScrolled ? 1 : 0)} flexShrink={0} overflow="hidden">
-        {isScrolled ? <Text dimColor>↑ scrolled up · Ctrl+D (or PageDown) to jump to latest</Text> : null}
-        {visibleLines.map((line) => (
-          <MessageBlock key={line.id} line={line} codeBorderColor={theme.toolLine} />
-        ))}
+      <Box flexDirection="column" height={scrollAreaHeight + (isScrolled ? 1 : 0)} flexShrink={0} overflow="hidden">
+        {isScrolled ? <Text dimColor>↑ scrolled up · ↓ to return to latest</Text> : null}
+        {visibleEntries.map((entry) => entry.render())}
         {!isScrolled && busy && status ? <Spinner label={status} /> : null}
         {!isScrolled && streamingText ? <Text color={theme.assistantColor}>{streamingText}</Text> : null}
       </Box>
