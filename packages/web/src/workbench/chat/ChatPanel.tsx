@@ -16,6 +16,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
   const [pendingApproval, setPendingApproval] = useState<{ turnId: string; call: ChatToolCall; preview: string } | null>(null);
   const [status, setStatus] = useState<{ activeModel: string | null; reason: string | null }>({ activeModel: null, reason: null });
   const [turnId, setTurnId] = useState<string | null>(null);
+  const [pinnedToBottom, setPinnedToBottom] = useState(true);
   // Settles the in-flight `send()` promise (unsubscribes from TurnStore,
   // resolves) for the current turn, if any. `chat/abort` only signals the
   // daemon's AbortController - AgentRuntime.sendMessage returns silently on
@@ -25,6 +26,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
   // close, unmount) must call this alongside `chat/abort` to avoid a leaked
   // listener and a `busy` state stuck true forever.
   const finishTurnRef = useRef<(() => void) | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   function abortCurrentTurn(): void {
     if (turnId) client.request("chat/abort", { turnId }).catch(() => {});
@@ -38,6 +40,13 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
 
   function reportError(message: string): void {
     setBanner(message);
+  }
+
+  function handleScroll(): void {
+    const el = listRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setPinnedToBottom(distanceFromBottom < 40);
   }
 
   function refreshStatus(sessionId: string): void {
@@ -80,6 +89,11 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
     refreshStatus(id);
     return () => { cancelled = true; };
   }, [client, activeId]);
+
+  // Auto-scroll to bottom when pinned and new messages/streaming text arrive
+  useEffect(() => {
+    if (pinnedToBottom) listRef.current?.scrollTo({ top: listRef.current?.scrollHeight ?? 0 });
+  }, [messages.length, streaming.length, pinnedToBottom]);
 
   // Fix #4: Cleanup on unmount - abort any in-flight turn, reading the
   // current turnId from the ref (via abortCurrentTurn) so this always targets
@@ -229,58 +243,71 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
           <button onClick={() => setBanner(null)} aria-label="Dismiss error">×</button>
         </div>
       )}
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 8 }}>
-        {!activeId ? (
-          <div style={{ padding: 16, opacity: 0.6 }}>No chat open</div>
-        ) : (
-          <>
-            {messages.filter((m) => m.role !== "system").map((m, i) => (
-              <div key={i} style={{
-                marginBottom: 8, padding: "6px 10px", borderRadius: 6,
-                background: m.role === "user" ? "var(--zero-selection-bg)" : "var(--zero-editor-bg)",
-                border: "1px solid var(--zero-border)",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                  <span aria-hidden style={{
-                    width: 18, height: 18, borderRadius: "50%", display: "inline-flex",
-                    alignItems: "center", justifyContent: "center", fontSize: 11,
-                    background: m.role === "user" ? "var(--zero-accent)" : "var(--zero-status-ok)",
-                    color: "#fff",
-                  }}>
-                    {m.role === "user" ? "U" : m.role === "tool" ? "T" : "Z"}
-                  </span>
-                  <strong>{m.role === "tool" ? `tool:${m.toolName}` : m.role}</strong>
-                  <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.6 }}>
-                    {m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null}
-                  </span>
+      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        <div ref={listRef} onScroll={handleScroll} style={{ height: "100%", overflowY: "auto", padding: 8 }}>
+          {!activeId ? (
+            <div style={{ padding: 16, opacity: 0.6 }}>No chat open</div>
+          ) : (
+            <>
+              {messages.filter((m) => m.role !== "system").map((m, i) => (
+                <div key={i} style={{
+                  marginBottom: 8, padding: "6px 10px", borderRadius: 6,
+                  background: m.role === "user" ? "var(--zero-selection-bg)" : "var(--zero-editor-bg)",
+                  border: "1px solid var(--zero-border)",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                    <span aria-hidden style={{
+                      width: 18, height: 18, borderRadius: "50%", display: "inline-flex",
+                      alignItems: "center", justifyContent: "center", fontSize: 11,
+                      background: m.role === "user" ? "var(--zero-accent)" : "var(--zero-status-ok)",
+                      color: "#fff",
+                    }}>
+                      {m.role === "user" ? "U" : m.role === "tool" ? "T" : "Z"}
+                    </span>
+                    <strong>{m.role === "tool" ? `tool:${m.toolName}` : m.role}</strong>
+                    <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.6 }}>
+                      {m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null}
+                    </span>
+                  </div>
+                  <div style={{ whiteSpace: "pre-wrap", color: "var(--zero-editor-fg)" }}>{m.content}</div>
                 </div>
-                <div style={{ whiteSpace: "pre-wrap", color: "var(--zero-editor-fg)" }}>{m.content}</div>
-              </div>
-            ))}
-            {streaming && (
-              <div style={{
-                marginBottom: 8, padding: "6px 10px", borderRadius: 6,
-                background: "var(--zero-editor-bg)",
-                border: "1px solid var(--zero-border)",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                  <span aria-hidden style={{
-                    width: 18, height: 18, borderRadius: "50%", display: "inline-flex",
-                    alignItems: "center", justifyContent: "center", fontSize: 11,
-                    background: "var(--zero-status-ok)",
-                    color: "#fff",
-                  }}>
-                    Z
-                  </span>
-                  <strong>assistant</strong>
-                  <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.6 }}>
-                    {new Date(Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </span>
+              ))}
+              {streaming && (
+                <div style={{
+                  marginBottom: 8, padding: "6px 10px", borderRadius: 6,
+                  background: "var(--zero-editor-bg)",
+                  border: "1px solid var(--zero-border)",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                    <span aria-hidden style={{
+                      width: 18, height: 18, borderRadius: "50%", display: "inline-flex",
+                      alignItems: "center", justifyContent: "center", fontSize: 11,
+                      background: "var(--zero-status-ok)",
+                      color: "#fff",
+                    }}>
+                      Z
+                    </span>
+                    <strong>assistant</strong>
+                    <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.6 }}>
+                      {new Date(Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                  <div style={{ whiteSpace: "pre-wrap", color: "var(--zero-editor-fg)" }}>{streaming}</div>
                 </div>
-                <div style={{ whiteSpace: "pre-wrap", color: "var(--zero-editor-fg)" }}>{streaming}</div>
-              </div>
-            )}
-          </>
+              )}
+            </>
+          )}
+        </div>
+        {!pinnedToBottom && (
+          <button
+            onClick={() => { listRef.current?.scrollTo({ top: listRef.current?.scrollHeight ?? 0, behavior: "smooth" }); setPinnedToBottom(true); }}
+            style={{
+              position: "absolute", bottom: 60, right: 20, borderRadius: 16, padding: "6px 12px",
+              background: "var(--zero-accent)", color: "#fff", border: "none", cursor: "pointer",
+            }}
+          >
+            ↓ New messages
+          </button>
         )}
       </div>
       {pendingApproval && (
