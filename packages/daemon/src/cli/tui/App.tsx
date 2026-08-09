@@ -1,0 +1,81 @@
+// packages/daemon/src/cli/tui/App.tsx
+import React, { useEffect, useState } from "react";
+import { Text } from "ink";
+import type { AgentRuntime } from "@zero/core";
+import type { ChatMessage, ChatSessionSummary } from "@zero/protocol";
+import type { SessionStore } from "../../sessions";
+import { SessionPicker } from "./SessionPicker";
+import { ChatScreen } from "./ChatScreen";
+
+export type StartMode = { kind: "new" } | { kind: "resume" } | { kind: "session"; sessionId: string };
+
+export interface AppProps {
+  sessions: SessionStore;
+  start: StartMode;
+  newSessionTitle: string;
+  createRuntime: (sessionId: string) => AgentRuntime;
+}
+
+type ViewState =
+  | { kind: "loading" }
+  | { kind: "picker"; items: ChatSessionSummary[] }
+  | { kind: "chat"; sessionId: string; runtime: AgentRuntime; initialLines: string[] }
+  | { kind: "error"; message: string };
+
+function linesFromMessages(messages: ChatMessage[]): string[] {
+  return messages
+    .filter((m) => m.role === "user" || (m.role === "assistant" && m.content.length > 0))
+    .map((m) => (m.role === "user" ? `> ${m.content}` : m.content));
+}
+
+export function App({ sessions, start, newSessionTitle, createRuntime }: AppProps) {
+  const [state, setState] = useState<ViewState>({ kind: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function enterChat(sessionId: string) {
+      const existing = await sessions.get(sessionId);
+      if (!existing) {
+        if (!cancelled) setState({ kind: "error", message: `session not found: ${sessionId}` });
+        return;
+      }
+      if (!cancelled) {
+        setState({
+          kind: "chat", sessionId,
+          runtime: createRuntime(sessionId),
+          initialLines: linesFromMessages(existing.messages),
+        });
+      }
+    }
+
+    async function bootstrap() {
+      if (start.kind === "resume") {
+        const items = await sessions.list();
+        if (!cancelled) setState({ kind: "picker", items });
+        return;
+      }
+      const sessionId = start.kind === "session" ? start.sessionId : await sessions.create(newSessionTitle);
+      await enterChat(sessionId);
+    }
+
+    void bootstrap();
+    return () => { cancelled = true; };
+  }, [sessions, start, newSessionTitle, createRuntime]);
+
+  const onPick = async (sessionId: string | "new") => {
+    const id = sessionId === "new" ? await sessions.create(newSessionTitle) : sessionId;
+    const existing = await sessions.get(id);
+    if (!existing) { setState({ kind: "error", message: `session not found: ${id}` }); return; }
+    setState({
+      kind: "chat", sessionId: id,
+      runtime: createRuntime(id),
+      initialLines: linesFromMessages(existing.messages),
+    });
+  };
+
+  if (state.kind === "loading") return <Text dimColor>loading...</Text>;
+  if (state.kind === "error") return <Text color="red">error: {state.message}</Text>;
+  if (state.kind === "picker") return <SessionPicker sessions={state.items} onSelect={(id) => void onPick(id)} />;
+  return <ChatScreen runtime={state.runtime} sessionId={state.sessionId} initialLines={state.initialLines} />;
+}
