@@ -240,7 +240,20 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
                 background: m.role === "user" ? "var(--zero-selection-bg)" : "var(--zero-editor-bg)",
                 border: "1px solid var(--zero-border)",
               }}>
-                <strong style={{ color: "var(--zero-statusbar-fg)" }}>{m.role === "tool" ? `tool:${m.toolName}` : m.role}</strong>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                  <span aria-hidden style={{
+                    width: 18, height: 18, borderRadius: "50%", display: "inline-flex",
+                    alignItems: "center", justifyContent: "center", fontSize: 11,
+                    background: m.role === "user" ? "var(--zero-accent)" : "var(--zero-status-ok)",
+                    color: "#fff",
+                  }}>
+                    {m.role === "user" ? "U" : m.role === "tool" ? "T" : "Z"}
+                  </span>
+                  <strong>{m.role === "tool" ? `tool:${m.toolName}` : m.role}</strong>
+                  <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.6 }}>
+                    {m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null}
+                  </span>
+                </div>
                 <div style={{ whiteSpace: "pre-wrap", color: "var(--zero-editor-fg)" }}>{m.content}</div>
               </div>
             ))}
@@ -250,7 +263,20 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
                 background: "var(--zero-editor-bg)",
                 border: "1px solid var(--zero-border)",
               }}>
-                <strong style={{ color: "var(--zero-statusbar-fg)" }}>assistant</strong>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                  <span aria-hidden style={{
+                    width: 18, height: 18, borderRadius: "50%", display: "inline-flex",
+                    alignItems: "center", justifyContent: "center", fontSize: 11,
+                    background: "var(--zero-status-ok)",
+                    color: "#fff",
+                  }}>
+                    Z
+                  </span>
+                  <strong>assistant</strong>
+                  <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.6 }}>
+                    {new Date(Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
                 <div style={{ whiteSpace: "pre-wrap", color: "var(--zero-editor-fg)" }}>{streaming}</div>
               </div>
             )}
