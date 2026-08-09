@@ -3,3 +3,4 @@ dist/
 .zero/
 *.tsbuildinfo
 graphify-out/
+.DS_STORE
