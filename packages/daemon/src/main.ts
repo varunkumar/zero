@@ -21,7 +21,7 @@ import { execCommand } from "./execCommand";
 export async function startZero(opts: DaemonOptions) {
   const daemon = createDaemon(opts);
   const ws = new Workspace(opts.root);
-  const sessions = new SessionStore(ws);
+  const sessions = new SessionStore(ws.root);
   const checkpoint = new GitCheckpoint(opts.root);
   const agentClient = createAgentRuntimeClient(sessions);
 

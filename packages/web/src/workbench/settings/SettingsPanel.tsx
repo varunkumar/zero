@@ -60,7 +60,7 @@ export function SettingsPanel(props: { registry: CommandRegistry; theme: "light"
         <h4 style={{ marginTop: 16 }}>Graphify</h4>
         <p style={{ fontSize: 13, opacity: 0.8, lineHeight: 1.5, margin: 0 }}>
           Structural code graph for completions. Default languages: TypeScript, JavaScript.
-          Add others via <code>.zero/settings.json</code> key <code>graphify.grammars</code>
+          Add others via <code>~/.zero/settings.json</code> key <code>graphify.grammars</code>
           {" "}(see <code>docs/plugins.md</code>).
         </p>
       </div>

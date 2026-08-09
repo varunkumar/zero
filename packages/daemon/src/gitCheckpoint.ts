@@ -40,8 +40,10 @@ export class GitCheckpoint {
       const env = { GIT_INDEX_FILE: indexFile };
 
       // Exclude .zero/ - it holds the gateway's live API key
-      // (.zero/gateway-key) and full chat transcripts (.zero/sessions/*.json).
-      // This repo's own .gitignore happens to already exclude .zero/, which
+      // (.zero/gateway-key) and the Graphify index cache (.zero/graph.json).
+      // Session transcripts live under ~/.zero/sessions/... (outside the
+      // workspace), not here. This repo's own .gitignore happens to already
+      // exclude .zero/, which
       // is why nothing caught this in dogfooding, but an arbitrary user
       // workspace the daemon is pointed at has no such guarantee - the
       // exclusion must be enforced here, not left to the workspace's own

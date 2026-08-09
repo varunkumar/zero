@@ -1,0 +1,78 @@
+// packages/daemon/src/cli/tui/Banner.tsx
+import React from "react";
+import { Box, Text } from "ink";
+import { useTheme, type Theme } from "./theme";
+
+// A shaded ASCII rendition of the actual Zero mark (see
+// docs/assets/zero-logo-dark.png): a thick, rounded "Z" - flat top/bottom
+// bars joined by a diagonal - with the diagonal's edges anti-aliased via
+// density characters (light " .+*" -> heavy "#@") rather than a hard
+// single-character stair-step, echoing the soft, halftone-shaded style of
+// the reference art while keeping the actual Z's proportions. Generated
+// by supersampling coverage of the Z's geometric outline per cell (see
+// the generation script noted in git history for this file) rather than
+// hand-drawn, so the diagonal's curve is consistent top to bottom.
+const LOGO_SHAPE = [
+  "  @@@@@@@@@@@@@@@@@  ",
+  "  @@@@@@@@@@@@@@@@@  ",
+  "             +#@#.   ",
+  "           .*@@+     ",
+  "          *@@*       ",
+  "        .#@#.        ",
+  "       *@@*          ",
+  "     +@@*.           ",
+  "   .#@#+             ",
+  "  @@@@@@@@@@@@@@@@@  ",
+  "  @@@@@@@@@@@@@@@@@  ",
+];
+
+// Density -> weight along the light-to-heavy ramp used above, driving
+// bold/dim so the diagonal's anti-aliased edges read as a soft gradient
+// rather than flat single-weight strokes.
+const DENSITY_WEIGHT: Record<string, "dim" | "normal" | "bold"> = {
+  ".": "dim", "+": "dim", "*": "normal", "#": "bold", "@": "bold",
+};
+
+interface Run { text: string; color: string; weight: "dim" | "normal" | "bold" }
+
+function shadeRuns(theme: Theme, row: string, rowIndex: number): Run[] {
+  const strokeColor = theme.logoColors[rowIndex] ?? theme.accent;
+  const runs: Run[] = [];
+  for (const ch of row) {
+    if (ch === " ") {
+      const last = runs[runs.length - 1];
+      if (last && last.color === "") last.text += ch;
+      else runs.push({ text: ch, color: "", weight: "normal" });
+      continue;
+    }
+    const weight = DENSITY_WEIGHT[ch] ?? "normal";
+    const last = runs[runs.length - 1];
+    if (last && last.color === strokeColor && last.weight === weight) last.text += ch;
+    else runs.push({ text: ch, color: strokeColor, weight });
+  }
+  return runs;
+}
+
+export interface BannerProps {
+  cwd: string;
+  version: string;
+  subtitle?: string;
+}
+
+/** Boxed welcome banner shown once at the top of a screen, Claude-Code-style. */
+export function Banner({ cwd, version, subtitle }: BannerProps) {
+  const { theme } = useTheme();
+  return (
+    <Box flexDirection="column" flexShrink={0} borderStyle="round" borderColor={theme.accent} paddingX={1} marginBottom={1}>
+      {LOGO_SHAPE.map((row, i) => (
+        <Text key={i}>
+          {shadeRuns(theme, row, i).map((run, j) => (
+            <Text key={j} color={run.color || undefined} bold={run.weight === "bold"} dimColor={run.weight === "dim"}>{run.text}</Text>
+          ))}
+        </Text>
+      ))}
+      <Text dimColor>v{version} · {cwd}</Text>
+      {subtitle ? <Text dimColor>{subtitle}</Text> : null}
+    </Box>
+  );
+}

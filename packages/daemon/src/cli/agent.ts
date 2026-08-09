@@ -1,21 +1,13 @@
+// packages/daemon/src/cli/agent.ts
 import { createInterface } from "node:readline/promises";
-import { AgentRuntime, OpenAICompatProvider, type ChatCapableProvider } from "@zero/core";
-import { Workspace } from "../workspace";
-import { SessionStore } from "../sessions";
-import { LspService } from "../lsp/service";
-import { DEFAULT_LSP_SERVERS } from "../lsp/registry";
-import { createGraphify } from "../plugins/graphify";
-import { createChatTools } from "../chatTools";
-import { createAgentRuntimeClient } from "../agentClient";
-import { GitCheckpoint } from "../gitCheckpoint";
-import { execCommand } from "../execCommand";
+import { createCliContext, createRuntimeForSession, type CliOpts } from "./runtimeFactory";
 
-export interface AgentCliOpts { providers?: ChatCapableProvider[] }
+export type AgentCliOpts = CliOpts;
 
 // Flags that take a following value - that value must not be mistaken for a
 // positional argument (e.g. `zero --gateway-port 4000` must not treat "4000"
 // as the workspace path).
-const FLAGS_WITH_VALUE = new Set(["--session", "--gateway-port"]);
+const FLAGS_WITH_VALUE = new Set(["-p", "--session", "--gateway-port"]);
 
 /** Parses `--gateway-port <value>` out of argv. Returns `undefined` if the
  * flag is absent, `"invalid"` if present but its value isn't a number (e.g.
@@ -43,27 +35,14 @@ export async function runAgentCli(argv: string[], root: string, opts: AgentCliOp
   const forceNonTty = argv.includes("--no-tty-for-test"); // test-only, see agent.test.ts
   const sessionIdx = argv.indexOf("--session");
   const sessionArg = sessionIdx >= 0 ? argv[sessionIdx + 1] : undefined;
-  const [task] = positionalArgs(argv);
-  if (!task) { console.error("usage: zero agent \"task description\" [--yes] [--session <id>] [path]"); return 1; }
+  const pIdx = argv.indexOf("-p");
+  const task = pIdx >= 0 ? argv[pIdx + 1] : undefined;
+  if (!task) { console.error('usage: zero -p "task description" [--yes] [--session <id>] [path]'); return 1; }
 
   try {
-    const ws = new Workspace(root);
-    const sessions = new SessionStore(ws);
-    const sessionId = sessionArg ?? (await sessions.create(task.slice(0, 40)));
-    const checkpoint = new GitCheckpoint(ws.root);
-    const graphify = createGraphify();
-    const lsp = new LspService(ws, DEFAULT_LSP_SERVERS, () => {});
-
-    const providers = opts.providers ?? [
-      new OpenAICompatProvider({ baseUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5-coder:7b" }),
-    ];
-    const tools = createChatTools({
-      sessionId, root: ws.root, ws, lsp, checkpoint, execCommand,
-      graphQuery: (p) => graphify.query(p),
-    });
-    const runtime = new AgentRuntime({
-      providers, tools, client: createAgentRuntimeClient(sessions), workspace: () => ({}),
-    });
+    const ctx = createCliContext(root, opts);
+    const sessionId = sessionArg ?? (await ctx.sessions.create(task.slice(0, 40)));
+    const runtime = createRuntimeForSession(ctx, sessionId);
 
     const nonInteractive = forceNonTty || !process.stdin.isTTY;
     const rl = nonInteractive ? null : createInterface({ input: process.stdin, output: process.stdout });
