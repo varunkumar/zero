@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import type { EditorView } from "@codemirror/view";
 import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent, ChatTurnEventPayload } from "@zero/protocol";
@@ -9,7 +9,7 @@ import { attachKeybindings } from "../keybindings/dispatcher";
 import { TabStore, type Tab } from "../tabs/store";
 import { SettingsStore } from "../settings/store";
 import { ThemeProvider } from "../theme/ThemeProvider";
-import { FileTreePanel } from "../filetree/FileTreePanel";
+import { FileTreePanel, type FileTreeActions } from "../filetree/FileTreePanel";
 import { CommandPalette } from "../palette/CommandPalette";
 import { FileOpener } from "../palette/FileOpener";
 import { SearchPanel } from "../search/SearchPanel";
@@ -88,6 +88,15 @@ interface WorkbenchContextValue {
   bottomView: "terminal" | "chat";
   setBottomView: (view: "terminal" | "chat") => void;
   treeRefreshToken: number;
+  /** Called after a file-tree create/rename/delete/move/copy to refresh the
+   * tree - the same bump `fs/changed` already drives, exposed so
+   * `FileTreePanel` can trigger it directly for its own mutations. */
+  onTreeChanged: () => void;
+  /** Imperative handle onto the mounted `FileTreePanel`, so the
+   * files.newFile/newFolder/rename/delete keybindings (registered here,
+   * since that's where the rest of the command registry lives) can act on
+   * whatever's currently selected in the tree. */
+  fileTreeActionsRef: MutableRefObject<FileTreeActions | null>;
   /** Bumped on every TabStore mutation; unused directly by consumers but part
    * of the context value so a mutation produces a fresh object identity and
    * therefore re-renders every panel. */
@@ -120,7 +129,14 @@ function SidebarPanel() {
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {w.sidebarView === "files" ? (
-          <FileTreePanel client={w.client} activePath={w.activePath} onOpen={w.openFile} refreshToken={w.treeRefreshToken} />
+          <FileTreePanel
+            ref={w.fileTreeActionsRef}
+            client={w.client}
+            activePath={w.activePath}
+            onOpen={w.openFile}
+            refreshToken={w.treeRefreshToken}
+            onTreeChanged={w.onTreeChanged}
+          />
         ) : (
           <SearchPanel client={w.client} onJumpTo={(path) => w.openFile(path)} />
         )}
@@ -342,6 +358,9 @@ export function Workbench(props: { client: RpcClient }) {
   const statusTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const treeDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const lspSyncDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  // Imperative handle onto the mounted FileTreePanel - see the note on
+  // WorkbenchContextValue.fileTreeActionsRef.
+  const fileTreeActionsRef = useRef<FileTreeActions | null>(null);
 
   /** Surface an RPC failure in the status bar. Silence is the worst outcome
    * here: a failed fs/write otherwise leaves a tab looking merely dirty. */
@@ -352,6 +371,15 @@ export function Workbench(props: { client: RpcClient }) {
   }
   const reportRef = useRef(report);
   reportRef.current = report;
+
+  /** Bump the token that drives `fs/tree` refetches. Shared by the
+   * `fs/changed` watcher notification (debounced, below) and by
+   * `FileTreePanel`'s own create/rename/delete/move/copy actions (immediate -
+   * those already know exactly what changed and don't need to wait out a
+   * burst window). */
+  function bumpTreeRefreshToken(): void {
+    setTreeRefreshToken((t) => t + 1);
+  }
 
   useEffect(() => () => {
     clearTimeout(statusTimerRef.current);
@@ -487,7 +515,7 @@ export function Workbench(props: { client: RpcClient }) {
       if (method !== "fs/changed") return;
       const { path } = params as FsChangedEvent;
       clearTimeout(treeDebounceRef.current);
-      treeDebounceRef.current = setTimeout(() => setTreeRefreshToken((t) => t + 1), TREE_REFRESH_DEBOUNCE_MS);
+      treeDebounceRef.current = setTimeout(bumpTreeRefreshToken, TREE_REFRESH_DEBOUNCE_MS);
 
       const lastWrite = lastWriteRef.current;
       if (lastWrite && lastWrite.path === path) {
@@ -786,6 +814,25 @@ export function Workbench(props: { client: RpcClient }) {
         .then((s) => ptyStore.addSession(s))
         .catch((e: unknown) => reportRef.current(`Could not open terminal: ${errorText(e)}`));
     },
+    // Scoped to the Files sidebar being visible, same as the brief asks:
+    // Cmd/Ctrl+Alt+N etc. shouldn't fire New File while the user is in
+    // Search or has focus elsewhere.
+    newFileInSelectedDir: () => {
+      if (sidebarView !== "files") return;
+      fileTreeActionsRef.current?.newFileInSelectedDir();
+    },
+    newFolderInSelectedDir: () => {
+      if (sidebarView !== "files") return;
+      fileTreeActionsRef.current?.newFolderInSelectedDir();
+    },
+    renameSelectedTreeEntry: () => {
+      if (sidebarView !== "files") return;
+      fileTreeActionsRef.current?.renameSelected();
+    },
+    deleteSelectedTreeEntry: () => {
+      if (sidebarView !== "files") return;
+      fileTreeActionsRef.current?.deleteSelected();
+    },
   };
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -809,6 +856,10 @@ export function Workbench(props: { client: RpcClient }) {
       { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleBottomPanel("terminal"), keybinding: "Control+Backquote" },
       { id: "terminal.new", title: "New Terminal", run: () => actionsRef.current.newTerminal() },
       { id: "view.toggleChat", title: "Toggle Chat", run: () => actionsRef.current.toggleBottomPanel("chat"), keybinding: "Control+Shift+KeyC" },
+      { id: "files.newFile", title: "New File", run: () => actionsRef.current.newFileInSelectedDir(), keybinding: "$mod+Alt+KeyN" },
+      { id: "files.newFolder", title: "New Folder", run: () => actionsRef.current.newFolderInSelectedDir(), keybinding: "$mod+Alt+Shift+KeyN" },
+      { id: "files.rename", title: "Rename", run: () => actionsRef.current.renameSelectedTreeEntry(), keybinding: "F2" },
+      { id: "files.delete", title: "Delete", run: () => actionsRef.current.deleteSelectedTreeEntry(), keybinding: "$mod+Backspace" },
     ];
     for (const command of commands) registry.register(command);
     const detach = attachKeybindings(registry);
@@ -882,6 +933,8 @@ export function Workbench(props: { client: RpcClient }) {
     bottomView,
     setBottomView,
     treeRefreshToken,
+    onTreeChanged: bumpTreeRefreshToken,
+    fileTreeActionsRef,
     tabsVersion,
     theme,
     ptyStore,
