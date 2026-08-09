@@ -118,3 +118,31 @@ body {
   border-bottom-color: var(--zero-accent);
   color: var(--zero-accent);
 }
+
+/* Typing indicator animation for chat agent response. Three dots pulse
+ * with staggered timing to show activity. */
+@keyframes zero-typing-pulse {
+  0%, 60%, 100% {
+    opacity: 0.4;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.zero-typing-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: zero-typing-pulse 1.4s infinite;
+}
+
+.zero-typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.zero-typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}

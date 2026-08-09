@@ -6,6 +6,7 @@ import type { ChatTurnEvent } from "@zero/protocol";
  * stream concurrently without cross-talk. */
 export class TurnStore {
   #listeners = new Map<string, Set<(event: ChatTurnEvent) => void>>();
+  #activeTurns = new Set<string>();
 
   onEvent(turnId: string, listener: (event: ChatTurnEvent) => void): () => void {
     let set = this.#listeners.get(turnId);
@@ -20,6 +21,17 @@ export class TurnStore {
   }
 
   handleEvent(turnId: string, event: ChatTurnEvent): void {
+    // Track active turns: add on any non-terminal event, remove on done/error
+    if (event.type === "done" || event.type === "error") {
+      this.#activeTurns.delete(turnId);
+    } else {
+      this.#activeTurns.add(turnId);
+    }
+
     for (const listener of this.#listeners.get(turnId) ?? []) listener(event);
+  }
+
+  isActive(turnId: string): boolean {
+    return this.#activeTurns.has(turnId);
   }
 }

@@ -15,6 +15,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
   const [banner, setBanner] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ turnId: string; call: ChatToolCall; preview: string } | null>(null);
   const [status, setStatus] = useState<{ activeModel: string | null; reason: string | null }>({ activeModel: null, reason: null });
+  const [turnId, setTurnId] = useState<string | null>(null);
   const turnIdRef = useRef<string | null>(null);
   // Settles the in-flight `send()` promise (unsubscribes from TurnStore,
   // resolves) for the current turn, if any. `chat/abort` only signals the
@@ -31,6 +32,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
     if (turnId) client.request("chat/abort", { turnId }).catch(() => {});
     finishTurnRef.current?.();
     setPendingApproval(null);
+    setTurnId(null);
   }
 
   const sessions = chatStore.getSessions();
@@ -127,6 +129,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
     try {
       const { turnId } = await client.request<{ turnId: string }>("chat/turn", { sessionId, userText: text });
       turnIdRef.current = turnId;
+      setTurnId(turnId);
       await new Promise<void>((resolve) => {
         // `finish` is declared before use but assigned after `onEvent`
         // registers the listener below - safe because `onEvent` only stores
@@ -174,6 +177,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
       reportError(`failed to send: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       turnIdRef.current = null;
+      setTurnId(null);
       setBusy(false);
       chatStore.touchSession(sessionId);
       // Guard against a status response for a session the user has since
@@ -253,6 +257,14 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
           <pre style={{ maxHeight: 160, overflow: "auto", fontSize: 12, whiteSpace: "pre-wrap" }}>{pendingApproval.preview}</pre>
           <button onClick={() => void approve(true)}>Approve</button>
           <button onClick={() => void approve(false)}>Deny</button>
+        </div>
+      )}
+      {turnId && turnStore.isActive(turnId) && (
+        <div role="status" style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--zero-statusbar-fg)", opacity: 0.8, padding: "4px 10px", borderTop: "1px solid var(--zero-border)", background: "var(--zero-editor-bg)" }}>
+          <span className="zero-typing-dot" />
+          <span className="zero-typing-dot" />
+          <span className="zero-typing-dot" />
+          <span>Zero is thinking…</span>
         </div>
       )}
       <div style={{ display: "flex", gap: 4, padding: 8, borderTop: "1px solid var(--zero-border)" }}>

@@ -24,3 +24,22 @@ test("unsubscribing stops further delivery", () => {
   store.handleEvent("t1", { type: "text", delta: "hi" });
   expect(received).toEqual([]);
 });
+
+test("isActive is false before any event, true after a text delta, false after done", () => {
+  const store = new TurnStore();
+  expect(store.isActive("t1")).toBe(false);
+  store.handleEvent("t1", { type: "text", delta: "hi" });
+  expect(store.isActive("t1")).toBe(true);
+  store.handleEvent("t1", {
+    type: "done",
+    message: { role: "assistant", content: "hi", createdAt: 0 },
+  });
+  expect(store.isActive("t1")).toBe(false);
+});
+
+test("isActive is false after an error event", () => {
+  const store = new TurnStore();
+  store.handleEvent("t2", { type: "text", delta: "hi" });
+  store.handleEvent("t2", { type: "error", message: "boom" });
+  expect(store.isActive("t2")).toBe(false);
+});
