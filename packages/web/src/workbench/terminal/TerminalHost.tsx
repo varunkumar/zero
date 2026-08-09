@@ -58,5 +58,10 @@ export function TerminalHost(props: {
     if (props.visible) fit.current?.fit();
   }, [props.visible]);
 
+  useEffect(() => {
+    if (!term.current) return;
+    term.current.options.theme = terminalTheme(props.theme);
+  }, [props.theme]);
+
   return <div ref={host} style={{ height: "100%", display: props.visible ? "block" : "none", padding: 4 }} />;
 }
