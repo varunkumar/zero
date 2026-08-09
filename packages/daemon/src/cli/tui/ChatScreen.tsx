@@ -94,6 +94,13 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [suggestionIndex, setSuggestionIndex] = useState(0);
+  // Submitted messages, oldest first, for Up/Down history recall in the
+  // input bar (shell-style). historyIndex of -1 means "not currently
+  // recalling - show the live draft"; draftRef holds whatever the user
+  // had typed before the first Up press, so Down can restore it.
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const draftRef = useRef("");
   // Number of newest *entries* (blocks, not rows - see `entries` below)
   // currently scrolled out of view below the visible window. 0 means
   // pinned to the live tail.
@@ -175,7 +182,10 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     const trimmed = value.trim();
     setInput("");
     setSuggestionIndex(0);
+    setHistoryIndex(-1);
+    draftRef.current = "";
     if (!trimmed || busy) return;
+    setHistory((prev) => (prev[prev.length - 1] === trimmed ? prev : [...prev, trimmed]));
     if (trimmed === "/exit" || trimmed === "/quit") { exit(); return; }
     if (trimmed === "/help") {
       for (const c of SLASH_COMMANDS) pushLine(`${c.name}  ${c.description}`);
@@ -190,6 +200,15 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     setScrollOffset(0);
     void runTurn(trimmed);
   }, [busy, runTurn, exit, pushLine, toggleTheme]);
+
+  // The onChange TextInput calls for actual typed keystrokes. History
+  // recall (below) sets `input` directly instead of through this, so
+  // typing - which always comes through here - can reliably detect "the
+  // user diverged from the recalled entry" and drop back to draft mode.
+  const onTypedInputChange = useCallback((value: string) => {
+    setHistoryIndex(-1);
+    setInput(value);
+  }, []);
 
   const suggestions = matchingCommands(input);
   const activeSuggestion = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
@@ -206,16 +225,36 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       if (key.tab) { setInput(`${suggestions[activeSuggestion]!.name} `); setSuggestionIndex(0); return; }
     }
     if (!pending && suggestions.length === 0) {
-      // Plain arrow keys, not Page Up/Down or Ctrl+U/D: many Mac
-      // keyboards have no dedicated Page Up/Down, and - more importantly
-      // - ink-text-input inserts *any* key it doesn't explicitly special-
-      // case as literal text into the input box (it only ignores plain
-      // Up/Down/Tab/Ctrl+C/Return/Backspace/Delete), so Page Up/Down and
-      // Ctrl+U/D were leaking stray characters into whatever the user was
-      // typing. Up/Down are the one binding ink-text-input unconditionally
-      // ignores, and every keyboard has them.
-      if (key.upArrow) { setScrollOffset((o) => Math.min(Math.max(0, entries.length - 1), o + SCROLL_PAGE_ENTRIES)); return; }
-      if (key.downArrow) { setScrollOffset((o) => Math.max(0, o - SCROLL_PAGE_ENTRIES)); return; }
+      // Page Up/Down scroll the transcript (Fn+Up/Down on a Mac keyboard
+      // without dedicated Page Up/Down keys). ink-text-input inserts any
+      // key it doesn't special-case as literal text, but Page Up/Down are
+      // "named" keys Ink itself resolves to an empty `input` string
+      // (see parse-keypress's nonAlphanumericKeys), so ink-text-input's
+      // own "insert this into the text" branch has nothing to insert -
+      // safe by construction, not by luck.
+      if (key.pageUp) { setScrollOffset((o) => Math.min(Math.max(0, entries.length - 1), o + SCROLL_PAGE_ENTRIES)); return; }
+      if (key.pageDown) { setScrollOffset((o) => Math.max(0, o - SCROLL_PAGE_ENTRIES)); return; }
+      // Up/Down cycle through previously submitted messages, shell-style.
+      if (key.upArrow) {
+        if (history.length === 0) return;
+        if (historyIndex === -1) draftRef.current = input;
+        const nextIndex = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
+        setHistoryIndex(nextIndex);
+        setInput(history[nextIndex]!);
+        return;
+      }
+      if (key.downArrow) {
+        if (historyIndex === -1) return;
+        if (historyIndex >= history.length - 1) {
+          setHistoryIndex(-1);
+          setInput(draftRef.current);
+        } else {
+          const nextIndex = historyIndex + 1;
+          setHistoryIndex(nextIndex);
+          setInput(history[nextIndex]!);
+        }
+        return;
+      }
     }
   });
 
@@ -277,10 +316,9 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const streamingRows = streamingText ? estimateTextRows(streamingText, columns) : 0;
   const liveExtra = (busy && status ? 1 : 0) + streamingRows;
   // Conversations can run longer than the terminal - rather than only
-  // ever showing the live tail, Up/Down arrows (see
-  // useInput above) walk scrollOffset back through older entries.
-  // clampedOffset keeps that in range as entries grow or shrink (e.g.
-  // right after mount).
+  // ever showing the live tail, Page Up/Down (see useInput above) walk
+  // scrollOffset back through older entries. clampedOffset keeps that in
+  // range as entries grow or shrink (e.g. right after mount).
   const clampedOffset = Math.min(scrollOffset, Math.max(0, entries.length - 1));
   const isScrolled = clampedOffset > 0;
   // Reserve one row for the "scrolled up" indicator below so it never
@@ -316,7 +354,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
           plus flexShrink=0 makes this box (and its siblings below)
           immovable regardless of content length. */}
       <Box flexDirection="column" height={scrollAreaHeight + (isScrolled ? 1 : 0)} flexShrink={0} overflow="hidden">
-        {isScrolled ? <Text dimColor>↑ scrolled up · ↓ to return to latest</Text> : null}
+        {isScrolled ? <Text dimColor>↑ scrolled up · PageDown to return to latest</Text> : null}
         {visibleEntries.map((entry) => entry.render())}
         {!isScrolled && busy && status ? <Spinner label={status} /> : null}
         {!isScrolled && streamingText ? <Text color={theme.assistantColor}>{streamingText}</Text> : null}
@@ -327,7 +365,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
         <Box flexDirection="column" flexShrink={0}>
           <Box borderStyle="round" borderColor={theme.accent} paddingX={1}>
             <Text color={theme.accent}>{"> "}</Text>
-            <TextInput value={input} onChange={setInput} onSubmit={onSubmit} focus={!busy} />
+            <TextInput value={input} onChange={onTypedInputChange} onSubmit={onSubmit} focus={!busy} />
           </Box>
           {suggestions.length > 0 ? (
             <Box flexDirection="column" paddingLeft={2}>

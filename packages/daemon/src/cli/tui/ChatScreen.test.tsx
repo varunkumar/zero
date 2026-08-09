@@ -60,7 +60,7 @@ test("the newest lines stay in view (header scrolled out) when the transcript ov
   expect(frameHeight).toBeLessThan(24);
 
   // Scrolling all the way up reaches the header, same as any old content.
-  for (let i = 0; i < 10; i++) { stdin.write("\x1b[A"); await tick(); } // Up arrow
+  for (let i = 0; i < 10; i++) { stdin.write("\x1b[5~"); await tick(); } // Page Up
   expect(lastFrame() ?? "").toContain("v0.0.0-test");
 });
 
@@ -87,7 +87,7 @@ test("a long, unbroken assistant reply does not corrupt the header or footer lay
   expect(frame).toMatch(/╰─+╯/);
 });
 
-test("Up arrow scrolls the transcript into history, Down arrow returns to the live tail (no Page Up/Down needed)", async () => {
+test("Page Up scrolls the transcript into history, Page Down returns to the live tail", async () => {
   const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
   const { stdin, lastFrame } = render(
     <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={manyLines} cwd="/tmp/proj" version="0.0.0-test" />,
@@ -95,32 +95,73 @@ test("Up arrow scrolls the transcript into history, Down arrow returns to the li
   await tick();
   expect(lastFrame() ?? "").toContain("line 39");
 
-  stdin.write("\x1b[A"); // Up arrow
+  stdin.write("\x1b[5~"); // Page Up
   await tick();
   let frame = lastFrame() ?? "";
   expect(frame).toContain("scrolled up");
   expect(frame).not.toContain("line 39");
 
-  stdin.write("\x1b[B"); // Down arrow
+  stdin.write("\x1b[6~"); // Page Down
   await tick();
   frame = lastFrame() ?? "";
   expect(frame).toContain("line 39");
   expect(frame).not.toContain("scrolled up");
 });
 
-test("scrolling with Up/Down arrows never leaks keystrokes into the message input box", async () => {
+test("scrolling with Page Up/Down never leaks keystrokes into the message input box", async () => {
   const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
   const { stdin, lastFrame } = render(
     <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={manyLines} cwd="/tmp/proj" version="0.0.0-test" />,
   );
   await tick();
-  for (let i = 0; i < 5; i++) { stdin.write("\x1b[A"); await tick(); } // Up arrow x5
-  for (let i = 0; i < 3; i++) { stdin.write("\x1b[B"); await tick(); } // Down arrow x3
+  for (let i = 0; i < 5; i++) { stdin.write("\x1b[5~"); await tick(); } // Page Up x5
+  for (let i = 0; i < 3; i++) { stdin.write("\x1b[6~"); await tick(); } // Page Down x3
   const frame = lastFrame() ?? "";
   // ink-text-input inserts any keystroke it doesn't special-case as
   // literal text - the input box must still show only the placeholder
   // prompt, not stray characters from the scroll keys.
   expect(frame).toMatch(/│ >\s*│/);
+});
+
+test("Up/Down arrows cycle through submitted message history in the input bar", async () => {
+  const runtime = fakeRuntime([
+    { type: "done", message: { role: "assistant", content: "ok", createdAt: 0 } },
+  ]);
+  const { stdin, lastFrame } = render(
+    <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  await typeAndSubmit(stdin, "first");
+  await tick();
+  await typeAndSubmit(stdin, "second");
+  await tick();
+
+  // The transcript above already contains "> first" and "> second" from
+  // the two submitted turns, so assertions must target the input box's
+  // own line specifically (the one bordered by "│ >" ... "│"), not just
+  // check the frame as a whole.
+  const inputLine = () => (lastFrame() ?? "").split("\n").find((l) => /^│ >/.test(l)) ?? "";
+
+  // Start typing a fresh (unsent) draft, then recall history over it.
+  stdin.write("d");
+  await tick();
+  expect(inputLine()).toContain("> d");
+
+  stdin.write("\x1b[A"); // Up -> most recent submitted message
+  await tick();
+  expect(inputLine()).toContain("> second");
+
+  stdin.write("\x1b[A"); // Up again -> older message
+  await tick();
+  expect(inputLine()).toContain("> first");
+
+  stdin.write("\x1b[B"); // Down -> back to "second"
+  await tick();
+  expect(inputLine()).toContain("> second");
+
+  stdin.write("\x1b[B"); // Down past the newest entry -> restores the draft
+  await tick();
+  expect(inputLine()).toContain("> d");
 });
 
 test("a fenced code block renders as a bordered block with its language tag, not raw backtick fences", async () => {
