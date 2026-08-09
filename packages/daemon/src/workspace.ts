@@ -73,10 +73,15 @@ export class Workspace {
   async create(rel: string, kind: "file" | "dir"): Promise<void> {
     const abs = this.#resolve(rel);
     if (kind === "dir") {
-      await fs.mkdir(await this.#resolveReal(rel).catch(() => abs), { recursive: true });
+      // Create the parent dirs first so #resolveReal can realpath them
+      // (mirrors write()'s "path doesn't exist yet" handling), then let
+      // #resolveReal re-verify containment through any symlinks before
+      // mkdir touches the target itself.
+      await fs.mkdir(dirname(abs), { recursive: true });
+      await fs.mkdir(await this.#resolveReal(rel), { recursive: true });
     } else {
       await fs.mkdir(dirname(abs), { recursive: true });
-      await fs.writeFile(abs, "", { flag: "wx" });
+      await fs.writeFile(await this.#resolveReal(rel), "", { flag: "wx" });
     }
   }
 

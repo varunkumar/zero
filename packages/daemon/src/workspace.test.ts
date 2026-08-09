@@ -144,6 +144,24 @@ test("create rejects a path outside the workspace root", async () => {
   await expect(ws.create("../escape.txt", "file")).rejects.toThrow(PathOutsideWorkspaceError);
 });
 
+test("create blocks a file through a not-yet-existing path behind a symlinked directory", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await expect(ws.create("outdir/new.txt", "file")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "new.txt"))).toBe(false);
+});
+
+test("create blocks a directory through a not-yet-existing path behind a symlinked directory", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await expect(ws.create("outdir/newdir", "dir")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "newdir"))).toBe(false);
+});
+
 test("rename moves a file to a new relative path", async () => {
   const ws = new Workspace(makeProject());
   await ws.write("a.txt", "hi");
