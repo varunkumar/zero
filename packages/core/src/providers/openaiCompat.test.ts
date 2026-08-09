@@ -91,6 +91,76 @@ test("chat() serializes outbound tool_calls and tool_call_id for assistant/tool-
   expect(toolMsg?.tool_call_id).toBe("c1");
 });
 
+test("chat() recovers a tool call embedded as <tool_call> JSON in content when tool_calls is empty", async () => {
+  const provider = new OpenAICompatProvider({
+    baseUrl: "http://x/v1", model: "qwen",
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '<tool_call>\n{"name": "fs_read", "arguments": {"path": "a.ts"}}\n</tool_call>' } }],
+    }), { status: 200 }),
+  });
+  const tools: ChatToolSpec[] = [{ name: "fs_read", description: "Read a file.", schema: { type: "object" } }];
+  const deltas = [];
+  for await (const d of provider.chat([{ role: "user", content: "read a.ts", createdAt: 0 }], tools, new AbortController().signal)) {
+    deltas.push(d);
+  }
+  expect(deltas[0]!.text).toBeUndefined();
+  expect(deltas[0]!.toolCalls?.[0]?.id).toMatch(/^fallback-0-/);
+  expect(deltas[0]!.toolCalls).toEqual([{ id: deltas[0]!.toolCalls![0]!.id, name: "fs_read", args: { path: "a.ts" } }]);
+});
+
+test("chat() recovers a tool call that is bare JSON in content with no <tool_call> tags (observed Ollama qwen2.5-coder behavior)", async () => {
+  const provider = new OpenAICompatProvider({
+    baseUrl: "http://x/v1", model: "qwen",
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '{"name": "fs_tree", "arguments": {}}' } }],
+    }), { status: 200 }),
+  });
+  const tools: ChatToolSpec[] = [{ name: "fs_tree", description: "List files.", schema: { type: "object" } }];
+  const deltas = [];
+  for await (const d of provider.chat([{ role: "user", content: "list files", createdAt: 0 }], tools, new AbortController().signal)) {
+    deltas.push(d);
+  }
+  expect(deltas[0]!.text).toBeUndefined();
+  expect(deltas[0]!.toolCalls).toEqual([{ id: deltas[0]!.toolCalls![0]!.id, name: "fs_tree", args: {} }]);
+});
+
+test("chat() recovers a tool call surrounded by noise: a stray <|im_start|> token and the same call echoed twice, once raw and once in a ```json fence (observed Ollama qwen2.5-coder behavior on fs_edit)", async () => {
+  const provider = new OpenAICompatProvider({
+    baseUrl: "http://x/v1", model: "qwen",
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content:
+        '<|im_start|>\n{"name": "fs_edit", "arguments": {"oldText":"hello from zero","newText":"edited by zero","path":"notes.txt"}}\n\n'
+        + '```json\n{"name": "fs_edit", "arguments": {"oldText":"hello from zero","newText":"edited by zero","path":"notes.txt"}}\n```' } }],
+    }), { status: 200 }),
+  });
+  const tools: ChatToolSpec[] = [{ name: "fs_edit", description: "Edit a file.", schema: { type: "object" } }];
+  const deltas = [];
+  for await (const d of provider.chat([{ role: "user", content: "edit notes.txt", createdAt: 0 }], tools, new AbortController().signal)) {
+    deltas.push(d);
+  }
+  expect(deltas[0]!.text).toBeUndefined();
+  expect(deltas[0]!.toolCalls).toHaveLength(1); // the echoed duplicate must be deduped
+  expect(deltas[0]!.toolCalls).toEqual([{
+    id: deltas[0]!.toolCalls![0]!.id, name: "fs_edit",
+    args: { oldText: "hello from zero", newText: "edited by zero", path: "notes.txt" },
+  }]);
+});
+
+test("chat() leaves ordinary text content alone when it isn't a recognized tool call", async () => {
+  const provider = new OpenAICompatProvider({
+    baseUrl: "http://x/v1", model: "qwen",
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: "Here is the answer: 42." } }],
+    }), { status: 200 }),
+  });
+  const tools: ChatToolSpec[] = [{ name: "fs_tree", description: "List files.", schema: { type: "object" } }];
+  const deltas = [];
+  for await (const d of provider.chat([{ role: "user", content: "what is the answer", createdAt: 0 }], tools, new AbortController().signal)) {
+    deltas.push(d);
+  }
+  expect(deltas).toEqual([{ text: "Here is the answer: 42.", toolCalls: undefined }]);
+});
+
 test("supportsTools() is true", () => {
   const provider = new OpenAICompatProvider({ baseUrl: "http://x/v1", model: "qwen" });
   expect(provider.supportsTools()).toBe(true);
