@@ -4,8 +4,10 @@ import TextInput from "ink-text-input";
 import type { AgentRuntime, ChatToolCall } from "@zero/core";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { Banner } from "./Banner";
+import { MessageBlock } from "./MessageBlock";
 import { Spinner } from "./Spinner";
 import { useTheme } from "./theme";
+import { estimateTextRows, parseBlocks } from "./markdown";
 
 export interface ChatScreenProps {
   runtime: Pick<AgentRuntime, "sendMessage" | "resolveApproval">;
@@ -69,7 +71,21 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const { stdout } = useStdout();
   const [rows, setRows] = useState(stdout.rows || 24);
   const [columns, setColumns] = useState(stdout.columns || 80);
-  const [lines, setLines] = useState<Line[]>(() => initialLines.map((text) => ({ id: nextLineId(), text })));
+  // Resumed transcript lines carry no structured role - App.tsx's
+  // linesFromMessages() prefixes user turns with "> " (the same
+  // convention runTurn below uses live), so that prefix is what
+  // distinguishes them here. Without this, every resumed line rendered in
+  // the same default color, making it impossible to tell who said what.
+  const [lines, setLines] = useState<Line[]>(() => initialLines.map((text, i) => {
+    const isUser = text.startsWith("> ");
+    return {
+      id: nextLineId(),
+      text,
+      color: isUser ? theme.userColor : theme.assistantColor,
+      bold: isUser,
+      spacer: isUser && i > 0,
+    };
+  }));
   const [streamingText, setStreamingText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingApproval | null>(null);
@@ -187,8 +203,14 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       if (key.tab) { setInput(`${suggestions[activeSuggestion]!.name} `); setSuggestionIndex(0); return; }
     }
     if (!pending) {
-      if (key.pageUp) { setScrollOffset((o) => Math.min(Math.max(0, lines.length - 1), o + SCROLL_PAGE_LINES)); return; }
-      if (key.pageDown) { setScrollOffset((o) => Math.max(0, o - SCROLL_PAGE_LINES)); return; }
+      // Many Mac keyboards have no dedicated Page Up/Down keys, so Ctrl+U
+      // / Ctrl+D (the vim/less convention for half-page scroll) are the
+      // primary bindings; PageUp/PageDown still work for terminals/
+      // keyboards that do send them (e.g. via fn+Up/Down).
+      const scrollUp = key.pageUp || (key.ctrl && _input === "u");
+      const scrollDown = key.pageDown || (key.ctrl && _input === "d");
+      if (scrollUp) { setScrollOffset((o) => Math.min(Math.max(0, lines.length - 1), o + SCROLL_PAGE_LINES)); return; }
+      if (scrollDown) { setScrollOffset((o) => Math.max(0, o - SCROLL_PAGE_LINES)); return; }
     }
   });
 
@@ -205,15 +227,17 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   // live region's computed height reaches stdout.rows. Reserving one row
   // keeps every render under that threshold.
   const totalHeight = Math.max(3, rows - 1);
-  // Ink wraps Text content at the terminal width by default, so a single
-  // pushed "line" (e.g. a long assistant reply) can occupy several actual
-  // terminal rows. Slicing by array-index count alone under-counts that,
-  // letting the real rendered height creep past totalHeight until it
-  // reaches stdout.rows again - re-triggering Ink's full-clear-and-rewrite
-  // (this file's original bug) after enough long messages accumulate.
-  // Walk from the newest line backward, accounting for wrapped row height,
-  // so the slice always fits the actual space available.
-  const rowsForText = (text: string) => Math.max(1, Math.ceil((text.length || 1) / Math.max(1, columns)));
+  // Ink wraps Text content at the terminal width by default, and embedded
+  // "\n"s (multi-line replies, fenced code blocks) each force their own
+  // row, so a single pushed "line" can occupy several actual terminal
+  // rows. Slicing by array-index count alone under-counts that, letting
+  // the real rendered height creep past totalHeight until it reaches
+  // stdout.rows again - re-triggering Ink's full-clear-and-rewrite (this
+  // file's original bug) after enough long/multi-line messages
+  // accumulate. estimateTextRows (shared with MessageBlock's own
+  // rendering, so the two stay in sync) accounts for both. Walk from the
+  // newest line backward so the slice always fits the space available.
+  const rowsForText = (text: string) => estimateTextRows(text, columns);
   const lineRowCost = (line: Line) => rowsForText(line.text) + (line.spacer ? 1 : 0);
   const streamingRows = streamingText ? rowsForText(streamingText) : 0;
   const liveExtra = (busy && status ? 1 : 0) + streamingRows;
@@ -232,12 +256,17 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   for (let i = bottomIndex; i >= 0; i--) {
     const line = lines[i]!;
     const rowsNeeded = lineRowCost(line);
-    // A single message longer than the whole budget (e.g. one huge
-    // unbroken paragraph) would otherwise make the loop bail before
-    // adding anything, leaving the transcript blank. Always show at
-    // least the newest line - overflow="hidden" on the container clips
-    // any excess rather than pushing the header/footer around.
-    if (usedRows + rowsNeeded > middleHeight && visibleLines.length > 0) break;
+    if (usedRows + rowsNeeded > middleHeight) {
+      // A single plain-text message longer than the whole budget (e.g.
+      // one huge unbroken paragraph) would otherwise make the loop bail
+      // before adding anything, leaving the transcript blank - so it's
+      // still shown, letting overflow="hidden" clip the excess. A code
+      // block clipped mid-box instead leaves a dangling open border with
+      // no content or closing edge, which reads as broken rather than
+      // "trimmed" - so code-block messages only ever render whole.
+      const hasCodeBlock = parseBlocks(line.text).some((b) => b.kind === "code");
+      if (hasCodeBlock || visibleLines.length > 0) break;
+    }
     usedRows += rowsNeeded;
     visibleLines.unshift(line);
     if (usedRows >= middleHeight) break;
@@ -253,13 +282,9 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
           height plus flexShrink=0 makes this box (and its siblings below)
           immovable regardless of content length. */}
       <Box flexDirection="column" height={middleHeight + (isScrolled ? 1 : 0)} flexShrink={0} overflow="hidden">
-        {isScrolled ? <Text dimColor>↑ scrolled up · PageDown to jump to latest</Text> : null}
+        {isScrolled ? <Text dimColor>↑ scrolled up · Ctrl+D (or PageDown) to jump to latest</Text> : null}
         {visibleLines.map((line) => (
-          <Box key={line.id} marginTop={line.spacer ? 1 : 0}>
-            <Text color={line.color} bold={line.bold} dimColor={line.dim}>
-              {line.text || " "}
-            </Text>
-          </Box>
+          <MessageBlock key={line.id} line={line} codeBorderColor={theme.toolLine} />
         ))}
         {!isScrolled && busy && status ? <Spinner label={status} /> : null}
         {!isScrolled && streamingText ? <Text color={theme.assistantColor}>{streamingText}</Text> : null}

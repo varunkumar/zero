@@ -85,6 +85,69 @@ test("a long, unbroken assistant reply does not corrupt the header or footer lay
   expect(frame).toMatch(/╰─+╯/);
 });
 
+test("Ctrl+U scrolls the transcript into history, Ctrl+D returns to the live tail (no Page Up/Down needed)", async () => {
+  const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+  const { stdin, lastFrame } = render(
+    <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={manyLines} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  expect(lastFrame() ?? "").toContain("line 39");
+
+  stdin.write("\x15"); // Ctrl+U
+  await tick();
+  let frame = lastFrame() ?? "";
+  expect(frame).toContain("scrolled up");
+  expect(frame).not.toContain("line 39");
+
+  stdin.write("\x04"); // Ctrl+D
+  await tick();
+  frame = lastFrame() ?? "";
+  expect(frame).toContain("line 39");
+  expect(frame).not.toContain("scrolled up");
+});
+
+test("a fenced code block renders as a bordered block with its language tag, not raw backtick fences", async () => {
+  const reply = "Here you go:\n```ts\nfunction add(a, b) {\n  return a + b;\n}\n```\nDone.";
+  const runtime = fakeRuntime([
+    { type: "text", delta: reply },
+    { type: "done", message: { role: "assistant", content: reply, createdAt: 0 } },
+  ]);
+  const { stdin, stdout, lastFrame } = render(
+    <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  // A default 24-row test terminal doesn't leave enough room below the
+  // fixed 16-row header for a 6-row code block - give it more room, the
+  // same way a real (taller) terminal would have it.
+  Object.defineProperty(stdout, "rows", { value: 45, configurable: true });
+  stdout.emit("resize");
+  await tick();
+  await typeAndSubmit(stdin, "show me");
+  await tick();
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("Here you go:");
+  expect(frame).toContain("ts");
+  expect(frame).toContain("function add(a, b) {");
+  expect(frame).toContain("return a + b;");
+  expect(frame).toContain("Done.");
+  expect(frame).not.toContain("```");
+});
+
+test("resumed transcript distinguishes user and assistant turns", () => {
+  const { lastFrame } = render(
+    <ChatScreen
+      runtime={fakeRuntime([])}
+      sessionId="s1"
+      initialLines={["> what is 2+2?", "2+2 is 4."]}
+      cwd="/tmp/proj"
+      version="0.0.0-test"
+    />,
+  );
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("> what is 2+2?");
+  expect(frame).toContain("2+2 is 4.");
+});
+
 test("PageUp scrolls the transcript into history, PageDown returns to the live tail", async () => {
   const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
   const { stdin, lastFrame } = render(
