@@ -21,6 +21,7 @@ import { ChatStore } from "../chat/store";
 import { TurnStore } from "../chat/turnStore";
 import { ChatPanel } from "../chat/ChatPanel";
 import { iconFor } from "../icons/iconFor";
+import { FilesTabIcon, SearchTabIcon, TerminalTabIcon, ChatTabIcon } from "../icons/TabIcons";
 import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
 
@@ -88,6 +89,11 @@ interface WorkbenchContextValue {
   setSidebarView: (view: "files" | "search") => void;
   bottomView: "terminal" | "chat";
   setBottomView: (view: "terminal" | "chat") => void;
+  /** Removes the Terminal/Chat dockview panel entirely (both panels stay
+   * mounted underneath while it's open - see BottomPanel - so this is the
+   * only way to actually close it, distinct from switching which view it
+   * shows). */
+  closeBottomPanel: () => void;
   treeRefreshToken: number;
   /** Called after a file-tree create/rename/delete/move/copy to refresh the
    * tree - the same bump `fs/changed` already drives, exposed so
@@ -130,8 +136,8 @@ function SidebarPanel() {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-sidebar-bg)", color: "var(--zero-sidebar-fg)" }}>
       <div className="zero-sidebar-toggle">
-        <button aria-pressed={w.sidebarView === "files"} onClick={() => w.setSidebarView("files")}>Files</button>
-        <button aria-pressed={w.sidebarView === "search"} onClick={() => w.setSidebarView("search")}>Search</button>
+        <button aria-pressed={w.sidebarView === "files"} onClick={() => w.setSidebarView("files")}><FilesTabIcon />Files</button>
+        <button aria-pressed={w.sidebarView === "search"} onClick={() => w.setSidebarView("search")}><SearchTabIcon />Search</button>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {w.sidebarView === "files" ? (
@@ -279,9 +285,19 @@ export function BottomPanel() {
   const w = useWorkbench();
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)" }}>
-      <div className="zero-sidebar-toggle">
-        <button aria-pressed={w.bottomView === "terminal"} onClick={() => w.setBottomView("terminal")}>Terminal</button>
-        <button aria-pressed={w.bottomView === "chat"} onClick={() => w.setBottomView("chat")}>Chat</button>
+      <div className="zero-sidebar-toggle" style={{ justifyContent: "space-between" }}>
+        <div style={{ display: "flex" }}>
+          <button aria-pressed={w.bottomView === "terminal"} onClick={() => w.setBottomView("terminal")}><TerminalTabIcon />Terminal</button>
+          <button aria-pressed={w.bottomView === "chat"} onClick={() => w.setBottomView("chat")}><ChatTabIcon />Chat</button>
+        </div>
+        <button
+          aria-label="Close panel"
+          title="Close panel"
+          onClick={() => w.closeBottomPanel()}
+          style={{ background: "transparent", border: "none", margin: "0 6px", opacity: 0.7 }}
+        >
+          ×
+        </button>
       </div>
       {/* Both panels stay mounted at all times and are toggled via `display`
           rather than a ternary: unmounting TerminalPanel would tear down its
@@ -861,6 +877,12 @@ export function Workbench(props: { client: RpcClient }) {
       // action is "add" or "switch" — both lead to showing the panel with the requested view
       actionsRef.current.showBottomPanel(view);
     },
+    closeBottomPanel: () => {
+      const api = dockApi.current;
+      if (!api) return;
+      const panel = api.getPanel(BOTTOM_PANEL_ID);
+      if (panel) api.removePanel(panel);
+    },
     newTerminal: () => {
       actionsRef.current.showBottomPanel("terminal");
       void client.request<{ sessionId: string; shell: string }>("pty/open", { cols: 80, rows: 24 })
@@ -987,6 +1009,7 @@ export function Workbench(props: { client: RpcClient }) {
     setSidebarView,
     bottomView,
     setBottomView,
+    closeBottomPanel: () => actionsRef.current.closeBottomPanel(),
     treeRefreshToken,
     onTreeChanged: bumpTreeRefreshToken,
     fileTreeActionsRef,

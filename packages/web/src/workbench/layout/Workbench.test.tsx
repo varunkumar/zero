@@ -33,6 +33,7 @@ function renderBottomPanel(bottomView: "terminal" | "chat") {
     theme: "dark" as const,
     bottomView,
     setBottomView: () => {},
+    closeBottomPanel: () => {},
   };
   return renderToStaticMarkup(
     <WorkbenchContext.Provider value={contextValue as any}>
@@ -44,14 +45,20 @@ function renderBottomPanel(bottomView: "terminal" | "chat") {
 describe("BottomPanel", () => {
   test("shows the Terminal toggle as pressed and renders the terminal view by default", () => {
     const html = renderBottomPanel("terminal");
-    expect(html).toContain(">Terminal<");
-    expect(html).toContain(">Chat<");
+    // Each toggle button now renders an icon before its label, so assertions
+    // below check "which </button> chunk contains this label", rather than
+    // relying on the label sitting directly after a `>`.
+    const buttons = html.split("</button>");
+    const terminalButton = buttons.find((b) => b.endsWith("Terminal"));
+    const chatButton = buttons.find((b) => b.endsWith("Chat"));
+    expect(terminalButton).toBeDefined();
+    expect(chatButton).toBeDefined();
     // An empty PtyStore renders TerminalPanel's empty state, not ChatPanel's.
     expect(html).toContain("No terminals open");
     // Positive assertion: Terminal button should have aria-pressed="true"
-    expect(html).toContain("aria-pressed=\"true\">Terminal<");
+    expect(terminalButton).toContain("aria-pressed=\"true\"");
     // Negative assertion: Chat button should not have aria-pressed="true"
-    expect(html).not.toContain("aria-pressed=\"true\">Chat<");
+    expect(chatButton).not.toContain("aria-pressed=\"true\"");
   });
 
   test("swapping bottomView to chat keeps TerminalPanel mounted but hidden, and shows ChatPanel", () => {
@@ -64,9 +71,12 @@ describe("BottomPanel", () => {
     // SidebarPanel's Files/Search, which really do mount only one at a time.
     expect(html).toContain("No terminals open");
     expect(html).toContain("display:none");
-    expect(html).toContain("aria-pressed=\"true\">Chat<");
+    const buttons = html.split("</button>");
+    const terminalButton = buttons.find((b) => b.endsWith("Terminal"));
+    const chatButton = buttons.find((b) => b.endsWith("Chat"));
+    expect(chatButton).toContain("aria-pressed=\"true\"");
     // Also check that Terminal is not pressed in this state
-    expect(html).not.toContain("aria-pressed=\"true\">Terminal<");
+    expect(terminalButton).not.toContain("aria-pressed=\"true\"");
   });
 });
 

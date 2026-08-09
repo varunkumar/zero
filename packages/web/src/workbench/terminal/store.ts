@@ -1,4 +1,4 @@
-export interface TerminalSession { sessionId: string; shell: string }
+export interface TerminalSession { sessionId: string; shell: string; name?: string }
 
 export class PtyStore {
   #sessions: TerminalSession[] = [];
@@ -32,6 +32,13 @@ export class PtyStore {
     if (this.hasSession(session.sessionId)) return;
     this.#sessions.push(session);
     this.#activeId = session.sessionId;
+    this.#notify();
+  }
+
+  renameSession(sessionId: string, name: string): void {
+    const session = this.#sessions.find((s) => s.sessionId === sessionId);
+    if (!session) return;
+    session.name = name;
     this.#notify();
   }
 
