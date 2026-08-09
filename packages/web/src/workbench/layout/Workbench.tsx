@@ -1,8 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import type { EditorView } from "@codemirror/view";
-import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent } from "@zero/protocol";
-import type { AgentRuntime } from "@zero/core";
+import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent, ChatTurnEventPayload } from "@zero/protocol";
 import { Editor } from "../../Editor";
 import { createCompletion } from "../../completionSetup";
 import { CommandRegistry } from "../commands/registry";
@@ -18,8 +17,8 @@ import { StatusBar } from "../StatusBar";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { PtyStore } from "../terminal/store";
 import { TerminalPanel } from "../terminal/TerminalPanel";
-import { createChat } from "../../chatSetup";
 import { ChatStore } from "../chat/store";
+import { TurnStore } from "../chat/turnStore";
 import { ChatPanel } from "../chat/ChatPanel";
 import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
@@ -83,7 +82,7 @@ interface WorkbenchContextValue {
   theme: "light" | "dark";
   ptyStore: PtyStore;
   chatStore: ChatStore;
-  chatRuntime: AgentRuntime;
+  turnStore: TurnStore;
   diagnosticsByPath: Map<string, LspDiagnostic[]>;
 }
 
@@ -239,7 +238,7 @@ function BottomTerminalPanel() {
 
 function BottomChatPanel() {
   const w = useWorkbench();
-  return <ChatPanel client={w.client} runtime={w.chatRuntime} chatStore={w.chatStore} />;
+  return <ChatPanel client={w.client} turnStore={w.turnStore} chatStore={w.chatStore} />;
 }
 
 /** Stable component map — see the note on WorkbenchContextValue for why this
@@ -261,7 +260,7 @@ export function Workbench(props: { client: RpcClient }) {
   const settingsStore = useConst(() => new SettingsStore(client, window.localStorage));
   const ptyStore = useConst(() => new PtyStore());
   const chatStore = useConst(() => new ChatStore());
-  const chatRuntime = useConst(() => createChat(client, () => activePathRef.current ?? undefined));
+  const turnStore = useConst(() => new TurnStore());
 
   const [settings, setSettings] = useState(() => settingsStore.getSnapshot());
   const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
@@ -404,6 +403,11 @@ export function Workbench(props: { client: RpcClient }) {
         ptyStore.handleExit(sessionId);
         return;
       }
+      if (method === "chat/turnEvent") {
+        const { turnId, event } = params as ChatTurnEventPayload;
+        turnStore.handleEvent(turnId, event);
+        return;
+      }
       if (method === "lsp/diagnostics") {
         const { path, diagnostics } = params as LspDiagnosticsEvent;
         setDiagnosticsByPath((prev) => {
@@ -440,7 +444,7 @@ export function Workbench(props: { client: RpcClient }) {
         })
         .catch((e: unknown) => reportRef.current(`Could not reload ${path}: ${errorText(e)}`));
     });
-  }, [client, tabStore, ptyStore]);
+  }, [client, tabStore, ptyStore, turnStore]);
 
   // Path list backing the fuzzy file opener, refreshed whenever the tree does.
   useEffect(() => {
@@ -817,7 +821,7 @@ export function Workbench(props: { client: RpcClient }) {
     theme,
     ptyStore,
     chatStore,
-    chatRuntime,
+    turnStore,
     diagnosticsByPath,
   };
 

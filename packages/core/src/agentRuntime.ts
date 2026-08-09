@@ -1,11 +1,13 @@
 import type { ChatCapableProvider, ChatMessage, ChatToolCall, ChatToolSpec, ToolProvider } from "./chatTypes";
 import { capToolOutput, needsCompaction, selectForCompaction, COMPACTION_SYSTEM_PROMPT } from "./tokenLedger";
 import { buildSystemPrompt, type WorkspaceInfo } from "./systemPrompt";
+import { ProviderGateway } from "./providerGateway";
 
 export type TurnEvent =
   | { type: "text"; delta: string }
   | { type: "toolCall"; call: ChatToolCall }
   | { type: "toolResult"; call: ChatToolCall; result: string }
+  | { type: "approvalRequest"; call: ChatToolCall; preview: string }
   | { type: "done"; message: ChatMessage }
   | { type: "error"; message: string };
 
@@ -25,15 +27,16 @@ export interface AgentRuntimeOpts {
 const MAX_TOOL_ROUNDS = 8;
 
 export class AgentRuntime {
-  #providers: ChatCapableProvider[];
+  #gateway: ProviderGateway;
   #tools: ToolProvider[];
   #client: AgentRuntimeClient;
   #workspace: () => WorkspaceInfo;
   #status: AgentRuntimeStatus = { activeModel: null, reason: null };
   #listeners = new Set<(s: AgentRuntimeStatus) => void>();
+  #pendingApprovals = new Map<string, (approved: boolean) => void>();
 
   constructor(opts: AgentRuntimeOpts) {
-    this.#providers = opts.providers;
+    this.#gateway = new ProviderGateway(opts.providers);
     this.#tools = opts.tools;
     this.#client = opts.client;
     this.#workspace = opts.workspace;
@@ -53,12 +56,26 @@ export class AgentRuntime {
     for (const fn of this.#listeners) fn(s);
   }
 
+  resolveApproval(callId: string, approved: boolean): void {
+    const resolve = this.#pendingApprovals.get(callId);
+    if (!resolve) return;
+    this.#pendingApprovals.delete(callId);
+    resolve(approved);
+  }
+
+  #awaitApproval(callId: string, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      this.#pendingApprovals.set(callId, resolve);
+      signal.addEventListener("abort", () => {
+        this.#pendingApprovals.delete(callId);
+        resolve(false);
+      }, { once: true });
+    });
+  }
+
   async #pick(): Promise<ChatCapableProvider | null> {
-    const available: ChatCapableProvider[] = [];
-    for (const p of this.#providers) {
-      if (await p.available().catch(() => false)) available.push(p);
-    }
-    return available.find((p) => p.supportsTools()) ?? available[0] ?? null;
+    return this.#gateway.pick();
   }
 
   async *sendMessage(sessionId: string, userText: string, signal: AbortSignal): AsyncIterable<TurnEvent> {
@@ -134,7 +151,23 @@ export class AgentRuntime {
       for (const call of toolCalls) {
         if (signal.aborted) return;
         yield { type: "toolCall", call };
+        if (signal.aborted) return;
         const tool = this.#tools.find((t) => t.name === call.name);
+
+        if (tool?.needsApproval) {
+          const preview = tool.preview ? await tool.preview(call.args).catch(() => "") : "";
+          const approvalPromise = this.#awaitApproval(call.id, signal);
+          yield { type: "approvalRequest", call, preview };
+          const approved = await approvalPromise;
+          if (signal.aborted) return;
+          if (!approved) {
+            const result = "denied by user";
+            history = [...history, { role: "tool", content: result, toolCallId: call.id, toolName: call.name, createdAt: Date.now() }];
+            yield { type: "toolResult", call, result };
+            continue;
+          }
+        }
+
         const rawResult = tool
           ? await tool.execute(call.args).catch((e: unknown) => `error: ${e instanceof Error ? e.message : String(e)}`)
           : `error: unknown tool ${call.name}`;

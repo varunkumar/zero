@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { RpcServer } from "./rpc";
 
-export interface DaemonOptions { root: string; port?: number; token?: string; webDist?: string }
+export interface DaemonOptions { root: string; port?: number; token?: string; webDist?: string; gatewayPort?: number }
 
 export function createDaemon(opts: DaemonOptions) {
   const token = opts.token ?? randomBytes(16).toString("hex");

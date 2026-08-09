@@ -23,6 +23,11 @@ export interface ToolProvider {
   name: string;
   description: string;
   schema: object;
+  /** Gated tools suspend before execute() until resolveApproval() is called. */
+  needsApproval?: boolean;
+  /** Human-readable preview of the pending call (diff, command string). Only
+   * consulted when needsApproval is true. */
+  preview?(args: unknown): Promise<string>;
   execute(args: unknown): Promise<string>;
 }
 

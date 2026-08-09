@@ -16,11 +16,12 @@ export { GraphStore } from "./store";
 export function createGraphify(): {
   factory: (ctx: PluginContext) => ZeroPlugin;
   getIndexer: () => GraphIndexer | undefined;
+  query: (p: { q: string; mode?: "neighbors" | "symbol" | "path"; budgetTokens?: number }) => ReturnType<typeof queryGraph>;
 } {
   let indexer: GraphIndexer | undefined;
+  const store = new GraphStore();
 
   const factory = (ctx: PluginContext): ZeroPlugin => {
-    const store = new GraphStore();
 
     const getGrammarSettings = async (): Promise<GrammarSettings | undefined> => {
       const value = await ctx.workspace.readSetting("graphify.grammars");
@@ -83,7 +84,7 @@ export function createGraphify(): {
     };
   };
 
-  return { factory, getIndexer: () => indexer };
+  return { factory, getIndexer: () => indexer, query: (p) => queryGraph(store, p) };
 }
 
 /** @deprecated Prefer createGraphify().factory for main wiring. */

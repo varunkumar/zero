@@ -27,3 +27,7 @@ export { buildSystemPrompt, type WorkspaceInfo } from "./systemPrompt";
 export {
   AgentRuntime, type TurnEvent, type AgentRuntimeClient, type AgentRuntimeOpts, type AgentRuntimeStatus,
 } from "./agentRuntime";
+export { ProviderGateway } from "./providerGateway";
+export {
+  anthropicRequestToChat, chatDeltaToSseEvents, finalSseEvents, createSseState, type SseState,
+} from "./anthropicTranslate";

@@ -137,3 +137,18 @@ export interface ChatGetResult { id: string; title: string; messages: ChatMessag
 export interface ChatAppendParams { id: string; messages: ChatMessage[] }
 export interface ChatRenameParams { id: string; title: string }
 export interface ChatDeleteParams { id: string }
+
+export type ChatTurnEvent =
+  | { type: "text"; delta: string }
+  | { type: "toolCall"; call: ChatToolCall }
+  | { type: "toolResult"; call: ChatToolCall; result: string }
+  | { type: "approvalRequest"; call: ChatToolCall; preview: string }
+  | { type: "done"; message: ChatMessage }
+  | { type: "error"; message: string };
+
+export interface ChatTurnParams { sessionId: string; userText: string }
+export interface ChatTurnResult { turnId: string }
+export interface ChatTurnEventPayload { turnId: string; event: ChatTurnEvent }
+export interface ChatApproveParams { turnId: string; callId: string; approved: boolean }
+export interface ChatAbortParams { turnId: string }
+export interface ChatStatusResult { activeModel: string | null; reason: string | null }

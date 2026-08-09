@@ -3,6 +3,58 @@ import type { ChatCapableProvider, ChatMessage, ChatToolSpec, ChatDelta } from "
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+type FallbackToolCall = { id: string; name: string; args: Record<string, unknown> };
+
+// Scans for top-level `{...}` substrings using brace balancing, so a tool
+// call embedded anywhere in noisy text (special tokens, stray prose, a
+// repeated echo of the same call, code-fence markers) can still be found,
+// rather than requiring the entire string to be exactly one JSON value.
+function extractJsonObjects(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "{") { if (depth === 0) start = i; depth++; }
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start >= 0) { out.push(text.slice(start, i + 1)); start = -1; }
+      else if (depth < 0) depth = 0; // unbalanced closer, e.g. stray text - resync
+    }
+  }
+  return out;
+}
+
+// Some Ollama models (e.g. qwen2.5-coder) are instructed by their chat
+// template to wrap tool calls in <tool_call>{...}</tool_call> so Ollama can
+// lift them into the structured `tool_calls` field, but don't reliably follow
+// that format - observed variants include bare JSON with no wrapper, a stray
+// `<|im_start|>` token before the JSON, and the same call echoed twice (once
+// raw, once in a ```json fence). Recover the call so tool use still works
+// against those models rather than the JSON being echoed to the user as if
+// it were a reply.
+function parseFallbackToolCalls(content: string | null | undefined, toolNames: Set<string>): FallbackToolCall[] | undefined {
+  if (!content) return undefined;
+  const tagMatches = [...content.matchAll(/<tool_call>([\s\S]*?)<\/tool_call>/g)];
+  const candidates = (tagMatches.length ? tagMatches.map((m) => m[1]) : [content]).flatMap(extractJsonObjects);
+  const calls: FallbackToolCall[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as { name?: unknown; arguments?: unknown };
+      if (typeof parsed.name !== "string" || !toolNames.has(parsed.name)) continue;
+      const args = (parsed.arguments && typeof parsed.arguments === "object" ? parsed.arguments : {}) as Record<string, unknown>;
+      const dedupeKey = `${parsed.name}:${JSON.stringify(args)}`;
+      if (seen.has(dedupeKey)) continue; // model echoed the same call more than once
+      seen.add(dedupeKey);
+      calls.push({ id: `fallback-${calls.length}-${Date.now()}`, name: parsed.name, args });
+    } catch {
+      // Not a tool call - ordinary text content, leave it alone.
+    }
+  }
+  return calls.length ? calls : undefined;
+}
+
 export class OpenAICompatProvider implements ChatCapableProvider {
   id: string;
   #opts: { baseUrl: string; model: string; contextWindowTokens: number; fetchImpl: FetchLike };
@@ -82,8 +134,9 @@ export class OpenAICompatProvider implements ChatCapableProvider {
         choices: { message: { content: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[];
       };
       const message = data.choices[0]?.message;
-      const toolCalls = message?.tool_calls?.map((c) => ({ id: c.id, name: c.function.name, args: JSON.parse(c.function.arguments || "{}") }));
-      yield { text: message?.content ?? undefined, toolCalls };
+      const toolCalls = message?.tool_calls?.map((c) => ({ id: c.id, name: c.function.name, args: JSON.parse(c.function.arguments || "{}") }))
+        ?? parseFallbackToolCalls(message?.content, new Set(tools.map((t) => t.name)));
+      yield { text: toolCalls ? undefined : message?.content ?? undefined, toolCalls };
       return;
     }
 
