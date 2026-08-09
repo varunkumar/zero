@@ -1,10 +1,11 @@
-import React, { useCallback, useRef, useState } from "react";
-import { Box, Static, Text, useApp, useInput } from "ink";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import type { AgentRuntime, ChatToolCall } from "@zero/core";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { bannerLines } from "./Banner";
 import { Spinner } from "./Spinner";
+import { useTheme } from "./theme";
 
 export interface ChatScreenProps {
   runtime: Pick<AgentRuntime, "sendMessage" | "resolveApproval">;
@@ -27,6 +28,7 @@ function nextLineId(): string { return `line-${++lineSeq}`; }
 
 const SLASH_COMMANDS = [
   { name: "/help", description: "list available commands" },
+  { name: "/theme", description: "toggle light/dark theme" },
   { name: "/exit", description: "exit zero" },
   { name: "/quit", description: "exit zero (alias for /exit)" },
 ];
@@ -35,10 +37,26 @@ function matchingCommands(value: string) {
   return value.startsWith("/") ? SLASH_COMMANDS.filter((c) => c.name.startsWith(value)) : [];
 }
 
+function truncate(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
+function summarizeArgs(args: unknown): string {
+  try {
+    return truncate(JSON.stringify(args), 60);
+  } catch {
+    return "";
+  }
+}
+
 export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onFirstMessage }: ChatScreenProps) {
   const { exit } = useApp();
+  const { theme, toggle: toggleTheme } = useTheme();
+  const { stdout } = useStdout();
+  const [rows, setRows] = useState(stdout.rows || 24);
   const [lines, setLines] = useState<Line[]>(() => [
-    ...bannerLines(cwd, version, "/exit to quit · esc cancels a turn").map((l) => ({ id: nextLineId(), ...l })),
+    ...bannerLines(theme, cwd, version, "/exit to quit · esc cancels a turn · / for commands").map((l) => ({ id: nextLineId(), ...l })),
     ...initialLines.map((text) => ({ id: nextLineId(), text })),
   ]);
   const [streamingText, setStreamingText] = useState("");
@@ -50,8 +68,14 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const controllerRef = useRef<AbortController | null>(null);
   const hasSentRef = useRef(false);
 
-  const pushLine = useCallback((text: string) => {
-    setLines((prev) => [...prev, { id: nextLineId(), text }]);
+  useEffect(() => {
+    const onResize = () => setRows(stdout.rows || 24);
+    stdout.on("resize", onResize);
+    return () => { stdout.off("resize", onResize); };
+  }, [stdout]);
+
+  const pushLine = useCallback((text: string, style?: { dim?: boolean; bold?: boolean; color?: string }) => {
+    setLines((prev) => [...prev, { id: nextLineId(), text, ...style }]);
   }, []);
 
   const runTurn = useCallback(async (userText: string) => {
@@ -72,13 +96,19 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
           setStreamingText(assistantText);
           setStatus(null);
         } else if (event.type === "toolCall") {
-          pushLine(`[tool] ${event.call.name} ${JSON.stringify(event.call.args)}`);
           setStatus(`Running ${event.call.name}`);
         } else if (event.type === "approvalRequest") {
           setPending({ call: event.call, preview: event.preview });
           setStatus(null);
         } else if (event.type === "toolResult") {
-          pushLine(`[result] ${event.result}`);
+          // Collapsed into a single dim summary line - the live "Running
+          // <tool>" status above already covered the in-flight state, so
+          // the transcript itself never shows the raw call + raw result
+          // as two separate noisy lines.
+          pushLine(
+            `✓ ${event.call.name} ${summarizeArgs(event.call.args)} → ${truncate(event.result, 60)}`,
+            { color: theme.toolLine, dim: true },
+          );
           setStatus("Thinking");
         } else if (event.type === "error") {
           pushLine(`[error] ${event.message}`);
@@ -92,7 +122,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       setBusy(false);
       controllerRef.current = null;
     }
-  }, [runtime, sessionId, pushLine, onFirstMessage]);
+  }, [runtime, sessionId, pushLine, onFirstMessage, theme.toolLine]);
 
   const onResolveApproval = useCallback((approved: boolean) => {
     if (!pending) return;
@@ -110,8 +140,12 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       for (const c of SLASH_COMMANDS) pushLine(`${c.name}  ${c.description}`);
       return;
     }
+    if (trimmed === "/theme") {
+      toggleTheme();
+      return;
+    }
     void runTurn(trimmed);
-  }, [busy, runTurn, exit, pushLine]);
+  }, [busy, runTurn, exit, pushLine, toggleTheme]);
 
   const suggestions = matchingCommands(input);
   const activeSuggestion = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
@@ -130,28 +164,30 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   });
 
   return (
-    <Box flexDirection="column">
-      <Static items={lines}>
-        {(line) => (
-          <Text key={line.id} color={line.color} bold={line.bold} dimColor={line.dim}>
-            {line.text}
-          </Text>
-        )}
-      </Static>
-      {busy && status ? <Spinner label={status} /> : null}
-      {streamingText ? <Text>{streamingText}</Text> : null}
+    <Box flexDirection="column" height={rows}>
+      <Box flexDirection="column" flexGrow={1}>
+        <Static items={lines}>
+          {(line) => (
+            <Text key={line.id} color={line.color} bold={line.bold} dimColor={line.dim}>
+              {line.text}
+            </Text>
+          )}
+        </Static>
+        {busy && status ? <Spinner label={status} /> : null}
+        {streamingText ? <Text>{streamingText}</Text> : null}
+      </Box>
       {pending ? (
         <ApprovalPrompt call={pending.call} preview={pending.preview} onResolve={onResolveApproval} />
       ) : (
         <Box flexDirection="column">
-          <Box borderStyle="round" borderColor="gray" paddingX={1}>
-            <Text color="green">{"> "}</Text>
+          <Box borderStyle="round" borderColor={theme.accent} paddingX={1}>
+            <Text color={theme.accent}>{"> "}</Text>
             <TextInput value={input} onChange={setInput} onSubmit={onSubmit} focus={!busy} />
           </Box>
           {suggestions.length > 0 ? (
             <Box flexDirection="column" paddingLeft={2}>
               {suggestions.map((c, i) => (
-                <Text key={c.name} color={i === activeSuggestion ? "cyan" : undefined} dimColor={i !== activeSuggestion}>
+                <Text key={c.name} color={i === activeSuggestion ? theme.accent : undefined} dimColor={i !== activeSuggestion}>
                   {i === activeSuggestion ? "> " : "  "}{c.name}  {c.description}
                 </Text>
               ))}

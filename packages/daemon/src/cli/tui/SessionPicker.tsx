@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import type { ChatSessionSummary } from "@zero/protocol";
 import { Banner } from "./Banner";
+import { useTheme } from "./theme";
 
 export interface SessionPickerProps {
   sessions: ChatSessionSummary[];
@@ -14,6 +15,7 @@ interface Item { id: string | "new"; label: string }
 
 export function SessionPicker({ sessions, onSelect, cwd, version }: SessionPickerProps) {
   const { exit } = useApp();
+  const { theme } = useTheme();
   const items: Item[] = [
     { id: "new", label: "New session" },
     ...sessions.map((s) => ({
@@ -34,7 +36,7 @@ export function SessionPicker({ sessions, onSelect, cwd, version }: SessionPicke
     <Box flexDirection="column">
       <Banner cwd={cwd} version={version} subtitle="Resume a session — up/down, enter · esc to quit" />
       {items.map((item, i) => (
-        <Text key={item.id} color={i === index ? "cyan" : undefined}>
+        <Text key={item.id} color={i === index ? theme.accent : undefined}>
           {i === index ? "> " : "  "}{item.label}
         </Text>
       ))}

@@ -4,6 +4,7 @@ import { render } from "ink";
 import { createCliContext, createRuntimeForSession, type CliOpts } from "../runtimeFactory";
 import { App, type StartMode } from "./App";
 import { VERSION } from "../../version";
+import { ThemeProvider } from "./theme";
 
 export type TuiOpts = CliOpts;
 
@@ -27,14 +28,16 @@ export async function runTui(root: string, start: StartMode, opts: TuiOpts = {})
   process.on("exit", restoreScreen);
   try {
     const { waitUntilExit } = render(
-      <App
-        sessions={ctx.sessions}
-        start={start}
-        newSessionTitle="New chat"
-        createRuntime={(sessionId) => createRuntimeForSession(ctx, sessionId)}
-        cwd={root}
-        version={VERSION}
-      />,
+      <ThemeProvider>
+        <App
+          sessions={ctx.sessions}
+          start={start}
+          newSessionTitle="New chat"
+          createRuntime={(sessionId) => createRuntimeForSession(ctx, sessionId)}
+          cwd={root}
+          version={VERSION}
+        />
+      </ThemeProvider>,
     );
     await waitUntilExit();
     return 0;

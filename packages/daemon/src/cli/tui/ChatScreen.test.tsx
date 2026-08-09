@@ -106,6 +106,7 @@ test("typing '/' shows a filtered command autocomplete", async () => {
   await tick();
   let frame = lastFrame() ?? "";
   expect(frame).toContain("/help");
+  expect(frame).toContain("/theme");
   expect(frame).toContain("/exit");
   expect(frame).toContain("/quit");
 
@@ -134,4 +135,40 @@ test("/help lists commands instead of sending a message", async () => {
   const frame = lastFrame() ?? "";
   expect(frame).toContain("/exit  exit zero");
   expect(sent).toBe(false);
+});
+
+test("/theme toggles the theme instead of sending a message", async () => {
+  const runtime = fakeRuntime([]);
+  let sent = false;
+  const originalSendMessage = runtime.sendMessage.bind(runtime);
+  runtime.sendMessage = (...args: Parameters<typeof originalSendMessage>) => {
+    sent = true;
+    return originalSendMessage(...args);
+  };
+  const { stdin } = render(
+    <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  await typeAndSubmit(stdin, "/theme");
+  await tick();
+  expect(sent).toBe(false);
+});
+
+test("a completed tool call collapses into a single summary line, not raw call/result lines", async () => {
+  const runtime = fakeRuntime([
+    { type: "toolCall", call: { id: "c1", name: "run_command", args: { command: "echo hi" } } },
+    { type: "toolResult", call: { id: "c1", name: "run_command", args: { command: "echo hi" } }, result: "hi" },
+    { type: "done", message: { role: "assistant", content: "", createdAt: 0 } },
+  ]);
+  const { stdin, lastFrame } = render(
+    <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  await typeAndSubmit(stdin, "run it");
+  await tick();
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("✓ run_command");
+  expect(frame).toContain("hi");
+  expect(frame).not.toContain("[tool]");
+  expect(frame).not.toContain("[result]");
 });
