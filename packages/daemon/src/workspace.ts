@@ -2,6 +2,7 @@ import { promises as fs, watch as fsWatch, realpathSync } from "node:fs";
 import { join, resolve, relative, sep, dirname, basename } from "node:path";
 import ignore, { type Ignore } from "ignore";
 import type { TreeEntry, FsSearchResult } from "@zero/protocol";
+import { settingsPath } from "./paths";
 
 export class PathOutsideWorkspaceError extends Error {}
 
@@ -77,7 +78,7 @@ export class Workspace {
 
   async #readSettingsFile(): Promise<Record<string, unknown>> {
     try {
-      const raw = await fs.readFile(join(this.#root, ".zero", "settings.json"), "utf8");
+      const raw = await fs.readFile(settingsPath(), "utf8");
       return JSON.parse(raw) as Record<string, unknown>;
     } catch {
       return {};
@@ -91,8 +92,8 @@ export class Workspace {
   async writeSetting(key: string, value: unknown): Promise<void> {
     const all = await this.#readSettingsFile();
     all[key] = value;
-    await fs.mkdir(join(this.#root, ".zero"), { recursive: true });
-    await fs.writeFile(join(this.#root, ".zero", "settings.json"), JSON.stringify(all, null, 2), "utf8");
+    await fs.mkdir(dirname(settingsPath()), { recursive: true });
+    await fs.writeFile(settingsPath(), JSON.stringify(all, null, 2), "utf8");
   }
 
   async tree(): Promise<TreeEntry[]> {

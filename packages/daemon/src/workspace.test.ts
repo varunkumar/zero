@@ -3,6 +3,10 @@ import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, existsSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace, PathOutsideWorkspaceError } from "./workspace";
+import { useTempZeroHome } from "./testSupport/zeroHome";
+import { settingsPath } from "./paths";
+
+useTempZeroHome();
 
 function makeProject() {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
@@ -132,12 +136,11 @@ test("readSetting returns undefined when nothing has been written", async () => 
   expect(await ws.readSetting("workbench")).toBeUndefined();
 });
 
-test("writeSetting then readSetting round-trips, creates .zero/settings.json", async () => {
-  const root = makeProject();
-  const ws = new Workspace(root);
+test("writeSetting then readSetting round-trips, creates settings.json under ~/.zero", async () => {
+  const ws = new Workspace(makeProject());
   await ws.writeSetting("workbench", { theme: "dark", sidebarWidth: 240 });
   expect(await ws.readSetting("workbench")).toEqual({ theme: "dark", sidebarWidth: 240 });
-  expect(existsSync(join(root, ".zero", "settings.json"))).toBe(true);
+  expect(existsSync(settingsPath())).toBe(true);
 });
 
 test("writeSetting preserves other keys", async () => {
