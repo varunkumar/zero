@@ -41,7 +41,13 @@ if (argv[0] === "serve") {
 } else {
   const path = positionalArgs(argv)[0];
   const root = resolve(path ?? ".");
-  const start = argv.includes("--resume") ? { kind: "resume" as const } : { kind: "new" as const };
+  const sessionIdx = argv.indexOf("--session");
+  const sessionId = sessionIdx >= 0 ? argv[sessionIdx + 1] : undefined;
+  const start = sessionId
+    ? { kind: "session" as const, sessionId }
+    : argv.includes("--resume")
+      ? { kind: "resume" as const }
+      : { kind: "new" as const };
   const exitCode = await runTui(root, start);
   process.exit(exitCode);
 }
