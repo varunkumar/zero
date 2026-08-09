@@ -70,18 +70,47 @@ export class Workspace {
     await fs.writeFile(await this.#resolveReal(rel), content, "utf8");
   }
 
+  // Like #resolveReal, but safe to use when the target doesn't exist yet and
+  // intermediate directories may need to be created: `mkdir(dirname(abs),
+  // { recursive: true })` followed by a single #resolveReal call (the
+  // earlier, still-buggy version of create()) creates every missing
+  // ancestor directory *before* containment is ever checked, so if an
+  // ancestor turns out to be a symlink pointing outside the root, the OS
+  // has already followed it and created directories on the far side by the
+  // time #resolveReal throws. Instead, walk the path one segment at a time
+  // from the (already-verified) root: realpath and re-verify containment
+  // for each segment that exists *before* creating the next one, and only
+  // create a segment (as a plain, non-symlink directory) once its parent is
+  // proven contained. The final segment is left for the caller to create
+  // (`mkdir` for a dir, `writeFile(..., { flag: "wx" })` for a file) so
+  // existing-target semantics (EEXIST, ENOTDIR, ...) are preserved exactly.
+  async #resolveContainedForCreate(rel: string): Promise<string> {
+    const abs = this.#resolve(rel); // lexical check first
+    const segments = relative(this.#root, abs).split(sep).filter(Boolean);
+    let cur = this.#root;
+    for (let i = 0; i < segments.length; i++) {
+      const next = join(cur, segments[i]);
+      let real: string;
+      try {
+        real = await fs.realpath(next);
+      } catch {
+        if (i === segments.length - 1) return next; // final segment: nothing to resolve yet
+        await fs.mkdir(next); // cur is proven contained; segments[i] is a literal, just-created name
+        real = next;
+      }
+      if (real !== this.#root && !real.startsWith(this.#root + sep))
+        throw new PathOutsideWorkspaceError(rel);
+      cur = real;
+    }
+    return cur; // every segment existed already and was verified contained
+  }
+
   async create(rel: string, kind: "file" | "dir"): Promise<void> {
-    const abs = this.#resolve(rel);
+    const target = await this.#resolveContainedForCreate(rel);
     if (kind === "dir") {
-      // Create the parent dirs first so #resolveReal can realpath them
-      // (mirrors write()'s "path doesn't exist yet" handling), then let
-      // #resolveReal re-verify containment through any symlinks before
-      // mkdir touches the target itself.
-      await fs.mkdir(dirname(abs), { recursive: true });
-      await fs.mkdir(await this.#resolveReal(rel), { recursive: true });
+      await fs.mkdir(target, { recursive: true });
     } else {
-      await fs.mkdir(dirname(abs), { recursive: true });
-      await fs.writeFile(await this.#resolveReal(rel), "", { flag: "wx" });
+      await fs.writeFile(target, "", { flag: "wx" });
     }
   }
 

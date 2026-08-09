@@ -162,6 +162,18 @@ test("create blocks a directory through a not-yet-existing path behind a symlink
   expect(existsSync(join(outside, "newdir"))).toBe(false);
 });
 
+test("create rejects a nested path through a symlinked directory without creating any intermediate directory outside the root", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await expect(ws.create("outdir/sub/new.txt", "file")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "sub"))).toBe(false);
+
+  await expect(ws.create("outdir/sub/newdir", "dir")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "sub"))).toBe(false);
+});
+
 test("rename moves a file to a new relative path", async () => {
   const ws = new Workspace(makeProject());
   await ws.write("a.txt", "hi");
