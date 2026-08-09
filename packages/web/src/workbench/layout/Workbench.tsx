@@ -24,8 +24,7 @@ import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
 
 const SIDEBAR_PANEL_ID = "sidebar";
-const TERMINAL_PANEL_ID = "terminal";
-const CHAT_PANEL_ID = "chat";
+const BOTTOM_PANEL_ID = "bottom";
 const TERMINAL_SESSIONS_KEY = "zero.terminal.sessionIds";
 /** How long a transient status-bar message stays up. */
 const STATUS_MESSAGE_MS = 8000;
@@ -74,6 +73,8 @@ interface WorkbenchContextValue {
   requestCompletion: (s: { prefix: string; suffix: string }) => void;
   sidebarView: "files" | "search";
   setSidebarView: (view: "files" | "search") => void;
+  bottomView: "terminal" | "chat";
+  setBottomView: (view: "terminal" | "chat") => void;
   treeRefreshToken: number;
   /** Bumped on every TabStore mutation; unused directly by consumers but part
    * of the context value so a mutation produces a fresh object identity and
@@ -86,7 +87,10 @@ interface WorkbenchContextValue {
   diagnosticsByPath: Map<string, LspDiagnostic[]>;
 }
 
-const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
+// Exported (alongside BottomPanel below) so tests can render dockview-hosted
+// panels directly against a fake context value, without spinning up the
+// whole Workbench + dockview + RpcClient stack.
+export const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
 
 function useWorkbench(): WorkbenchContextValue {
   const value = useContext(WorkbenchContext);
@@ -231,19 +235,32 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
   );
 }
 
-function BottomTerminalPanel() {
+/** Tabs Terminal and Chat into one dockview panel, mirroring the
+ * Files/Search toggle `SidebarPanel` uses above: a single panel that locally
+ * swaps which child renders rather than dockview's own multi-tab grouping
+ * (unused elsewhere in this app; its tab chrome is CSS-hidden). */
+export function BottomPanel() {
   const w = useWorkbench();
-  return <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />;
-}
-
-function BottomChatPanel() {
-  const w = useWorkbench();
-  return <ChatPanel client={w.client} turnStore={w.turnStore} chatStore={w.chatStore} />;
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)" }}>
+      <div className="zero-sidebar-toggle">
+        <button aria-pressed={w.bottomView === "terminal"} onClick={() => w.setBottomView("terminal")}>Terminal</button>
+        <button aria-pressed={w.bottomView === "chat"} onClick={() => w.setBottomView("chat")}>Chat</button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        {w.bottomView === "terminal" ? (
+          <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />
+        ) : (
+          <ChatPanel client={w.client} turnStore={w.turnStore} chatStore={w.chatStore} />
+        )}
+      </div>
+    </div>
+  );
 }
 
 /** Stable component map — see the note on WorkbenchContextValue for why this
  * must not be rebuilt per render. */
-const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel, terminal: BottomTerminalPanel, chat: BottomChatPanel };
+const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel, bottom: BottomPanel };
 
 /** Ref that initialises exactly once, unlike `useRef(new X())` which
  * constructs a throwaway on every render. */
@@ -264,6 +281,7 @@ export function Workbench(props: { client: RpcClient }) {
 
   const [settings, setSettings] = useState(() => settingsStore.getSnapshot());
   const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
+  const [bottomView, setBottomView] = useState<"terminal" | "chat">("terminal");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [openerOpen, setOpenerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -525,7 +543,7 @@ export function Workbench(props: { client: RpcClient }) {
             restored = true;
           }
         }
-        if (restored) actionsRef.current.showTerminalPanel();
+        if (restored) actionsRef.current.showBottomPanel("terminal");
       })
       .catch((e: unknown) => reportRef.current(`Could not restore terminals: ${errorText(e)}`));
     return () => {
@@ -722,43 +740,34 @@ export function Workbench(props: { client: RpcClient }) {
     toggleSidebar,
     splitEditor,
     closeEditorGroup,
-    showTerminalPanel: () => {
+    // Terminal and Chat share one dockview panel (BottomPanel), toggled
+    // locally between the two like the Files/Search sidebar toggle. Adding
+    // the panel and switching which view it shows are separate concerns:
+    // switching view must work even when the panel is already open (e.g.
+    // Ctrl+` while Chat is showing reveals Terminal, not a no-op).
+    showBottomPanel: (view: "terminal" | "chat") => {
       const api = dockApi.current;
-      if (!api || api.getPanel(TERMINAL_PANEL_ID)) return;
-      api.addPanel({
-        id: TERMINAL_PANEL_ID, component: "terminal", params: {},
-        position: { direction: "below" },
-        initialHeight: 240,
-      });
-    },
-    toggleTerminal: () => {
-      const api = dockApi.current;
+      setBottomView(view);
       if (!api) return;
-      const panel = api.getPanel(TERMINAL_PANEL_ID);
-      if (panel) { api.removePanel(panel); return; }
-      actionsRef.current.showTerminalPanel();
-    },
-    newTerminal: () => {
-      actionsRef.current.showTerminalPanel();
-      void client.request<{ sessionId: string; shell: string }>("pty/open", { cols: 80, rows: 24 })
-        .then((s) => ptyStore.addSession(s))
-        .catch((e: unknown) => reportRef.current(`Could not open terminal: ${errorText(e)}`));
-    },
-    showChatPanel: () => {
-      const api = dockApi.current;
-      if (!api || api.getPanel(CHAT_PANEL_ID)) return;
+      if (api.getPanel(BOTTOM_PANEL_ID)) return;
       api.addPanel({
-        id: CHAT_PANEL_ID, component: "chat", params: {},
+        id: BOTTOM_PANEL_ID, component: "bottom", params: {},
         position: { direction: "below" },
         initialHeight: 320,
       });
     },
-    toggleChat: () => {
+    toggleBottomPanel: (view: "terminal" | "chat") => {
       const api = dockApi.current;
       if (!api) return;
-      const panel = api.getPanel(CHAT_PANEL_ID);
-      if (panel) { api.removePanel(panel); return; }
-      actionsRef.current.showChatPanel();
+      const panel = api.getPanel(BOTTOM_PANEL_ID);
+      if (panel && bottomView === view) { api.removePanel(panel); return; }
+      actionsRef.current.showBottomPanel(view);
+    },
+    newTerminal: () => {
+      actionsRef.current.showBottomPanel("terminal");
+      void client.request<{ sessionId: string; shell: string }>("pty/open", { cols: 80, rows: 24 })
+        .then((s) => ptyStore.addSession(s))
+        .catch((e: unknown) => reportRef.current(`Could not open terminal: ${errorText(e)}`));
     },
   };
   const actionsRef = useRef(actions);
@@ -780,9 +789,9 @@ export function Workbench(props: { client: RpcClient }) {
       { id: "view.closeEditorGroup", title: "Close Editor Group", run: () => actionsRef.current.closeEditorGroup(), keybinding: "$mod+Shift+Backslash" },
       { id: "view.toggleTheme", title: "Toggle Theme", run: () => actionsRef.current.toggleTheme() },
       { id: "preferences.open", title: "Preferences: Open Settings", run: () => actionsRef.current.openSettings() },
-      { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleTerminal(), keybinding: "Control+Backquote" },
+      { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleBottomPanel("terminal"), keybinding: "Control+Backquote" },
       { id: "terminal.new", title: "New Terminal", run: () => actionsRef.current.newTerminal() },
-      { id: "view.toggleChat", title: "Toggle Chat", run: () => actionsRef.current.toggleChat(), keybinding: "Control+Shift+KeyC" },
+      { id: "view.toggleChat", title: "Toggle Chat", run: () => actionsRef.current.toggleBottomPanel("chat"), keybinding: "Control+Shift+KeyC" },
     ];
     for (const command of commands) registry.register(command);
     const detach = attachKeybindings(registry);
@@ -853,6 +862,8 @@ export function Workbench(props: { client: RpcClient }) {
     requestCompletion: completion.request,
     sidebarView,
     setSidebarView,
+    bottomView,
+    setBottomView,
     treeRefreshToken,
     tabsVersion,
     theme,
