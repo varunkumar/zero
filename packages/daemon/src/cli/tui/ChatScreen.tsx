@@ -21,7 +21,12 @@ export interface ChatScreenProps {
 }
 
 interface PendingApproval { call: ChatToolCall; preview: string }
-interface Line { id: string; text: string; bold?: boolean; dim?: boolean; color?: string }
+interface Line { id: string; text: string; bold?: boolean; dim?: boolean; color?: string; spacer?: boolean }
+
+// How many lines a PageUp/PageDown scroll step moves. Deliberately in
+// "lines" rather than "rows" - keeps the step size stable regardless of
+// how much of the visible content happens to be wrapped that render.
+const SCROLL_PAGE_LINES = 8;
 
 let lineSeq = 0;
 function nextLineId(): string { return `line-${++lineSeq}`; }
@@ -71,6 +76,9 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [suggestionIndex, setSuggestionIndex] = useState(0);
+  // Number of newest *lines* (not rows) currently scrolled out of view
+  // below the visible window. 0 means pinned to the live tail.
+  const [scrollOffset, setScrollOffset] = useState(0);
   const controllerRef = useRef<AbortController | null>(null);
   const hasSentRef = useRef(false);
 
@@ -83,7 +91,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     return () => { stdout.off("resize", onResize); };
   }, [stdout]);
 
-  const pushLine = useCallback((text: string, style?: { dim?: boolean; bold?: boolean; color?: string }) => {
+  const pushLine = useCallback((text: string, style?: { dim?: boolean; bold?: boolean; color?: string; spacer?: boolean }) => {
     setLines((prev) => [...prev, { id: nextLineId(), text, ...style }]);
   }, []);
 
@@ -94,10 +102,12 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     }
     setBusy(true);
     setStatus("Thinking");
-    // Blank line before every turn gives visible breathing room between
-    // one exchange and the next in the transcript.
-    pushLine("");
-    pushLine(`> ${userText}`, { color: theme.userColor, bold: true });
+    // "spacer" reserves a fixed one-row gap above this line as part of
+    // the same entry (rather than a separate blank Line) so the tail
+    // slicing and scroll offset below can never split a message from
+    // its own leading gap - which is what made the spacing look
+    // inconsistent once the transcript needed trimming or scrolling.
+    pushLine(`> ${userText}`, { color: theme.userColor, bold: true, spacer: true });
     const controller = new AbortController();
     controllerRef.current = controller;
     let assistantText = "";
@@ -156,6 +166,9 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       toggleTheme();
       return;
     }
+    // Sending a message is the user opting back into "live" view - jump
+    // back to the tail even if they'd scrolled up to reread history.
+    setScrollOffset(0);
     void runTurn(trimmed);
   }, [busy, runTurn, exit, pushLine, toggleTheme]);
 
@@ -172,6 +185,10 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       if (key.downArrow) { setSuggestionIndex((i) => Math.min(suggestions.length - 1, i + 1)); return; }
       if (key.upArrow) { setSuggestionIndex((i) => Math.max(0, i - 1)); return; }
       if (key.tab) { setInput(`${suggestions[activeSuggestion]!.name} `); setSuggestionIndex(0); return; }
+    }
+    if (!pending) {
+      if (key.pageUp) { setScrollOffset((o) => Math.min(Math.max(0, lines.length - 1), o + SCROLL_PAGE_LINES)); return; }
+      if (key.pageDown) { setScrollOffset((o) => Math.max(0, o - SCROLL_PAGE_LINES)); return; }
     }
   });
 
@@ -197,14 +214,24 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   // Walk from the newest line backward, accounting for wrapped row height,
   // so the slice always fits the actual space available.
   const rowsForText = (text: string) => Math.max(1, Math.ceil((text.length || 1) / Math.max(1, columns)));
+  const lineRowCost = (line: Line) => rowsForText(line.text) + (line.spacer ? 1 : 0);
   const streamingRows = streamingText ? rowsForText(streamingText) : 0;
   const liveExtra = (busy && status ? 1 : 0) + streamingRows;
-  const middleHeight = Math.max(0, totalHeight - HEADER_HEIGHT - footerHeight - liveExtra);
+  // Conversations can run longer than the terminal - rather than only
+  // ever showing the live tail, PageUp/PageDown (see useInput above) walk
+  // scrollOffset back through older lines. clampedOffset keeps that in
+  // range as the transcript grows or shrinks (e.g. right after mount).
+  const clampedOffset = Math.min(scrollOffset, Math.max(0, lines.length - 1));
+  const isScrolled = clampedOffset > 0;
+  // Reserve one row for the "scrolled up" indicator below so it never
+  // itself pushes a transcript line out of the fixed-height box.
+  const middleHeight = Math.max(0, totalHeight - HEADER_HEIGHT - footerHeight - liveExtra - (isScrolled ? 1 : 0));
+  const bottomIndex = lines.length - 1 - clampedOffset;
   const visibleLines: Line[] = [];
   let usedRows = 0;
-  for (let i = lines.length - 1; i >= 0; i--) {
+  for (let i = bottomIndex; i >= 0; i--) {
     const line = lines[i]!;
-    const rowsNeeded = rowsForText(line.text);
+    const rowsNeeded = lineRowCost(line);
     // A single message longer than the whole budget (e.g. one huge
     // unbroken paragraph) would otherwise make the loop bail before
     // adding anything, leaving the transcript blank. Always show at
@@ -225,14 +252,17 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
           squeeze the header/footer instead of being clipped. An explicit
           height plus flexShrink=0 makes this box (and its siblings below)
           immovable regardless of content length. */}
-      <Box flexDirection="column" height={middleHeight} flexShrink={0} overflow="hidden">
+      <Box flexDirection="column" height={middleHeight + (isScrolled ? 1 : 0)} flexShrink={0} overflow="hidden">
+        {isScrolled ? <Text dimColor>↑ scrolled up · PageDown to jump to latest</Text> : null}
         {visibleLines.map((line) => (
-          <Text key={line.id} color={line.color} bold={line.bold} dimColor={line.dim}>
-            {line.text || " "}
-          </Text>
+          <Box key={line.id} marginTop={line.spacer ? 1 : 0}>
+            <Text color={line.color} bold={line.bold} dimColor={line.dim}>
+              {line.text || " "}
+            </Text>
+          </Box>
         ))}
-        {busy && status ? <Spinner label={status} /> : null}
-        {streamingText ? <Text color={theme.assistantColor}>{streamingText}</Text> : null}
+        {!isScrolled && busy && status ? <Spinner label={status} /> : null}
+        {!isScrolled && streamingText ? <Text color={theme.assistantColor}>{streamingText}</Text> : null}
       </Box>
       {pending ? (
         <ApprovalPrompt call={pending.call} preview={pending.preview} onResolve={onResolveApproval} />

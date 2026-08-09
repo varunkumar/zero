@@ -85,6 +85,27 @@ test("a long, unbroken assistant reply does not corrupt the header or footer lay
   expect(frame).toMatch(/╰─+╯/);
 });
 
+test("PageUp scrolls the transcript into history, PageDown returns to the live tail", async () => {
+  const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+  const { stdin, lastFrame } = render(
+    <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={manyLines} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  expect(lastFrame() ?? "").toContain("line 39");
+
+  stdin.write("\x1b[5~"); // PageUp
+  await tick();
+  let frame = lastFrame() ?? "";
+  expect(frame).toContain("scrolled up");
+  expect(frame).not.toContain("line 39");
+
+  stdin.write("\x1b[6~"); // PageDown
+  await tick();
+  frame = lastFrame() ?? "";
+  expect(frame).toContain("line 39");
+  expect(frame).not.toContain("scrolled up");
+});
+
 test("submitting input streams assistant text into the transcript", async () => {
   const runtime = fakeRuntime([
     { type: "text", delta: "hi " },
