@@ -164,6 +164,30 @@ test("Up/Down arrows cycle through submitted message history in the input bar", 
   expect(inputLine()).toContain("> d");
 });
 
+test("Up/Down history recall works on a resumed session, seeded from initialLines", async () => {
+  const runtime = fakeRuntime([]);
+  const { stdin, lastFrame } = render(
+    <ChatScreen
+      runtime={runtime}
+      sessionId="s1"
+      initialLines={["> what is 2+2?", "2+2 is 4.", "> and 3+3?", "3+3 is 6."]}
+      cwd="/tmp/proj"
+      version="0.0.0-test"
+    />,
+  );
+  await tick();
+
+  const inputLine = () => (lastFrame() ?? "").split("\n").find((l) => /^│ >/.test(l)) ?? "";
+
+  stdin.write("\x1b[A"); // Up -> most recent resumed user message
+  await tick();
+  expect(inputLine()).toContain("> and 3+3?");
+
+  stdin.write("\x1b[A"); // Up again -> older resumed user message
+  await tick();
+  expect(inputLine()).toContain("> what is 2+2?");
+});
+
 test("a fenced code block renders as a bordered block with its language tag, not raw backtick fences", async () => {
   const reply = "Here you go:\n```ts\nfunction add(a, b) {\n  return a + b;\n}\n```\nDone.";
   const runtime = fakeRuntime([

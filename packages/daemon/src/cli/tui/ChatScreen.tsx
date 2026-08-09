@@ -97,8 +97,13 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   // Submitted messages, oldest first, for Up/Down history recall in the
   // input bar (shell-style). historyIndex of -1 means "not currently
   // recalling - show the live draft"; draftRef holds whatever the user
-  // had typed before the first Up press, so Down can restore it.
-  const [history, setHistory] = useState<string[]>([]);
+  // had typed before the first Up press, so Down can restore it. Seeded
+  // from any resumed transcript's user turns (same "> " convention as
+  // above) so history recall survives resuming a session, not just live
+  // submissions in this process.
+  const [history, setHistory] = useState<string[]>(() =>
+    initialLines.filter((text) => text.startsWith("> ")).map((text) => text.slice(2)),
+  );
   const [historyIndex, setHistoryIndex] = useState(-1);
   const draftRef = useRef("");
   // Number of newest *entries* (blocks, not rows - see `entries` below)
