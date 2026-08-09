@@ -34,6 +34,7 @@ export function StatusPill(props: { engine: CompletionEngine }) {
           flexShrink: 0,
         }}
       />
+      <span style={{ opacity: 0.7, marginRight: 4 }}>Completion:</span>
       {status.activeModel ?? "no model"}
     </div>
   );

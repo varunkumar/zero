@@ -228,6 +228,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
             }}
           >
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: status.activeModel !== null ? "var(--zero-status-ok)" : "var(--zero-status-idle)", flexShrink: 0 }} />
+            <span style={{ opacity: 0.7, marginRight: 4 }}>Chat:</span>
             {status.activeModel ?? "no chat model"}
           </div>
         </div>
