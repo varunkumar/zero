@@ -19,6 +19,18 @@ export interface FileTreeActions {
   newFolderInSelectedDir: () => void;
   renameSelected: () => void;
   deleteSelected: () => void;
+  /** Whether the file tree DOM subtree currently has focus - used by
+   * `Workbench.tsx` to scope the New File/New Folder/Rename/Delete
+   * keybindings to when this panel is actually focused, not merely when
+   * "Files" is the selected sidebar *view* (which stays true even while
+   * typing in the editor, since it's the default). Without this,
+   * `$mod+Backspace` for Delete collides with CodeMirror's own
+   * word-delete binding. */
+  hasFocus: () => boolean;
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 function buildTree(entries: TreeEntry[]): Node[] {
@@ -65,6 +77,10 @@ export async function createEntry(client: RpcClient, parentDir: string, kind: "f
 }
 
 export async function renameEntry(client: RpcClient, path: string, newName: string): Promise<void> {
+  // Renaming (unlike creating) never targets `path` itself as a
+  // destination directory, so passing "file" here always yields `path`'s
+  // parent - correct for renaming a directory too, since a directory's new
+  // name still belongs alongside it, one level up.
   const newPath = joinPath(containingDir(path, "file"), newName);
   await client.request("fs/rename", { path, newPath });
 }
@@ -163,6 +179,12 @@ export const FileTreePanel = forwardRef<
      * bump whatever token drives `fs/tree` refetches (same one it already
      * bumps on `fs/changed`). */
     onTreeChanged: () => void;
+    /** Surfaces a failed `fs/*` RPC to the status bar - mirrors
+     * `Workbench.tsx`'s own `report()` helper ("Silence is the worst
+     * outcome here"), reused by every create/rename/delete/paste handler
+     * below rather than letting a rejection become an unhandled promise
+     * rejection with no user-visible feedback. */
+    onError: (message: string) => void;
   }
 >(function FileTreePanel(props, ref) {
   const [entries, setEntries] = useState<TreeEntry[]>([]);
@@ -217,27 +239,43 @@ export const FileTreePanel = forwardRef<
   async function handleCreate(kind: "file" | "dir", parentDir: string): Promise<void> {
     const name = window.prompt(kind === "file" ? "New file name" : "New folder name");
     if (!name) return;
-    await createEntry(props.client, parentDir, kind, name);
-    props.onTreeChanged();
+    try {
+      await createEntry(props.client, parentDir, kind, name);
+      props.onTreeChanged();
+    } catch (e) {
+      props.onError(`Could not create ${joinPath(parentDir, name)}: ${errorText(e)}`);
+    }
   }
 
   async function handleRename(path: string): Promise<void> {
     const name = window.prompt("Rename to", path.split("/").at(-1));
     if (!name) return;
-    await renameEntry(props.client, path, name);
-    props.onTreeChanged();
+    try {
+      await renameEntry(props.client, path, name);
+      props.onTreeChanged();
+    } catch (e) {
+      props.onError(`Could not rename ${path}: ${errorText(e)}`);
+    }
   }
 
   async function handleDelete(path: string): Promise<void> {
-    const didDelete = await confirmAndDelete(props.client, path, window.confirm.bind(window));
-    if (didDelete) props.onTreeChanged();
+    try {
+      const didDelete = await confirmAndDelete(props.client, path, window.confirm.bind(window));
+      if (didDelete) props.onTreeChanged();
+    } catch (e) {
+      props.onError(`Could not delete ${path}: ${errorText(e)}`);
+    }
   }
 
   async function handlePaste(targetDir: string): Promise<void> {
     if (!clipboard) return;
-    await pasteEntry(props.client, clipboard, targetDir);
-    setClipboard(null);
-    props.onTreeChanged();
+    try {
+      await pasteEntry(props.client, clipboard, targetDir);
+      setClipboard(null);
+      props.onTreeChanged();
+    } catch (e) {
+      props.onError(`Could not paste ${clipboard.path}: ${errorText(e)}`);
+    }
   }
 
   useImperativeHandle(ref, () => ({
@@ -253,6 +291,7 @@ export const FileTreePanel = forwardRef<
     deleteSelected: () => {
       if (selected) void handleDelete(selected.path);
     },
+    hasFocus: () => containerRef.current?.contains(document.activeElement) ?? false,
     // selected/handleCreate/etc close over props.client and clipboard, so
     // they must be rebuilt whenever any of those change.
     // eslint-disable-next-line react-hooks/exhaustive-deps

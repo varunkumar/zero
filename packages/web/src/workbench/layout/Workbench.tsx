@@ -97,6 +97,11 @@ interface WorkbenchContextValue {
    * since that's where the rest of the command registry lives) can act on
    * whatever's currently selected in the tree. */
   fileTreeActionsRef: MutableRefObject<FileTreeActions | null>;
+  /** Surface a failure in the status bar - the same helper `newTerminal`
+   * and the fs/save path already use, exposed so `FileTreePanel` can report
+   * a failed `fs/create`/`fs/rename`/`fs/delete`/`fs/move`/`fs/copy`
+   * instead of letting it become a silent, unhandled promise rejection. */
+  report: (text: string, tone?: "error" | "info") => void;
   /** Bumped on every TabStore mutation; unused directly by consumers but part
    * of the context value so a mutation produces a fresh object identity and
    * therefore re-renders every panel. */
@@ -136,6 +141,7 @@ function SidebarPanel() {
             onOpen={w.openFile}
             refreshToken={w.treeRefreshToken}
             onTreeChanged={w.onTreeChanged}
+            onError={w.report}
           />
         ) : (
           <SearchPanel client={w.client} onJumpTo={(path) => w.openFile(path)} />
@@ -814,24 +820,26 @@ export function Workbench(props: { client: RpcClient }) {
         .then((s) => ptyStore.addSession(s))
         .catch((e: unknown) => reportRef.current(`Could not open terminal: ${errorText(e)}`));
     },
-    // Scoped to the Files sidebar being visible, same as the brief asks:
-    // Cmd/Ctrl+Alt+N etc. shouldn't fire New File while the user is in
-    // Search or has focus elsewhere.
+    // Scoped to the Files sidebar being both the selected view *and*
+    // actually DOM-focused: `sidebarView` alone stays "files" (its default)
+    // even while the user is typing in the editor, so without the
+    // `hasFocus()` check `$mod+Backspace` here would fight CodeMirror's own
+    // word-delete binding on every Cmd/Ctrl+Backspace keystroke.
     newFileInSelectedDir: () => {
-      if (sidebarView !== "files") return;
-      fileTreeActionsRef.current?.newFileInSelectedDir();
+      if (sidebarView !== "files" || !fileTreeActionsRef.current?.hasFocus()) return;
+      fileTreeActionsRef.current.newFileInSelectedDir();
     },
     newFolderInSelectedDir: () => {
-      if (sidebarView !== "files") return;
-      fileTreeActionsRef.current?.newFolderInSelectedDir();
+      if (sidebarView !== "files" || !fileTreeActionsRef.current?.hasFocus()) return;
+      fileTreeActionsRef.current.newFolderInSelectedDir();
     },
     renameSelectedTreeEntry: () => {
-      if (sidebarView !== "files") return;
-      fileTreeActionsRef.current?.renameSelected();
+      if (sidebarView !== "files" || !fileTreeActionsRef.current?.hasFocus()) return;
+      fileTreeActionsRef.current.renameSelected();
     },
     deleteSelectedTreeEntry: () => {
-      if (sidebarView !== "files") return;
-      fileTreeActionsRef.current?.deleteSelected();
+      if (sidebarView !== "files" || !fileTreeActionsRef.current?.hasFocus()) return;
+      fileTreeActionsRef.current.deleteSelected();
     },
   };
   const actionsRef = useRef(actions);
@@ -935,6 +943,7 @@ export function Workbench(props: { client: RpcClient }) {
     treeRefreshToken,
     onTreeChanged: bumpTreeRefreshToken,
     fileTreeActionsRef,
+    report,
     tabsVersion,
     theme,
     ptyStore,
