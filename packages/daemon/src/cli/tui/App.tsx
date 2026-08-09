@@ -16,6 +16,7 @@ export interface AppProps {
   newSessionTitle: string;
   createRuntime: (sessionId: string) => AgentRuntime;
   cwd: string;
+  version: string;
 }
 
 type ViewState =
@@ -30,7 +31,7 @@ function linesFromMessages(messages: ChatMessage[]): string[] {
     .map((m) => (m.role === "user" ? `> ${m.content}` : m.content));
 }
 
-export function App({ sessions, start, newSessionTitle, createRuntime, cwd }: AppProps) {
+export function App({ sessions, start, newSessionTitle, createRuntime, cwd, version }: AppProps) {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
   const { exit } = useApp();
 
@@ -90,7 +91,7 @@ export function App({ sessions, start, newSessionTitle, createRuntime, cwd }: Ap
   if (state.kind === "loading") {
     return (
       <>
-        <Banner cwd={cwd} />
+        <Banner cwd={cwd} version={version} />
         <Text dimColor>loading...</Text>
       </>
     );
@@ -98,13 +99,13 @@ export function App({ sessions, start, newSessionTitle, createRuntime, cwd }: Ap
   if (state.kind === "error") {
     return (
       <>
-        <Banner cwd={cwd} />
+        <Banner cwd={cwd} version={version} />
         <Text color="red">error: {state.message}</Text>
       </>
     );
   }
   if (state.kind === "picker") {
-    return <SessionPicker cwd={cwd} sessions={state.items} onSelect={(id) => void onPick(id)} />;
+    return <SessionPicker cwd={cwd} version={version} sessions={state.items} onSelect={(id) => void onPick(id)} />;
   }
   // A session with no prior messages - either a freshly-created "new"
   // session or a resumed session that happens to be empty - still has its
@@ -120,6 +121,7 @@ export function App({ sessions, start, newSessionTitle, createRuntime, cwd }: Ap
       sessionId={state.sessionId}
       initialLines={state.initialLines}
       cwd={cwd}
+      version={version}
       onFirstMessage={onFirstMessage}
     />
   );

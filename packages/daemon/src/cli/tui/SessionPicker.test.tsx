@@ -9,7 +9,7 @@ const sessions = [
 ];
 
 test("lists 'New session' plus each existing session's title", () => {
-  const { lastFrame } = render(<SessionPicker sessions={sessions} onSelect={() => {}} cwd="/tmp/proj" />);
+  const { lastFrame } = render(<SessionPicker sessions={sessions} onSelect={() => {}} cwd="/tmp/proj" version="0.0.0-test" />);
   const frame = lastFrame() ?? "";
   expect(frame).toContain("New session");
   expect(frame).toContain("Fix bug");
@@ -24,7 +24,7 @@ const tick = () => new Promise((r) => setTimeout(r, 20));
 
 test("enter on the default selection picks 'new'", async () => {
   let picked: string | undefined;
-  const { stdin } = render(<SessionPicker sessions={sessions} onSelect={(id) => { picked = id; }} cwd="/tmp/proj" />);
+  const { stdin } = render(<SessionPicker sessions={sessions} onSelect={(id) => { picked = id; }} cwd="/tmp/proj" version="0.0.0-test" />);
   await tick();
   stdin.write("\r");
   expect(picked).toBe("new");
@@ -32,7 +32,7 @@ test("enter on the default selection picks 'new'", async () => {
 
 test("down arrow then enter picks the first existing session", async () => {
   let picked: string | undefined;
-  const { stdin } = render(<SessionPicker sessions={sessions} onSelect={(id) => { picked = id; }} cwd="/tmp/proj" />);
+  const { stdin } = render(<SessionPicker sessions={sessions} onSelect={(id) => { picked = id; }} cwd="/tmp/proj" version="0.0.0-test" />);
   await tick();
   stdin.write("\u001B[B");
   await tick();

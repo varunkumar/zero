@@ -7,11 +7,12 @@ export interface SessionPickerProps {
   sessions: ChatSessionSummary[];
   onSelect: (sessionId: string | "new") => void;
   cwd: string;
+  version: string;
 }
 
 interface Item { id: string | "new"; label: string }
 
-export function SessionPicker({ sessions, onSelect, cwd }: SessionPickerProps) {
+export function SessionPicker({ sessions, onSelect, cwd, version }: SessionPickerProps) {
   const { exit } = useApp();
   const items: Item[] = [
     { id: "new", label: "New session" },
@@ -31,7 +32,7 @@ export function SessionPicker({ sessions, onSelect, cwd }: SessionPickerProps) {
 
   return (
     <Box flexDirection="column">
-      <Banner cwd={cwd} subtitle="Resume a session — up/down, enter · esc to quit" />
+      <Banner cwd={cwd} version={version} subtitle="Resume a session — up/down, enter · esc to quit" />
       {items.map((item, i) => (
         <Text key={item.id} color={i === index ? "cyan" : undefined}>
           {i === index ? "> " : "  "}{item.label}

@@ -2,15 +2,23 @@ import { resolve } from "node:path";
 import { startZero } from "../src/main";
 import { runAgentCli, positionalArgs, parseGatewayPort } from "../src/cli/agent";
 import { runTui } from "../src/cli/tui/runTui";
+import { VERSION } from "../src/version";
 
 const argv = process.argv.slice(2);
 
+if (argv.includes("--version") || argv.includes("-v")) {
+  console.log(`zero ${VERSION}`);
+  process.exit(0);
+}
 if (argv.includes("--help") || argv.includes("-h")) {
-  console.log(`usage:
+  console.log(`zero ${VERSION}
+
+usage:
   zero [path]                                       launch the interactive TUI (new session)
   zero --resume [path]                              launch the TUI, pick a session to resume
   zero -p "task" [--yes] [--session <id>] [path]    run one task headlessly
-  zero serve [path] [--gateway-port <port>]         start the web daemon`);
+  zero serve [path] [--gateway-port <port>]         start the web daemon
+  zero --version                                    print the version`);
   process.exit(0);
 }
 if (argv[0] === "agent") {

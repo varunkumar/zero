@@ -96,6 +96,7 @@ Command surface:
   headlessly (for scripts/CI)
 - `zero serve [path] [--gateway-port <port>]` - start the web daemon
   (editor/terminal/chat over HTTP/WS)
+- `zero --version` - print the installed version
 
 ## Development
 

@@ -4,12 +4,14 @@ import TextInput from "ink-text-input";
 import type { AgentRuntime, ChatToolCall } from "@zero/core";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { bannerLines } from "./Banner";
+import { Spinner } from "./Spinner";
 
 export interface ChatScreenProps {
   runtime: Pick<AgentRuntime, "sendMessage" | "resolveApproval">;
   sessionId: string;
   initialLines: string[];
   cwd: string;
+  version: string;
   /** Called once, on the first message submitted in this component
    * instance, with that message's text. Used by the caller to give a
    * freshly-created (or empty resumed) session a meaningful title instead
@@ -23,13 +25,14 @@ interface Line { id: string; text: string; bold?: boolean; dim?: boolean; color?
 let lineSeq = 0;
 function nextLineId(): string { return `line-${++lineSeq}`; }
 
-export function ChatScreen({ runtime, sessionId, initialLines, cwd, onFirstMessage }: ChatScreenProps) {
+export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onFirstMessage }: ChatScreenProps) {
   const { exit } = useApp();
   const [lines, setLines] = useState<Line[]>(() => [
-    ...bannerLines(cwd, "/exit to quit · esc cancels a turn").map((l) => ({ id: nextLineId(), ...l })),
+    ...bannerLines(cwd, version, "/exit to quit · esc cancels a turn").map((l) => ({ id: nextLineId(), ...l })),
     ...initialLines.map((text) => ({ id: nextLineId(), text })),
   ]);
   const [streamingText, setStreamingText] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingApproval | null>(null);
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
@@ -46,6 +49,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, onFirstMessa
       onFirstMessage?.(userText);
     }
     setBusy(true);
+    setStatus("Thinking");
     pushLine(`> ${userText}`);
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -55,12 +59,16 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, onFirstMessa
         if (event.type === "text") {
           assistantText += event.delta;
           setStreamingText(assistantText);
+          setStatus(null);
         } else if (event.type === "toolCall") {
           pushLine(`[tool] ${event.call.name} ${JSON.stringify(event.call.args)}`);
+          setStatus(`Running ${event.call.name}`);
         } else if (event.type === "approvalRequest") {
           setPending({ call: event.call, preview: event.preview });
+          setStatus(null);
         } else if (event.type === "toolResult") {
           pushLine(`[result] ${event.result}`);
+          setStatus("Thinking");
         } else if (event.type === "error") {
           pushLine(`[error] ${event.message}`);
         } else if (event.type === "done") {
@@ -69,6 +77,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, onFirstMessa
       }
     } finally {
       setStreamingText("");
+      setStatus(null);
       setBusy(false);
       controllerRef.current = null;
     }
@@ -101,6 +110,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, onFirstMessa
           </Text>
         )}
       </Static>
+      {busy && status ? <Spinner label={status} /> : null}
       {streamingText ? <Text>{streamingText}</Text> : null}
       {pending ? (
         <ApprovalPrompt call={pending.call} preview={pending.preview} onResolve={onResolveApproval} />

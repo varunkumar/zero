@@ -35,7 +35,7 @@ async function typeAndSubmit(stdin: { write: (data: string) => void }, text: str
 
 test("renders resumed transcript lines on mount", () => {
   const { lastFrame } = render(
-    <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={["> hi", "hello there"]} cwd="/tmp/proj" />,
+    <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={["> hi", "hello there"]} cwd="/tmp/proj" version="0.0.0-test" />,
   );
   const frame = lastFrame() ?? "";
   expect(frame).toContain("> hi");
@@ -48,7 +48,7 @@ test("submitting input streams assistant text into the transcript", async () => 
     { type: "text", delta: "there" },
     { type: "done", message: { role: "assistant", content: "hi there", createdAt: 0 } },
   ]);
-  const { stdin, lastFrame } = render(<ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" />);
+  const { stdin, lastFrame } = render(<ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />);
   await tick();
   await typeAndSubmit(stdin, "hello");
   await tick();
@@ -62,7 +62,7 @@ test("an approvalRequest renders the prompt, and 'y' resolves it via runtime.res
     { type: "approvalRequest", call: { id: "c1", name: "fs_write", args: {} }, preview: "+x" },
     { type: "done", message: { role: "assistant", content: "", createdAt: 0 } },
   ]);
-  const { stdin, lastFrame } = render(<ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" />);
+  const { stdin, lastFrame } = render(<ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />);
   await tick();
   await typeAndSubmit(stdin, "write it");
   await tick();
@@ -83,6 +83,7 @@ test("onFirstMessage fires exactly once, with the first submitted text", async (
       sessionId="s1"
       initialLines={[]}
       cwd="/tmp/proj"
+      version="0.0.0-test"
       onFirstMessage={(text) => calls.push(text)}
     />,
   );
