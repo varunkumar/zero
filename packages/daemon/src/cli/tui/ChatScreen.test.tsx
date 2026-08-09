@@ -42,6 +42,25 @@ test("renders resumed transcript lines on mount", () => {
   expect(frame).toContain("hello there");
 });
 
+test("header stays fully visible and the newest lines stay in view when the transcript overflows the terminal height", async () => {
+  const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+  const { lastFrame } = render(
+    <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={manyLines} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  const frame = lastFrame() ?? "";
+  // The header (logo + version line) must never scroll out of view, no
+  // matter how long the transcript grows.
+  expect(frame).toContain("v0.0.0-test");
+  // The most recent message must be visible...
+  expect(frame).toContain("line 39");
+  // ...and the oldest ones must be dropped from view rather than pushing
+  // the header/footer off-screen or growing the frame past the terminal.
+  expect(frame).not.toContain("line 0 ");
+  const frameHeight = frame.split("\n").length;
+  expect(frameHeight).toBeLessThan(24);
+});
+
 test("submitting input streams assistant text into the transcript", async () => {
   const runtime = fakeRuntime([
     { type: "text", delta: "hi " },

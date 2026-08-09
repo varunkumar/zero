@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import type { AgentRuntime, ChatToolCall } from "@zero/core";
 import { ApprovalPrompt } from "./ApprovalPrompt";
-import { bannerLines } from "./Banner";
+import { Banner } from "./Banner";
 import { Spinner } from "./Spinner";
 import { useTheme } from "./theme";
 
@@ -50,15 +50,20 @@ function summarizeArgs(args: unknown): string {
   }
 }
 
+// Banner is fixed content (11 logo rows + 2 border rows + version/cwd line
+// + subtitle line + marginBottom), so its rendered height is a known
+// constant rather than something to measure - deliberately avoiding a
+// measure-after-render (e.g. Ink's measureElement + useLayoutEffect) round
+// trip, which needs a second render pass with a different computed height
+// than the first and was empirically unreliable here.
+const HEADER_HEIGHT = 16;
+
 export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onFirstMessage }: ChatScreenProps) {
   const { exit } = useApp();
   const { theme, toggle: toggleTheme } = useTheme();
   const { stdout } = useStdout();
   const [rows, setRows] = useState(stdout.rows || 24);
-  const [lines, setLines] = useState<Line[]>(() => [
-    ...bannerLines(theme, cwd, version, "/exit to quit · esc cancels a turn · / for commands").map((l) => ({ id: nextLineId(), ...l })),
-    ...initialLines.map((text) => ({ id: nextLineId(), text })),
-  ]);
+  const [lines, setLines] = useState<Line[]>(() => initialLines.map((text) => ({ id: nextLineId(), text })));
   const [streamingText, setStreamingText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingApproval | null>(null);
@@ -85,7 +90,10 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     }
     setBusy(true);
     setStatus("Thinking");
-    pushLine(`> ${userText}`);
+    // Blank line before every turn gives visible breathing room between
+    // one exchange and the next in the transcript.
+    pushLine("");
+    pushLine(`> ${userText}`, { color: theme.userColor, bold: true });
     const controller = new AbortController();
     controllerRef.current = controller;
     let assistantText = "";
@@ -111,9 +119,9 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
           );
           setStatus("Thinking");
         } else if (event.type === "error") {
-          pushLine(`[error] ${event.message}`);
+          pushLine(`[error] ${event.message}`, { color: "red" });
         } else if (event.type === "done") {
-          if (assistantText) pushLine(assistantText);
+          if (assistantText) pushLine(assistantText, { color: theme.assistantColor });
         }
       }
     } finally {
@@ -122,7 +130,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       setBusy(false);
       controllerRef.current = null;
     }
-  }, [runtime, sessionId, pushLine, onFirstMessage, theme.toolLine]);
+  }, [runtime, sessionId, pushLine, onFirstMessage, theme.userColor, theme.toolLine, theme.assistantColor]);
 
   const onResolveApproval = useCallback((approved: boolean) => {
     if (!pending) return;
@@ -163,18 +171,34 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     }
   });
 
+  // Footer height is computed synchronously from state rather than
+  // measured after render, for the same reason as HEADER_HEIGHT above:
+  // border box (3 rows: top/content/bottom) plus either the hint line (1),
+  // the autocomplete list (one row per suggestion), or nothing (the
+  // approval prompt's own fixed-size box replaces the input entirely).
+  const footerHeight = pending ? 6 : 3 + (suggestions.length > 0 ? suggestions.length : 1);
+
+  // Total height is pinned strictly below the terminal's row count: Ink
+  // fully clears and rewrites the whole screen (the cause of both the
+  // flicker and the header/transcript scrolling out of view) whenever the
+  // live region's computed height reaches stdout.rows. Reserving one row
+  // keeps every render under that threshold.
+  const totalHeight = Math.max(3, rows - 1);
+  const liveExtra = (busy && status ? 1 : 0) + (streamingText ? 1 : 0);
+  const middleHeight = Math.max(0, totalHeight - HEADER_HEIGHT - footerHeight - liveExtra);
+  const visibleLines = lines.slice(-middleHeight);
+
   return (
-    <Box flexDirection="column" height={rows}>
-      <Box flexDirection="column" flexGrow={1}>
-        <Static items={lines}>
-          {(line) => (
-            <Text key={line.id} color={line.color} bold={line.bold} dimColor={line.dim}>
-              {line.text}
-            </Text>
-          )}
-        </Static>
+    <Box flexDirection="column" height={totalHeight} overflow="hidden">
+      <Banner cwd={cwd} version={version} subtitle="/exit to quit · esc cancels a turn · / for commands" />
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
+        {visibleLines.map((line) => (
+          <Text key={line.id} color={line.color} bold={line.bold} dimColor={line.dim}>
+            {line.text || " "}
+          </Text>
+        ))}
         {busy && status ? <Spinner label={status} /> : null}
-        {streamingText ? <Text>{streamingText}</Text> : null}
+        {streamingText ? <Text color={theme.assistantColor}>{streamingText}</Text> : null}
       </Box>
       {pending ? (
         <ApprovalPrompt call={pending.call} preview={pending.preview} onResolve={onResolveApproval} />
