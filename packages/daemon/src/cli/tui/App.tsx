@@ -77,5 +77,20 @@ export function App({ sessions, start, newSessionTitle, createRuntime }: AppProp
   if (state.kind === "loading") return <Text dimColor>loading...</Text>;
   if (state.kind === "error") return <Text color="red">error: {state.message}</Text>;
   if (state.kind === "picker") return <SessionPicker sessions={state.items} onSelect={(id) => void onPick(id)} />;
-  return <ChatScreen runtime={state.runtime} sessionId={state.sessionId} initialLines={state.initialLines} />;
+  // A session with no prior messages - either a freshly-created "new"
+  // session or a resumed session that happens to be empty - still has its
+  // generic default title. Rename it from the user's first submitted
+  // message so `zero --resume`'s picker shows something distinguishable
+  // instead of a wall of identical "New chat" rows.
+  const onFirstMessage = state.initialLines.length === 0
+    ? (text: string) => { void sessions.rename(state.sessionId, text.slice(0, 40)); }
+    : undefined;
+  return (
+    <ChatScreen
+      runtime={state.runtime}
+      sessionId={state.sessionId}
+      initialLines={state.initialLines}
+      onFirstMessage={onFirstMessage}
+    />
+  );
 }

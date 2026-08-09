@@ -8,6 +8,11 @@ export interface ChatScreenProps {
   runtime: Pick<AgentRuntime, "sendMessage" | "resolveApproval">;
   sessionId: string;
   initialLines: string[];
+  /** Called once, on the first message submitted in this component
+   * instance, with that message's text. Used by the caller to give a
+   * freshly-created (or empty resumed) session a meaningful title instead
+   * of the generic default. */
+  onFirstMessage?: (text: string) => void;
 }
 
 interface PendingApproval { call: ChatToolCall; preview: string }
@@ -16,7 +21,7 @@ interface Line { id: string; text: string }
 let lineSeq = 0;
 function nextLineId(): string { return `line-${++lineSeq}`; }
 
-export function ChatScreen({ runtime, sessionId, initialLines }: ChatScreenProps) {
+export function ChatScreen({ runtime, sessionId, initialLines, onFirstMessage }: ChatScreenProps) {
   const { exit } = useApp();
   const [lines, setLines] = useState<Line[]>(() => initialLines.map((text) => ({ id: nextLineId(), text })));
   const [streamingText, setStreamingText] = useState("");
@@ -24,12 +29,17 @@ export function ChatScreen({ runtime, sessionId, initialLines }: ChatScreenProps
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const controllerRef = useRef<AbortController | null>(null);
+  const hasSentRef = useRef(false);
 
   const pushLine = useCallback((text: string) => {
     setLines((prev) => [...prev, { id: nextLineId(), text }]);
   }, []);
 
   const runTurn = useCallback(async (userText: string) => {
+    if (!hasSentRef.current) {
+      hasSentRef.current = true;
+      onFirstMessage?.(userText);
+    }
     setBusy(true);
     pushLine(`> ${userText}`);
     const controller = new AbortController();
@@ -57,7 +67,7 @@ export function ChatScreen({ runtime, sessionId, initialLines }: ChatScreenProps
       setBusy(false);
       controllerRef.current = null;
     }
-  }, [runtime, sessionId, pushLine]);
+  }, [runtime, sessionId, pushLine, onFirstMessage]);
 
   const onResolveApproval = useCallback((approved: boolean) => {
     if (!pending) return;

@@ -71,3 +71,26 @@ test("an approvalRequest renders the prompt, and 'y' resolves it via runtime.res
   await tick();
   expect(runtime.resolved).toEqual([{ id: "c1", approved: true }]);
 });
+
+test("onFirstMessage fires exactly once, with the first submitted text", async () => {
+  const runtime = fakeRuntime([
+    { type: "done", message: { role: "assistant", content: "ok", createdAt: 0 } },
+  ]);
+  const calls: string[] = [];
+  const { stdin } = render(
+    <ChatScreen
+      runtime={runtime}
+      sessionId="s1"
+      initialLines={[]}
+      onFirstMessage={(text) => calls.push(text)}
+    />,
+  );
+  await tick();
+  await typeAndSubmit(stdin, "first message");
+  await tick();
+  expect(calls).toEqual(["first message"]);
+
+  await typeAndSubmit(stdin, "second message");
+  await tick();
+  expect(calls).toEqual(["first message"]);
+});
