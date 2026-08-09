@@ -184,17 +184,27 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)" }}>
-      <div className="zero-tabstrip" role="tablist">
-        {sessions.map((s) => (
-          <div key={s.id} className="zero-tab" role="tab" aria-selected={s.id === activeId} onClick={() => chatStore.setActive(s.id)}>
-            <span>{s.title}</span>
-            <button className="zero-tab-close" aria-label={`Close chat ${s.title}`}
-              onClick={(e) => { e.stopPropagation(); closeSession(s.id); }}>
-              ×
-            </button>
-          </div>
-        ))}
-        <button aria-label="New chat" onClick={() => void newSession()} style={{ marginLeft: 4 }}>+</button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderBottom: "1px solid var(--zero-border)" }}>
+        <select
+          aria-label="Chat session"
+          value={activeId ?? ""}
+          onChange={(e) => chatStore.setActive(e.target.value)}
+          style={{
+            background: "var(--zero-sidebar-bg)",
+            color: "var(--zero-sidebar-fg)",
+            border: "1px solid var(--zero-border)",
+            borderRadius: 4,
+            padding: "4px 8px",
+          }}
+        >
+          {sessions.map((s) => (
+            <option key={s.id} value={s.id}>{s.title ?? s.id}</option>
+          ))}
+        </select>
+        <button onClick={() => void newSession()} title="New chat session">+</button>
+        {sessions.length > 1 && (
+          <button onClick={() => activeId && closeSession(activeId)} title="Delete current chat session">Delete</button>
+        )}
         <div style={{ marginLeft: "auto", padding: "4px 8px" }}>
           <div
             title={status.reason ?? undefined}
