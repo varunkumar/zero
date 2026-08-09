@@ -96,3 +96,42 @@ test("onFirstMessage fires exactly once, with the first submitted text", async (
   await tick();
   expect(calls).toEqual(["first message"]);
 });
+
+test("typing '/' shows a filtered command autocomplete", async () => {
+  const { stdin, lastFrame } = render(
+    <ChatScreen runtime={fakeRuntime([])} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  stdin.write("/");
+  await tick();
+  let frame = lastFrame() ?? "";
+  expect(frame).toContain("/help");
+  expect(frame).toContain("/exit");
+  expect(frame).toContain("/quit");
+
+  stdin.write("e");
+  await tick();
+  frame = lastFrame() ?? "";
+  expect(frame).toContain("/exit");
+  expect(frame).not.toContain("/help");
+  expect(frame).not.toContain("/quit");
+});
+
+test("/help lists commands instead of sending a message", async () => {
+  const runtime = fakeRuntime([]);
+  let sent = false;
+  const originalSendMessage = runtime.sendMessage.bind(runtime);
+  runtime.sendMessage = (...args: Parameters<typeof originalSendMessage>) => {
+    sent = true;
+    return originalSendMessage(...args);
+  };
+  const { stdin, lastFrame } = render(
+    <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  await typeAndSubmit(stdin, "/help");
+  await tick();
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("/exit  exit zero");
+  expect(sent).toBe(false);
+});

@@ -25,6 +25,16 @@ interface Line { id: string; text: string; bold?: boolean; dim?: boolean; color?
 let lineSeq = 0;
 function nextLineId(): string { return `line-${++lineSeq}`; }
 
+const SLASH_COMMANDS = [
+  { name: "/help", description: "list available commands" },
+  { name: "/exit", description: "exit zero" },
+  { name: "/quit", description: "exit zero (alias for /exit)" },
+];
+
+function matchingCommands(value: string) {
+  return value.startsWith("/") ? SLASH_COMMANDS.filter((c) => c.name.startsWith(value)) : [];
+}
+
 export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onFirstMessage }: ChatScreenProps) {
   const { exit } = useApp();
   const [lines, setLines] = useState<Line[]>(() => [
@@ -36,6 +46,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const [pending, setPending] = useState<PendingApproval | null>(null);
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
   const controllerRef = useRef<AbortController | null>(null);
   const hasSentRef = useRef(false);
 
@@ -92,13 +103,30 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const onSubmit = useCallback((value: string) => {
     const trimmed = value.trim();
     setInput("");
+    setSuggestionIndex(0);
     if (!trimmed || busy) return;
     if (trimmed === "/exit" || trimmed === "/quit") { exit(); return; }
+    if (trimmed === "/help") {
+      for (const c of SLASH_COMMANDS) pushLine(`${c.name}  ${c.description}`);
+      return;
+    }
     void runTurn(trimmed);
-  }, [busy, runTurn, exit]);
+  }, [busy, runTurn, exit, pushLine]);
+
+  const suggestions = matchingCommands(input);
+  const activeSuggestion = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
 
   useInput((_input, key) => {
-    if (key.escape && !pending) exit();
+    if (key.escape) {
+      if (!pending && suggestions.length > 0) setInput("");
+      else if (!pending) exit();
+      return;
+    }
+    if (!pending && suggestions.length > 0) {
+      if (key.downArrow) { setSuggestionIndex((i) => Math.min(suggestions.length - 1, i + 1)); return; }
+      if (key.upArrow) { setSuggestionIndex((i) => Math.max(0, i - 1)); return; }
+      if (key.tab) { setInput(`${suggestions[activeSuggestion]!.name} `); setSuggestionIndex(0); return; }
+    }
   });
 
   return (
@@ -120,7 +148,17 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
             <Text color="green">{"> "}</Text>
             <TextInput value={input} onChange={setInput} onSubmit={onSubmit} focus={!busy} />
           </Box>
-          <Text dimColor>{busy ? "working..." : "/exit to quit"}</Text>
+          {suggestions.length > 0 ? (
+            <Box flexDirection="column" paddingLeft={2}>
+              {suggestions.map((c, i) => (
+                <Text key={c.name} color={i === activeSuggestion ? "cyan" : undefined} dimColor={i !== activeSuggestion}>
+                  {i === activeSuggestion ? "> " : "  "}{c.name}  {c.description}
+                </Text>
+              ))}
+            </Box>
+          ) : (
+            <Text dimColor>{busy ? "working..." : "/exit to quit · / for commands"}</Text>
+          )}
         </Box>
       )}
     </Box>
