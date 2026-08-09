@@ -1,6 +1,6 @@
 // packages/daemon/src/cli/tui/App.tsx
 import React, { useEffect, useState } from "react";
-import { Text } from "ink";
+import { Text, useApp } from "ink";
 import type { AgentRuntime } from "@zero/core";
 import type { ChatMessage, ChatSessionSummary } from "@zero/protocol";
 import type { SessionStore } from "../../sessions";
@@ -30,6 +30,17 @@ function linesFromMessages(messages: ChatMessage[]): string[] {
 
 export function App({ sessions, start, newSessionTitle, createRuntime }: AppProps) {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
+  const { exit } = useApp();
+
+  // Resuming an unknown/deleted session id (or a fresh-session lookup
+  // racing a delete) lands here; without this, Ink never terminates on its
+  // own and the process hangs until the user hits Ctrl+C. Known gap: this
+  // only stops the hang, it doesn't propagate a non-zero exit code out of
+  // <App> (runTui.tsx still reports 0) - that needs return-value plumbing
+  // out of the component and is out of scope here.
+  useEffect(() => {
+    if (state.kind === "error") exit();
+  }, [state.kind, exit]);
 
   useEffect(() => {
     let cancelled = false;
