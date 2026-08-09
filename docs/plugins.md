@@ -79,7 +79,7 @@ without redesigning this protocol.
 
 Grammars are not hard-coded beyond the TS/JS defaults. Settings key
 `graphify.grammars` (via `settings/get` / `settings/set` →
-`.zero/settings.json`):
+`~/.zero/settings.json`):
 
 ```json
 {

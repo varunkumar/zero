@@ -38,7 +38,7 @@ M0–M5 are implemented on `main`:
   chat panel) — completes v1 scope
 - **M5** Zero Agents (daemon-side AgentRuntime, approval-gated write tools
   `fs_write`/`fs_edit`/`run_command`, git checkpointing to a shadow branch,
-  headless `zero agent "task"` CLI, Anthropic Messages API-compatible model
+  headless `zero -p "task"` CLI, Anthropic Messages API-compatible model
   gateway) — Nano is not yet wired into daemon-side runs; that lands with
   the M7 Nano bridge
 
@@ -66,10 +66,12 @@ zero/
   docs/
 ```
 
-`zero [path]` starts the daemon in a project directory. The daemon indexes
-the project and serves the web client at `http://localhost:<port>`. The
-browser connects back over one WebSocket carrying JSON-RPC both ways.
-Everything works with the network unplugged.
+`zero [path]` opens an interactive terminal UI rooted at a project directory.
+`zero serve [path]` starts the daemon instead: it indexes the project and
+serves the web client at `http://localhost:<port>`, with the browser
+connecting back over one WebSocket carrying JSON-RPC both ways. Everything
+works with the network unplugged. See [CLI usage](#cli-usage) below for the
+full command surface.
 
 - **Browser**: CodeMirror 6 editor, the completion engine and AgentRuntime
   (from `@zero/core`), chat panel, xterm.js terminal UI, settings, and the
@@ -77,6 +79,23 @@ Everything works with the network unplugged.
 - **Daemon**: file system, project watching, PTY sessions, LSP server
   management, **plugin host** (built-ins first; Graphify indexer), session
   store, and static serving of the client. See [`docs/plugins.md`](docs/plugins.md).
+
+## CLI usage
+
+Install a `zero` command onto `~/.local/bin`:
+
+```
+./scripts/install.sh
+```
+
+Command surface:
+
+- `zero [path]` - interactive TUI, new session
+- `zero --resume [path]` - interactive TUI, pick a session to resume
+- `zero -p "task" [--yes] [--session <id>] [path]` - run one task
+  headlessly (for scripts/CI)
+- `zero serve [path] [--gateway-port <port>]` - start the web daemon
+  (editor/terminal/chat over HTTP/WS)
 
 ## Development
 
