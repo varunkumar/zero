@@ -1,11 +1,10 @@
 // packages/daemon/src/cli/tui/runTui.tsx
 import React from "react";
 import { render } from "ink";
-import type { ChatCapableProvider } from "@zero/core";
-import { createCliContext, createRuntimeForSession } from "../runtimeFactory";
+import { createCliContext, createRuntimeForSession, type CliOpts } from "../runtimeFactory";
 import { App, type StartMode } from "./App";
 
-export interface TuiOpts { providers?: ChatCapableProvider[] }
+export type TuiOpts = CliOpts;
 
 export async function runTui(root: string, start: StartMode, opts: TuiOpts = {}): Promise<number> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {

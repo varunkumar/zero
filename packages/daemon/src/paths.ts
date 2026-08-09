@@ -11,7 +11,12 @@ export function zeroHome(): string {
 /** Turns an absolute workspace path into a flat, filesystem-safe directory
  * name, the same convention Claude Code itself uses for its own
  * per-project directories (e.g. `/Users/x/proj` -> `-Users-x-proj`). Also
- * strips `:` so Windows drive letters don't produce an invalid path. */
+ * strips `:` so Windows drive letters don't produce an invalid path.
+ *
+ * Accepted collision risk: separators collapse to `-`, so distinct paths
+ * like `/a/b` and `/a-b` both sanitize to `-a-b` and would share a session
+ * directory. This mirrors the same tradeoff in the design spec ("same
+ * convention... requiring no new collision handling") - not a bug to fix. */
 export function sanitizeWorkspacePath(root: string): string {
   const collapsed = root.replace(/[\\/:]+/g, "-").replace(/^-+/, "");
   return `-${collapsed}`;

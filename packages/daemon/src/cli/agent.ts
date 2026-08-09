@@ -1,9 +1,8 @@
 // packages/daemon/src/cli/agent.ts
 import { createInterface } from "node:readline/promises";
-import type { ChatCapableProvider } from "@zero/core";
-import { createCliContext, createRuntimeForSession } from "./runtimeFactory";
+import { createCliContext, createRuntimeForSession, type CliOpts } from "./runtimeFactory";
 
-export interface AgentCliOpts { providers?: ChatCapableProvider[] }
+export type AgentCliOpts = CliOpts;
 
 // Flags that take a following value - that value must not be mistaken for a
 // positional argument (e.g. `zero --gateway-port 4000` must not treat "4000"
