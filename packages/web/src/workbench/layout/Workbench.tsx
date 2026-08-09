@@ -287,6 +287,13 @@ export function Workbench(props: { client: RpcClient }) {
     lastError?: string;
     nodeCount?: number;
   } | null>(null);
+  const [gitStatus, setGitStatus] = useState<{
+    branch: string;
+    dirtyCount: number;
+    ahead: number;
+    behind: number;
+    remoteUrl: string | null;
+  } | null>(null);
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -345,6 +352,36 @@ export function Workbench(props: { client: RpcClient }) {
         if (!cancelled) setGraphStatus(s);
       } catch {
         if (!cancelled) setGraphStatus({ ready: false, indexing: false, lastError: "unreachable" });
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [client]);
+
+  // Poll git branch/dirty/remote status for the status bar. Failures
+  // surface as no pill at all (null) rather than taking the editor down -
+  // git/status itself already degrades to null server-side when `root`
+  // isn't a git work tree, so an unreachable daemon gets the same result.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const { status } = await client.request<{
+          status: {
+            branch: string;
+            dirtyCount: number;
+            ahead: number;
+            behind: number;
+            remoteUrl: string | null;
+          } | null;
+        }>("git/status");
+        if (!cancelled) setGitStatus(status);
+      } catch {
+        if (!cancelled) setGitStatus(null);
       }
     };
     void tick();
@@ -848,6 +885,7 @@ export function Workbench(props: { client: RpcClient }) {
               ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length, failed: lspFailedByPath.get(activePath) ?? false }
               : null}
             graphStatus={graphStatus}
+            gitStatus={gitStatus}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />

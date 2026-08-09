@@ -17,6 +17,7 @@ import { createAgentRuntimeClient } from "./agentClient";
 import { createRuntimePool } from "./agentRuntimePool";
 import { GitCheckpoint } from "./gitCheckpoint";
 import { execCommand } from "./execCommand";
+import { getGitStatus } from "./gitInfo";
 
 export async function startZero(opts: DaemonOptions) {
   const daemon = createDaemon(opts);
@@ -57,6 +58,11 @@ export async function startZero(opts: DaemonOptions) {
     async (p) => ({ value: await ws.readSetting(p.key) }));
   daemon.rpc.register("settings/set", z.object({ key: z.string(), value: z.unknown() }),
     async (p) => { await ws.writeSetting(p.key, p.value); return {}; });
+  // Returns { status: GitStatusResult | null } - null when `opts.root` isn't
+  // inside a git work tree (or git isn't installed), matching the "degrade,
+  // never throw" convention for optional subsystems.
+  daemon.rpc.register("git/status", z.object({}).optional().transform(() => ({})),
+    async () => ({ status: await getGitStatus(opts.root) }));
 
   daemon.rpc.register("pty/open", z.object({ shell: z.string().optional(), cols: z.number(), rows: z.number() }),
     async (p) => pty.open(p.shell, p.cols, p.rows));

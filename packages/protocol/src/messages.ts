@@ -152,3 +152,11 @@ export interface ChatTurnEventPayload { turnId: string; event: ChatTurnEvent }
 export interface ChatApproveParams { turnId: string; callId: string; approved: boolean }
 export interface ChatAbortParams { turnId: string }
 export interface ChatStatusResult { activeModel: string | null; reason: string | null }
+
+export interface GitStatusResult {
+  branch: string;
+  dirtyCount: number;
+  ahead: number;
+  behind: number;
+  remoteUrl: string | null;
+}

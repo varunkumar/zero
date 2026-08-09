@@ -400,3 +400,48 @@ test("a second chat/turn for a session with an already-active turn is rejected, 
 
   ws.close(); d.stop();
 });
+
+test("git/status returns null outside a git repo, and real data inside one", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const before = await client.request<{ status: unknown }>("git/status");
+  expect(before.status).toBeNull();
+
+  ws.close(); d.stop();
+
+  // "Real data inside one": init a repo under `root` itself after the fact
+  // (rather than a second daemon/tmpdir) so this test isn't tripped up by
+  // the daemon's own async `.zero/` bookkeeping writes racing the git
+  // status check - that behavior belongs to SessionStore/Workspace, not to
+  // git/status, and is already covered unit-wise in gitInfo.test.ts.
+  async function git(cwd: string, args: string[]) {
+    const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+    await proc.exited;
+  }
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["config", "user.email", "t@example.com"]);
+  await git(root, ["config", "user.name", "t"]);
+  await git(root, ["add", "-A"]);
+  await git(root, ["commit", "-m", "init"]);
+
+  const d2 = await startZero({ root });
+  const ws2 = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d2.port}/rpc?token=${d2.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client2 = new RpcClient(wsAdapter(ws2));
+
+  const after = await client2.request<{
+    status: { branch: string; dirtyCount: number; ahead: number; behind: number; remoteUrl: string | null } | null;
+  }>("git/status");
+  expect(after.status?.branch).toBe("main");
+  expect(after.status?.remoteUrl).toBeNull();
+
+  ws2.close(); d2.stop();
+});
