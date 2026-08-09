@@ -6,6 +6,7 @@ import type { ChatMessage, ChatSessionSummary } from "@zero/protocol";
 import type { SessionStore } from "../../sessions";
 import { SessionPicker } from "./SessionPicker";
 import { ChatScreen } from "./ChatScreen";
+import { Banner } from "./Banner";
 
 export type StartMode = { kind: "new" } | { kind: "resume" } | { kind: "session"; sessionId: string };
 
@@ -14,6 +15,7 @@ export interface AppProps {
   start: StartMode;
   newSessionTitle: string;
   createRuntime: (sessionId: string) => AgentRuntime;
+  cwd: string;
 }
 
 type ViewState =
@@ -28,7 +30,7 @@ function linesFromMessages(messages: ChatMessage[]): string[] {
     .map((m) => (m.role === "user" ? `> ${m.content}` : m.content));
 }
 
-export function App({ sessions, start, newSessionTitle, createRuntime }: AppProps) {
+export function App({ sessions, start, newSessionTitle, createRuntime, cwd }: AppProps) {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
   const { exit } = useApp();
 
@@ -85,9 +87,25 @@ export function App({ sessions, start, newSessionTitle, createRuntime }: AppProp
     });
   };
 
-  if (state.kind === "loading") return <Text dimColor>loading...</Text>;
-  if (state.kind === "error") return <Text color="red">error: {state.message}</Text>;
-  if (state.kind === "picker") return <SessionPicker sessions={state.items} onSelect={(id) => void onPick(id)} />;
+  if (state.kind === "loading") {
+    return (
+      <>
+        <Banner cwd={cwd} />
+        <Text dimColor>loading...</Text>
+      </>
+    );
+  }
+  if (state.kind === "error") {
+    return (
+      <>
+        <Banner cwd={cwd} />
+        <Text color="red">error: {state.message}</Text>
+      </>
+    );
+  }
+  if (state.kind === "picker") {
+    return <SessionPicker cwd={cwd} sessions={state.items} onSelect={(id) => void onPick(id)} />;
+  }
   // A session with no prior messages - either a freshly-created "new"
   // session or a resumed session that happens to be empty - still has its
   // generic default title. Rename it from the user's first submitted
@@ -101,6 +119,7 @@ export function App({ sessions, start, newSessionTitle, createRuntime }: AppProp
       runtime={state.runtime}
       sessionId={state.sessionId}
       initialLines={state.initialLines}
+      cwd={cwd}
       onFirstMessage={onFirstMessage}
     />
   );

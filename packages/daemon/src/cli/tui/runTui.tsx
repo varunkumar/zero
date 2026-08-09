@@ -18,6 +18,7 @@ export async function runTui(root: string, start: StartMode, opts: TuiOpts = {})
       start={start}
       newSessionTitle="New chat"
       createRuntime={(sessionId) => createRuntimeForSession(ctx, sessionId)}
+      cwd={root}
     />,
   );
   await waitUntilExit();

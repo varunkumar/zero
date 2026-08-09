@@ -21,8 +21,15 @@ export function createDaemon(opts: DaemonOptions) {
       if (opts.webDist) {
         const path = url.pathname === "/" ? "/index.html" : url.pathname;
         const file = Bun.file(opts.webDist + path);
-        return file.exists().then((ok) =>
-          ok ? new Response(file) : new Response(Bun.file(opts.webDist + "/index.html")));
+        const index = Bun.file(opts.webDist + "/index.html");
+        return file.exists().then(async (ok) => {
+          if (ok) return new Response(file);
+          if (await index.exists()) return new Response(index);
+          return new Response(
+            "zero web UI is not built. Run `bun run --filter @zero/web build` (or ./scripts/install.sh) and retry.",
+            { status: 500 },
+          );
+        });
       }
       return new Response("zero daemon", { status: 200 });
     },

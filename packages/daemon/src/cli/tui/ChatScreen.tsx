@@ -3,11 +3,13 @@ import { Box, Static, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type { AgentRuntime, ChatToolCall } from "@zero/core";
 import { ApprovalPrompt } from "./ApprovalPrompt";
+import { bannerLines } from "./Banner";
 
 export interface ChatScreenProps {
   runtime: Pick<AgentRuntime, "sendMessage" | "resolveApproval">;
   sessionId: string;
   initialLines: string[];
+  cwd: string;
   /** Called once, on the first message submitted in this component
    * instance, with that message's text. Used by the caller to give a
    * freshly-created (or empty resumed) session a meaningful title instead
@@ -16,14 +18,17 @@ export interface ChatScreenProps {
 }
 
 interface PendingApproval { call: ChatToolCall; preview: string }
-interface Line { id: string; text: string }
+interface Line { id: string; text: string; bold?: boolean; dim?: boolean; color?: string }
 
 let lineSeq = 0;
 function nextLineId(): string { return `line-${++lineSeq}`; }
 
-export function ChatScreen({ runtime, sessionId, initialLines, onFirstMessage }: ChatScreenProps) {
+export function ChatScreen({ runtime, sessionId, initialLines, cwd, onFirstMessage }: ChatScreenProps) {
   const { exit } = useApp();
-  const [lines, setLines] = useState<Line[]>(() => initialLines.map((text) => ({ id: nextLineId(), text })));
+  const [lines, setLines] = useState<Line[]>(() => [
+    ...bannerLines(cwd, "/exit to quit · esc cancels a turn").map((l) => ({ id: nextLineId(), ...l })),
+    ...initialLines.map((text) => ({ id: nextLineId(), text })),
+  ]);
   const [streamingText, setStreamingText] = useState("");
   const [pending, setPending] = useState<PendingApproval | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,8 +84,9 @@ export function ChatScreen({ runtime, sessionId, initialLines, onFirstMessage }:
     const trimmed = value.trim();
     setInput("");
     if (!trimmed || busy) return;
+    if (trimmed === "/exit" || trimmed === "/quit") { exit(); return; }
     void runTurn(trimmed);
-  }, [busy, runTurn]);
+  }, [busy, runTurn, exit]);
 
   useInput((_input, key) => {
     if (key.escape && !pending) exit();
@@ -89,15 +95,22 @@ export function ChatScreen({ runtime, sessionId, initialLines, onFirstMessage }:
   return (
     <Box flexDirection="column">
       <Static items={lines}>
-        {(line) => <Text key={line.id}>{line.text}</Text>}
+        {(line) => (
+          <Text key={line.id} color={line.color} bold={line.bold} dimColor={line.dim}>
+            {line.text}
+          </Text>
+        )}
       </Static>
       {streamingText ? <Text>{streamingText}</Text> : null}
       {pending ? (
         <ApprovalPrompt call={pending.call} preview={pending.preview} onResolve={onResolveApproval} />
       ) : (
-        <Box>
-          <Text color="green">{"> "}</Text>
-          <TextInput value={input} onChange={setInput} onSubmit={onSubmit} focus={!busy} />
+        <Box flexDirection="column">
+          <Box borderStyle="round" borderColor="gray" paddingX={1}>
+            <Text color="green">{"> "}</Text>
+            <TextInput value={input} onChange={setInput} onSubmit={onSubmit} focus={!busy} />
+          </Box>
+          <Text dimColor>{busy ? "working..." : "/exit to quit"}</Text>
         </Box>
       )}
     </Box>

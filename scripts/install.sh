@@ -14,6 +14,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "Installing dependencies (this also compiles node-pty's native addon)..."
 (cd "$REPO_ROOT" && bun install)
 
+echo "Building web UI (used by 'zero serve')..."
+(cd "$REPO_ROOT/packages/web" && bun run build)
+
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 

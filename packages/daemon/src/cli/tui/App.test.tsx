@@ -34,7 +34,7 @@ test("'new' start mode creates a session and goes straight to the chat screen", 
   const root = mkdtempSync(join(tmpdir(), "zero-app-"));
   const sessions = new SessionStore(root);
   render(
-    <App sessions={sessions} start={{ kind: "new" }} newSessionTitle="New chat" createRuntime={() => fakeRuntime() as AgentRuntime} />,
+    <App sessions={sessions} start={{ kind: "new" }} newSessionTitle="New chat" createRuntime={() => fakeRuntime() as AgentRuntime} cwd={root} />,
   );
   await tick();
   const list = await sessions.list();
@@ -46,7 +46,7 @@ test("'resume' start mode with sessions shows the picker listing them", async ()
   const sessions = new SessionStore(root);
   await sessions.create("Earlier chat");
   const { lastFrame } = render(
-    <App sessions={sessions} start={{ kind: "resume" }} newSessionTitle="New chat" createRuntime={() => fakeRuntime() as AgentRuntime} />,
+    <App sessions={sessions} start={{ kind: "resume" }} newSessionTitle="New chat" createRuntime={() => fakeRuntime() as AgentRuntime} cwd={root} />,
   );
   await tick();
   expect(lastFrame() ?? "").toContain("Earlier chat");
@@ -61,6 +61,7 @@ test("'session' start mode with an unknown id shows an error instead of crashing
       start={{ kind: "session", sessionId: "11111111-1111-4111-8111-111111111111" }}
       newSessionTitle="New chat"
       createRuntime={() => fakeRuntime() as AgentRuntime}
+      cwd={root}
     />,
   );
   await tick();
@@ -71,7 +72,7 @@ test("'new' start mode renames the session from the first submitted message", as
   const root = mkdtempSync(join(tmpdir(), "zero-app-"));
   const sessions = new SessionStore(root);
   const { stdin } = render(
-    <App sessions={sessions} start={{ kind: "new" }} newSessionTitle="New chat" createRuntime={() => fakeRuntime() as AgentRuntime} />,
+    <App sessions={sessions} start={{ kind: "new" }} newSessionTitle="New chat" createRuntime={() => fakeRuntime() as AgentRuntime} cwd={root} />,
   );
   await tick();
   await typeAndSubmit(stdin, "help me fix the parser");

@@ -1,15 +1,18 @@
 import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import type { ChatSessionSummary } from "@zero/protocol";
+import { Banner } from "./Banner";
 
 export interface SessionPickerProps {
   sessions: ChatSessionSummary[];
   onSelect: (sessionId: string | "new") => void;
+  cwd: string;
 }
 
 interface Item { id: string | "new"; label: string }
 
-export function SessionPicker({ sessions, onSelect }: SessionPickerProps) {
+export function SessionPicker({ sessions, onSelect, cwd }: SessionPickerProps) {
+  const { exit } = useApp();
   const items: Item[] = [
     { id: "new", label: "New session" },
     ...sessions.map((s) => ({
@@ -23,11 +26,12 @@ export function SessionPicker({ sessions, onSelect }: SessionPickerProps) {
     if (key.upArrow) setIndex((i) => Math.max(0, i - 1));
     else if (key.downArrow) setIndex((i) => Math.min(items.length - 1, i + 1));
     else if (key.return) onSelect(items[index]!.id);
+    else if (key.escape) exit();
   });
 
   return (
     <Box flexDirection="column">
-      <Text bold>Resume a session (up/down, enter):</Text>
+      <Banner cwd={cwd} subtitle="Resume a session — up/down, enter · esc to quit" />
       {items.map((item, i) => (
         <Text key={item.id} color={i === index ? "cyan" : undefined}>
           {i === index ? "> " : "  "}{item.label}
