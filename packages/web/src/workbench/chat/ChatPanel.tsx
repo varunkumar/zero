@@ -16,7 +16,6 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
   const [pendingApproval, setPendingApproval] = useState<{ turnId: string; call: ChatToolCall; preview: string } | null>(null);
   const [status, setStatus] = useState<{ activeModel: string | null; reason: string | null }>({ activeModel: null, reason: null });
   const [turnId, setTurnId] = useState<string | null>(null);
-  const turnIdRef = useRef<string | null>(null);
   // Settles the in-flight `send()` promise (unsubscribes from TurnStore,
   // resolves) for the current turn, if any. `chat/abort` only signals the
   // daemon's AbortController - AgentRuntime.sendMessage returns silently on
@@ -28,7 +27,6 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
   const finishTurnRef = useRef<(() => void) | null>(null);
 
   function abortCurrentTurn(): void {
-    const turnId = turnIdRef.current;
     if (turnId) client.request("chat/abort", { turnId }).catch(() => {});
     finishTurnRef.current?.();
     setPendingApproval(null);
@@ -128,7 +126,6 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
 
     try {
       const { turnId } = await client.request<{ turnId: string }>("chat/turn", { sessionId, userText: text });
-      turnIdRef.current = turnId;
       setTurnId(turnId);
       await new Promise<void>((resolve) => {
         // `finish` is declared before use but assigned after `onEvent`
@@ -176,7 +173,6 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
     } catch (e) {
       reportError(`failed to send: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      turnIdRef.current = null;
       setTurnId(null);
       setBusy(false);
       chatStore.touchSession(sessionId);
