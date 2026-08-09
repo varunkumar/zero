@@ -3,12 +3,14 @@ import { mkdtempSync, existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Workspace } from "./workspace";
 import { SessionStore, InvalidSessionIdError } from "./sessions";
+import { useTempZeroHome } from "./testSupport/zeroHome";
+import { sessionsDir } from "./paths";
 
-function makeStore(): SessionStore {
-  const root = mkdtempSync(join(tmpdir(), "zero-"));
-  return new SessionStore(new Workspace(root));
+useTempZeroHome();
+
+function makeStore(root = mkdtempSync(join(tmpdir(), "zero-"))): SessionStore {
+  return new SessionStore(root);
 }
 
 test("create then get round-trips an empty session", async () => {
@@ -74,9 +76,9 @@ test("list on a workspace with no sessions yet returns empty, not an error", asy
 
 test("list skips a stray non-UUID filename instead of failing entirely", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
-  const store = new SessionStore(new Workspace(root));
+  const store = new SessionStore(root);
   const id = await store.create("Valid session");
-  const dir = join(root, ".zero", "sessions");
+  const dir = sessionsDir(root);
   await writeFile(join(dir, "not-a-uuid.json"), "{}", "utf8");
   const list = await store.list();
   expect(list.map((s) => s.id)).toEqual([id]);
@@ -88,4 +90,20 @@ test("append on a deleted session is a no-op and does not recreate it", async ()
   await store.delete(id);
   await store.append(id, [{ role: "user", content: "hi", createdAt: 1 }]);
   expect(await store.get(id)).toBeNull();
+});
+
+test("sessions from different workspace roots are stored and listed separately", async () => {
+  const rootA = mkdtempSync(join(tmpdir(), "zero-a-"));
+  const rootB = mkdtempSync(join(tmpdir(), "zero-b-"));
+  const storeA = new SessionStore(rootA);
+  const storeB = new SessionStore(rootB);
+
+  const idA = await storeA.create("chat in A");
+  await storeB.create("chat in B");
+
+  expect(await storeA.get(idA)).not.toBeNull();
+  expect((await storeA.list()).map((s) => s.title)).toEqual(["chat in A"]);
+  expect((await storeB.list()).map((s) => s.title)).toEqual(["chat in B"]);
+  expect(existsSync(sessionsDir(rootA))).toBe(true);
+  expect(existsSync(sessionsDir(rootB))).toBe(true);
 });

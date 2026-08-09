@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ChatMessage, ChatSessionSummary } from "@zero/protocol";
-import type { Workspace } from "./workspace";
+import { sessionsDir } from "./paths";
 
 export class InvalidSessionIdError extends Error {}
 
@@ -13,10 +13,10 @@ interface StoredSession { id: string; title: string; updatedAt: number; messages
 let writeCounter = 0;
 
 export class SessionStore {
-  constructor(private workspace: Workspace) {}
+  constructor(private workspaceRoot: string) {}
 
   #dir(): string {
-    return join(this.workspace.root, ".zero", "sessions");
+    return sessionsDir(this.workspaceRoot);
   }
 
   #path(id: string): string {

@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcClient, type SocketLike } from "@zero/protocol";
 import { startZero } from "./main";
+import { useTempZeroHome } from "./testSupport/zeroHome";
+
+useTempZeroHome();
 
 function wsAdapter(ws: WebSocket): SocketLike {
   const s: SocketLike = { send: (d) => ws.send(d), onmessage: null };

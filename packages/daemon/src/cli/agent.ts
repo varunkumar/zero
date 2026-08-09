@@ -48,7 +48,7 @@ export async function runAgentCli(argv: string[], root: string, opts: AgentCliOp
 
   try {
     const ws = new Workspace(root);
-    const sessions = new SessionStore(ws);
+    const sessions = new SessionStore(ws.root);
     const sessionId = sessionArg ?? (await sessions.create(task.slice(0, 40)));
     const checkpoint = new GitCheckpoint(ws.root);
     const graphify = createGraphify();

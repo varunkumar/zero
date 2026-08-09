@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { runAgentCli, positionalArgs, parseGatewayPort } from "./agent";
-import { Workspace } from "../workspace";
 import { SessionStore } from "../sessions";
+import { useTempZeroHome } from "../testSupport/zeroHome";
 import type { ChatCapableProvider } from "@zero/core";
+
+useTempZeroHome();
 
 function stubProvider(reply: string): ChatCapableProvider {
   return {
@@ -75,8 +77,7 @@ test("bin/zero.ts's path extraction via positionalArgs(rest)[1] correctly gets t
 
 test("--session <id> resumes an existing session instead of creating a new one", async () => {
   const dir = await mkdtemp(join(tmpdir(), "zero-agent-cli-"));
-  const ws = new Workspace(dir);
-  const sessions = new SessionStore(ws);
+  const sessions = new SessionStore(dir);
   const existingId = await sessions.create("existing task");
 
   await runAgentCli(["second message", "--session", existingId, "--yes"], dir, { providers: [stubProvider("hello!")] });
