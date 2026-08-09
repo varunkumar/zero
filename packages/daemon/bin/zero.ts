@@ -5,6 +5,19 @@ import { runTui } from "../src/cli/tui/runTui";
 
 const argv = process.argv.slice(2);
 
+if (argv.includes("--help") || argv.includes("-h")) {
+  console.log(`usage:
+  zero [path]                                       launch the interactive TUI (new session)
+  zero --resume [path]                              launch the TUI, pick a session to resume
+  zero -p "task" [--yes] [--session <id>] [path]    run one task headlessly
+  zero serve [path] [--gateway-port <port>]         start the web daemon`);
+  process.exit(0);
+}
+if (argv[0] === "agent") {
+  console.error('zero agent is gone — use: zero -p "task description" [--yes] [--session <id>] [path]');
+  process.exit(1);
+}
+
 if (argv[0] === "serve") {
   const rest = argv.slice(1);
   const path = positionalArgs(rest)[0];
