@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import type { EditorView } from "@codemirror/view";
-import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent, ChatTurnEventPayload } from "@zero/protocol";
+import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent, ChatTurnEventPayload, ChatStatusResult } from "@zero/protocol";
 import { Editor } from "../../Editor";
 import { createCompletion } from "../../completionSetup";
 import { CommandRegistry } from "../commands/registry";
@@ -9,7 +9,7 @@ import { attachKeybindings } from "../keybindings/dispatcher";
 import { TabStore, type Tab } from "../tabs/store";
 import { SettingsStore } from "../settings/store";
 import { ThemeProvider } from "../theme/ThemeProvider";
-import { FileTreePanel } from "../filetree/FileTreePanel";
+import { FileTreePanel, type FileTreeActions } from "../filetree/FileTreePanel";
 import { CommandPalette } from "../palette/CommandPalette";
 import { FileOpener } from "../palette/FileOpener";
 import { SearchPanel } from "../search/SearchPanel";
@@ -20,12 +20,13 @@ import { TerminalPanel } from "../terminal/TerminalPanel";
 import { ChatStore } from "../chat/store";
 import { TurnStore } from "../chat/turnStore";
 import { ChatPanel } from "../chat/ChatPanel";
+import { iconFor } from "../icons/iconFor";
+import { FilesTabIcon, SearchTabIcon, TerminalTabIcon, ChatTabIcon } from "../icons/TabIcons";
 import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
 
 const SIDEBAR_PANEL_ID = "sidebar";
-const TERMINAL_PANEL_ID = "terminal";
-const CHAT_PANEL_ID = "chat";
+const BOTTOM_PANEL_ID = "bottom";
 const TERMINAL_SESSIONS_KEY = "zero.terminal.sessionIds";
 /** How long a transient status-bar message stays up. */
 const STATUS_MESSAGE_MS = 8000;
@@ -42,6 +43,18 @@ function errorText(e: unknown): string {
 }
 
 const editorPanelId = (groupId: string) => `editor:${groupId}`;
+
+/** Decide what action to take on a bottom panel request, given the current state.
+ * Exported for testing in isolation without a real dockapi. */
+export function getBottomPanelAction(
+  panelExists: boolean,
+  currentView: "terminal" | "chat",
+  requestedView: "terminal" | "chat",
+): "add" | "remove" | "switch" | "none" {
+  if (!panelExists) return "add";
+  if (currentView === requestedView) return "remove";
+  return "switch";
+}
 
 /** Value shared with the dockview-hosted panels.
  *
@@ -74,7 +87,28 @@ interface WorkbenchContextValue {
   requestCompletion: (s: { prefix: string; suffix: string }) => void;
   sidebarView: "files" | "search";
   setSidebarView: (view: "files" | "search") => void;
+  bottomView: "terminal" | "chat";
+  setBottomView: (view: "terminal" | "chat") => void;
+  /** Removes the Terminal/Chat dockview panel entirely (both panels stay
+   * mounted underneath while it's open - see BottomPanel - so this is the
+   * only way to actually close it, distinct from switching which view it
+   * shows). */
+  closeBottomPanel: () => void;
   treeRefreshToken: number;
+  /** Called after a file-tree create/rename/delete/move/copy to refresh the
+   * tree - the same bump `fs/changed` already drives, exposed so
+   * `FileTreePanel` can trigger it directly for its own mutations. */
+  onTreeChanged: () => void;
+  /** Imperative handle onto the mounted `FileTreePanel`, so the
+   * files.newFile/newFolder/rename/delete keybindings (registered here,
+   * since that's where the rest of the command registry lives) can act on
+   * whatever's currently selected in the tree. */
+  fileTreeActionsRef: MutableRefObject<FileTreeActions | null>;
+  /** Surface a failure in the status bar - the same helper `newTerminal`
+   * and the fs/save path already use, exposed so `FileTreePanel` can report
+   * a failed `fs/create`/`fs/rename`/`fs/delete`/`fs/move`/`fs/copy`
+   * instead of letting it become a silent, unhandled promise rejection. */
+  report: (text: string, tone?: "error" | "info") => void;
   /** Bumped on every TabStore mutation; unused directly by consumers but part
    * of the context value so a mutation produces a fresh object identity and
    * therefore re-renders every panel. */
@@ -86,7 +120,10 @@ interface WorkbenchContextValue {
   diagnosticsByPath: Map<string, LspDiagnostic[]>;
 }
 
-const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
+// Exported (alongside BottomPanel below) so tests can render dockview-hosted
+// panels directly against a fake context value, without spinning up the
+// whole Workbench + dockview + RpcClient stack.
+export const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
 
 function useWorkbench(): WorkbenchContextValue {
   const value = useContext(WorkbenchContext);
@@ -99,12 +136,20 @@ function SidebarPanel() {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-sidebar-bg)", color: "var(--zero-sidebar-fg)" }}>
       <div className="zero-sidebar-toggle">
-        <button aria-pressed={w.sidebarView === "files"} onClick={() => w.setSidebarView("files")}>Files</button>
-        <button aria-pressed={w.sidebarView === "search"} onClick={() => w.setSidebarView("search")}>Search</button>
+        <button aria-pressed={w.sidebarView === "files"} onClick={() => w.setSidebarView("files")}><FilesTabIcon />Files</button>
+        <button aria-pressed={w.sidebarView === "search"} onClick={() => w.setSidebarView("search")}><SearchTabIcon />Search</button>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {w.sidebarView === "files" ? (
-          <FileTreePanel client={w.client} activePath={w.activePath} onOpen={w.openFile} refreshToken={w.treeRefreshToken} />
+          <FileTreePanel
+            ref={w.fileTreeActionsRef}
+            client={w.client}
+            activePath={w.activePath}
+            onOpen={w.openFile}
+            refreshToken={w.treeRefreshToken}
+            onTreeChanged={w.onTreeChanged}
+            onError={w.report}
+          />
         ) : (
           <SearchPanel client={w.client} onJumpTo={(path) => w.openFile(path)} />
         )}
@@ -113,7 +158,7 @@ function SidebarPanel() {
   );
 }
 
-function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | null }) {
+export function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | null }) {
   const w = useWorkbench();
   // The dirty tab asking to confirm its own close (per the design spec an
   // inline bar in the tab itself, never a modal) is Workbench state, so that
@@ -135,6 +180,7 @@ function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | n
               w.tabStore.setActiveTab(props.groupId, tab.id);
             }}
           >
+            <img src={iconFor(tab.path.split("/").at(-1) ?? "", false)} alt="" width={14} height={14} style={{ flexShrink: 0 }} />
             <span>{tab.path.split("/").at(-1)}</span>
             {tab.dirty && <span className="zero-dirty-dot" aria-label="unsaved changes" />}
             {confirming ? (
@@ -231,19 +277,47 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
   );
 }
 
-function BottomTerminalPanel() {
+/** Tabs Terminal and Chat into one dockview panel, mirroring the
+ * Files/Search toggle `SidebarPanel` uses above: a single panel that locally
+ * swaps which child renders rather than dockview's own multi-tab grouping
+ * (unused elsewhere in this app; its tab chrome is CSS-hidden). */
+export function BottomPanel() {
   const w = useWorkbench();
-  return <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />;
-}
-
-function BottomChatPanel() {
-  const w = useWorkbench();
-  return <ChatPanel client={w.client} turnStore={w.turnStore} chatStore={w.chatStore} />;
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)" }}>
+      <div className="zero-sidebar-toggle" style={{ justifyContent: "space-between" }}>
+        <div style={{ display: "flex" }}>
+          <button aria-pressed={w.bottomView === "terminal"} onClick={() => w.setBottomView("terminal")}><TerminalTabIcon />Terminal</button>
+          <button aria-pressed={w.bottomView === "chat"} onClick={() => w.setBottomView("chat")}><ChatTabIcon />Chat</button>
+        </div>
+        <button
+          aria-label="Close panel"
+          title="Close panel"
+          onClick={() => w.closeBottomPanel()}
+          style={{ background: "transparent", border: "none", margin: "0 6px", opacity: 0.7 }}
+        >
+          ×
+        </button>
+      </div>
+      {/* Both panels stay mounted at all times and are toggled via `display`
+          rather than a ternary: unmounting TerminalPanel would tear down its
+          TerminalHost(s), disposing the live xterm instance and dropping the
+          PtyStore output subscription (PtyStore keeps no buffer for
+          unsubscribed listeners), permanently losing scrollback and any
+          output emitted while Chat was showing. */}
+      <div style={{ flex: 1, minHeight: 0, display: w.bottomView === "terminal" ? "flex" : "none", flexDirection: "column" }}>
+        <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: w.bottomView === "chat" ? "flex" : "none", flexDirection: "column" }}>
+        <ChatPanel client={w.client} turnStore={w.turnStore} chatStore={w.chatStore} />
+      </div>
+    </div>
+  );
 }
 
 /** Stable component map — see the note on WorkbenchContextValue for why this
  * must not be rebuilt per render. */
-const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel, terminal: BottomTerminalPanel, chat: BottomChatPanel };
+const DOCKVIEW_COMPONENTS = { sidebar: SidebarPanel, editor: EditorPanel, bottom: BottomPanel };
 
 /** Ref that initialises exactly once, unlike `useRef(new X())` which
  * constructs a throwaway on every render. */
@@ -264,6 +338,7 @@ export function Workbench(props: { client: RpcClient }) {
 
   const [settings, setSettings] = useState(() => settingsStore.getSnapshot());
   const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
+  const [bottomView, setBottomView] = useState<"terminal" | "chat">("terminal");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [openerOpen, setOpenerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -287,6 +362,18 @@ export function Workbench(props: { client: RpcClient }) {
     lastError?: string;
     nodeCount?: number;
   } | null>(null);
+  const [gitStatus, setGitStatus] = useState<{
+    branch: string;
+    dirtyCount: number;
+    ahead: number;
+    behind: number;
+    remoteUrl: string | null;
+  } | null>(null);
+  const [tokenStatus, setTokenStatus] = useState<{
+    usedTokens: number | null;
+    contextWindowTokens: number | null;
+  } | null>(null);
+  const [chatVersion, setChatVersion] = useState(0);
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -305,6 +392,9 @@ export function Workbench(props: { client: RpcClient }) {
   const statusTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const treeDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const lspSyncDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  // Imperative handle onto the mounted FileTreePanel - see the note on
+  // WorkbenchContextValue.fileTreeActionsRef.
+  const fileTreeActionsRef = useRef<FileTreeActions | null>(null);
 
   /** Surface an RPC failure in the status bar. Silence is the worst outcome
    * here: a failed fs/write otherwise leaves a tab looking merely dirty. */
@@ -315,6 +405,15 @@ export function Workbench(props: { client: RpcClient }) {
   }
   const reportRef = useRef(report);
   reportRef.current = report;
+
+  /** Bump the token that drives `fs/tree` refetches. Shared by the
+   * `fs/changed` watcher notification (debounced, below) and by
+   * `FileTreePanel`'s own create/rename/delete/move/copy actions (immediate -
+   * those already know exactly what changed and don't need to wait out a
+   * burst window). */
+  function bumpTreeRefreshToken(): void {
+    setTreeRefreshToken((t) => t + 1);
+  }
 
   useEffect(() => () => {
     clearTimeout(statusTimerRef.current);
@@ -354,6 +453,71 @@ export function Workbench(props: { client: RpcClient }) {
       clearInterval(id);
     };
   }, [client]);
+
+  // Poll git branch/dirty/remote status for the status bar. Failures
+  // surface as no pill at all (null) rather than taking the editor down -
+  // git/status itself already degrades to null server-side when `root`
+  // isn't a git work tree, so an unreachable daemon gets the same result.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const { status } = await client.request<{
+          status: {
+            branch: string;
+            dirtyCount: number;
+            ahead: number;
+            behind: number;
+            remoteUrl: string | null;
+          } | null;
+        }>("git/status");
+        if (!cancelled) setGitStatus(status);
+      } catch {
+        if (!cancelled) setGitStatus(null);
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [client]);
+
+  // Poll chat context-window token usage for the status bar, for whichever
+  // session is currently active. Mirrors the graph/status and git/status
+  // polling above: same interval, same "degrade to null rather than take
+  // the editor down" failure mode. Lives here (not in ChatPanel, which
+  // already polls chat/status for its own model pill) so StatusBar can stay
+  // fed the same way as the other polled pills without threading state up
+  // out of ChatPanel.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const sessionId = chatStore.getActiveId();
+      if (!sessionId) {
+        if (!cancelled) setTokenStatus(null);
+        return;
+      }
+      try {
+        const status = await client.request<ChatStatusResult>("chat/status", { sessionId });
+        if (!cancelled) setTokenStatus({ usedTokens: status.usedTokens, contextWindowTokens: status.contextWindowTokens });
+      } catch {
+        if (!cancelled) setTokenStatus(null);
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [client, chatStore, chatVersion]);
+
+  // Re-run the token-status poll immediately on session switch (rather than
+  // waiting up to 2s for the next tick) by bumping a version the effect above
+  // depends on.
+  useEffect(() => chatStore.subscribe(() => setChatVersion((v) => v + 1)), [chatStore]);
 
   useEffect(() => tabStore.subscribe(() => setTabsVersion((v) => v + 1)), [tabStore]);
 
@@ -420,7 +584,7 @@ export function Workbench(props: { client: RpcClient }) {
       if (method !== "fs/changed") return;
       const { path } = params as FsChangedEvent;
       clearTimeout(treeDebounceRef.current);
-      treeDebounceRef.current = setTimeout(() => setTreeRefreshToken((t) => t + 1), TREE_REFRESH_DEBOUNCE_MS);
+      treeDebounceRef.current = setTimeout(bumpTreeRefreshToken, TREE_REFRESH_DEBOUNCE_MS);
 
       const lastWrite = lastWriteRef.current;
       if (lastWrite && lastWrite.path === path) {
@@ -488,7 +652,7 @@ export function Workbench(props: { client: RpcClient }) {
             restored = true;
           }
         }
-        if (restored) actionsRef.current.showTerminalPanel();
+        if (restored) actionsRef.current.showBottomPanel("terminal");
       })
       .catch((e: unknown) => reportRef.current(`Could not restore terminals: ${errorText(e)}`));
     return () => {
@@ -685,43 +849,66 @@ export function Workbench(props: { client: RpcClient }) {
     toggleSidebar,
     splitEditor,
     closeEditorGroup,
-    showTerminalPanel: () => {
+    // Terminal and Chat share one dockview panel (BottomPanel), toggled
+    // locally between the two like the Files/Search sidebar toggle. Adding
+    // the panel and switching which view it shows are separate concerns:
+    // switching view must work even when the panel is already open (e.g.
+    // Ctrl+` while Chat is showing reveals Terminal, not a no-op).
+    showBottomPanel: (view: "terminal" | "chat") => {
       const api = dockApi.current;
-      if (!api || api.getPanel(TERMINAL_PANEL_ID)) return;
-      api.addPanel({
-        id: TERMINAL_PANEL_ID, component: "terminal", params: {},
-        position: { direction: "below" },
-        initialHeight: 240,
-      });
-    },
-    toggleTerminal: () => {
-      const api = dockApi.current;
+      setBottomView(view);
       if (!api) return;
-      const panel = api.getPanel(TERMINAL_PANEL_ID);
-      if (panel) { api.removePanel(panel); return; }
-      actionsRef.current.showTerminalPanel();
-    },
-    newTerminal: () => {
-      actionsRef.current.showTerminalPanel();
-      void client.request<{ sessionId: string; shell: string }>("pty/open", { cols: 80, rows: 24 })
-        .then((s) => ptyStore.addSession(s))
-        .catch((e: unknown) => reportRef.current(`Could not open terminal: ${errorText(e)}`));
-    },
-    showChatPanel: () => {
-      const api = dockApi.current;
-      if (!api || api.getPanel(CHAT_PANEL_ID)) return;
+      if (api.getPanel(BOTTOM_PANEL_ID)) return;
       api.addPanel({
-        id: CHAT_PANEL_ID, component: "chat", params: {},
+        id: BOTTOM_PANEL_ID, component: "bottom", params: {},
         position: { direction: "below" },
         initialHeight: 320,
       });
     },
-    toggleChat: () => {
+    toggleBottomPanel: (view: "terminal" | "chat") => {
       const api = dockApi.current;
       if (!api) return;
-      const panel = api.getPanel(CHAT_PANEL_ID);
-      if (panel) { api.removePanel(panel); return; }
-      actionsRef.current.showChatPanel();
+      const panel = api.getPanel(BOTTOM_PANEL_ID);
+      const action = getBottomPanelAction(!!panel, bottomView, view);
+      if (action === "remove" && panel) {
+        api.removePanel(panel);
+        return;
+      }
+      // action is "add" or "switch" — both lead to showing the panel with the requested view
+      actionsRef.current.showBottomPanel(view);
+    },
+    closeBottomPanel: () => {
+      const api = dockApi.current;
+      if (!api) return;
+      const panel = api.getPanel(BOTTOM_PANEL_ID);
+      if (panel) api.removePanel(panel);
+    },
+    newTerminal: () => {
+      actionsRef.current.showBottomPanel("terminal");
+      void client.request<{ sessionId: string; shell: string }>("pty/open", { cols: 80, rows: 24 })
+        .then((s) => ptyStore.addSession(s))
+        .catch((e: unknown) => reportRef.current(`Could not open terminal: ${errorText(e)}`));
+    },
+    // Scoped to the Files sidebar being both the selected view *and*
+    // actually DOM-focused: `sidebarView` alone stays "files" (its default)
+    // even while the user is typing in the editor, so without the
+    // `hasFocus()` check `$mod+Backspace` here would fight CodeMirror's own
+    // word-delete binding on every Cmd/Ctrl+Backspace keystroke.
+    newFileInSelectedDir: () => {
+      if (sidebarView !== "files" || !fileTreeActionsRef.current?.hasFocus()) return;
+      fileTreeActionsRef.current.newFileInSelectedDir();
+    },
+    newFolderInSelectedDir: () => {
+      if (sidebarView !== "files" || !fileTreeActionsRef.current?.hasFocus()) return;
+      fileTreeActionsRef.current.newFolderInSelectedDir();
+    },
+    renameSelectedTreeEntry: () => {
+      if (sidebarView !== "files" || !fileTreeActionsRef.current?.hasFocus()) return;
+      fileTreeActionsRef.current.renameSelected();
+    },
+    deleteSelectedTreeEntry: () => {
+      if (sidebarView !== "files" || !fileTreeActionsRef.current?.hasFocus()) return;
+      fileTreeActionsRef.current.deleteSelected();
     },
   };
   const actionsRef = useRef(actions);
@@ -743,9 +930,13 @@ export function Workbench(props: { client: RpcClient }) {
       { id: "view.closeEditorGroup", title: "Close Editor Group", run: () => actionsRef.current.closeEditorGroup(), keybinding: "$mod+Shift+Backslash" },
       { id: "view.toggleTheme", title: "Toggle Theme", run: () => actionsRef.current.toggleTheme() },
       { id: "preferences.open", title: "Preferences: Open Settings", run: () => actionsRef.current.openSettings() },
-      { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleTerminal(), keybinding: "Control+Backquote" },
+      { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleBottomPanel("terminal"), keybinding: "Control+Backquote" },
       { id: "terminal.new", title: "New Terminal", run: () => actionsRef.current.newTerminal() },
-      { id: "view.toggleChat", title: "Toggle Chat", run: () => actionsRef.current.toggleChat(), keybinding: "Control+Shift+KeyC" },
+      { id: "view.toggleChat", title: "Toggle Chat", run: () => actionsRef.current.toggleBottomPanel("chat"), keybinding: "Control+Shift+KeyC" },
+      { id: "files.newFile", title: "New File", run: () => actionsRef.current.newFileInSelectedDir(), keybinding: "$mod+Alt+KeyN" },
+      { id: "files.newFolder", title: "New Folder", run: () => actionsRef.current.newFolderInSelectedDir(), keybinding: "$mod+Alt+Shift+KeyN" },
+      { id: "files.rename", title: "Rename", run: () => actionsRef.current.renameSelectedTreeEntry(), keybinding: "F2" },
+      { id: "files.delete", title: "Delete", run: () => actionsRef.current.deleteSelectedTreeEntry(), keybinding: "$mod+Backspace" },
     ];
     for (const command of commands) registry.register(command);
     const detach = attachKeybindings(registry);
@@ -816,7 +1007,13 @@ export function Workbench(props: { client: RpcClient }) {
     requestCompletion: completion.request,
     sidebarView,
     setSidebarView,
+    bottomView,
+    setBottomView,
+    closeBottomPanel: () => actionsRef.current.closeBottomPanel(),
     treeRefreshToken,
+    onTreeChanged: bumpTreeRefreshToken,
+    fileTreeActionsRef,
+    report,
     tabsVersion,
     theme,
     ptyStore,
@@ -848,6 +1045,8 @@ export function Workbench(props: { client: RpcClient }) {
               ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length, failed: lspFailedByPath.get(activePath) ?? false }
               : null}
             graphStatus={graphStatus}
+            gitStatus={gitStatus}
+            tokenStatus={tokenStatus}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />

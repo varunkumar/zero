@@ -1,4 +1,5 @@
 import { writeFile, mkdir } from "node:fs/promises";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { createDaemon, type DaemonOptions } from "./server";
@@ -17,6 +18,7 @@ import { createAgentRuntimeClient } from "./agentClient";
 import { createRuntimePool } from "./agentRuntimePool";
 import { GitCheckpoint } from "./gitCheckpoint";
 import { execCommand } from "./execCommand";
+import { getGitStatus } from "./gitInfo";
 
 export async function startZero(opts: DaemonOptions) {
   const daemon = createDaemon(opts);
@@ -53,10 +55,31 @@ export async function startZero(opts: DaemonOptions) {
     async () => ({ entries: await ws.tree() }));
   daemon.rpc.register("fs/search", z.object({ query: z.string(), caseSensitive: z.boolean().optional() }),
     async (p) => ws.search(p.query, p.caseSensitive));
+  daemon.rpc.register("fs/create", z.object({ path: z.string(), kind: z.enum(["file", "dir"]) }),
+    async (p) => { await ws.create(p.path, p.kind); return {}; });
+  daemon.rpc.register("fs/rename", z.object({ path: z.string(), newPath: z.string() }),
+    async (p) => { await ws.rename(p.path, p.newPath); return {}; });
+  daemon.rpc.register("fs/delete", z.object({ path: z.string() }),
+    async (p) => { await ws.delete(p.path); return {}; });
+  daemon.rpc.register("fs/move", z.object({ path: z.string(), newPath: z.string() }),
+    async (p) => { await ws.move(p.path, p.newPath); return {}; });
+  daemon.rpc.register("fs/copy", z.object({ path: z.string(), newPath: z.string() }),
+    async (p) => { await ws.copy(p.path, p.newPath); return {}; });
   daemon.rpc.register("settings/get", z.object({ key: z.string() }),
     async (p) => ({ value: await ws.readSetting(p.key) }));
   daemon.rpc.register("settings/set", z.object({ key: z.string(), value: z.unknown() }),
     async (p) => { await ws.writeSetting(p.key, p.value); return {}; });
+  // Returns { status: GitStatusResult | null } - null when `opts.root` isn't
+  // inside a git work tree (or git isn't installed), matching the "degrade,
+  // never throw" convention for optional subsystems.
+  daemon.rpc.register("git/status", z.object({}).optional().transform(() => ({})),
+    async () => ({ status: await getGitStatus(opts.root) }));
+  // The local OS account running the daemon - used client-side purely as a
+  // display label (chat message avatars/authorship), not for auth. Falls
+  // back to "you" if the OS refuses to report a username (has happened in
+  // some minimal container images).
+  daemon.rpc.register("system/whoami", z.object({}).optional().transform(() => ({})),
+    async () => ({ username: (() => { try { return userInfo().username; } catch { return "you"; } })() }));
 
   daemon.rpc.register("pty/open", z.object({ shell: z.string().optional(), cols: z.number(), rows: z.number() }),
     async (p) => pty.open(p.shell, p.cols, p.rows));
@@ -190,7 +213,9 @@ export async function startZero(opts: DaemonOptions) {
       // runtime the first time chat/turn actually runs for it - that's the
       // correct trigger point. Until then, report the neutral "no chat
       // model" status without building anything.
-      if (!runtimeFor.has(p.sessionId)) return { activeModel: null, reason: null };
+      if (!runtimeFor.has(p.sessionId)) {
+        return { activeModel: null, reason: null, usedTokens: null, contextWindowTokens: null };
+      }
       return (await runtimeFor(p.sessionId)).status();
     });
 

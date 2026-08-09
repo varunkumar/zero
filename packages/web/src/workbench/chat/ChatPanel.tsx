@@ -1,10 +1,117 @@
 import { useEffect, useRef, useState } from "react";
-import type { RpcClient, ChatSessionSummary, ChatMessage, ChatToolCall } from "@zero/protocol";
+import type { RpcClient, ChatSessionSummary, ChatMessage, ChatToolCall, WhoamiResult } from "@zero/protocol";
 import type { ChatStore } from "./store";
 import type { TurnStore } from "./turnStore";
+import { highlightCode, highlightDiff } from "./codeHighlight";
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+/** "just now" / "5m ago" / "3h ago" / "2d ago" / calendar date beyond that,
+ * for the message-row label. The full timestamp always stays available via
+ * the caller's `title` (native hover tooltip). */
+function humanizeTimestamp(ts: number, now = Date.now()): string {
+  const delta = now - ts;
+  if (delta < MINUTE_MS) return "just now";
+  if (delta < HOUR_MS) return `${Math.floor(delta / MINUTE_MS)}m ago`;
+  if (delta < DAY_MS) return `${Math.floor(delta / HOUR_MS)}h ago`;
+  if (delta < 7 * DAY_MS) return `${Math.floor(delta / DAY_MS)}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+/** Display name for a message's `role`: the local OS username for "user"
+ * (fetched once via system/whoami), "Zero" for the assistant, and
+ * "tool:<name>" unchanged for tool results. */
+function roleLabel(role: ChatMessage["role"], toolName: string | undefined, username: string): string {
+  if (role === "user") return username;
+  if (role === "tool") return `tool:${toolName}`;
+  return "Zero";
+}
+
+const CODE_FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+
+/** Renders inline `` `code` `` spans within a plain-text segment (already
+ * known to contain no fenced code blocks - those are split out by
+ * `renderMessageContent` before this runs). */
+function renderInlineCode(text: string, keyPrefix: string): React.ReactNode[] {
+  const segments = text.split(/`([^`\n]+)`/g);
+  return segments.map((seg, i) =>
+    i % 2 === 1 ? (
+      <code key={`${keyPrefix}-${i}`} style={{
+        background: "var(--zero-sidebar-bg)", border: "1px solid var(--zero-border)",
+        color: "var(--zero-editor-fg)", borderRadius: 3, padding: "1px 4px", fontFamily: CODE_FONT, fontSize: "0.9em",
+      }}>
+        {seg}
+      </code>
+    ) : (
+      seg
+    ),
+  );
+}
+
+/** A fenced code block, syntax-highlighted when `lang` is recognized
+ * (`highlightCode` returns null for anything it doesn't have a grammar
+ * for), diff-colored for "diff"/"patch", or left as plain monospace text
+ * otherwise - always themed and horizontally scrollable either way. */
+function CodeBlock(props: { lang: string; code: string }) {
+  const body = props.code.replace(/\n$/, ""); // trailing newline before the closing ``` renders as a blank last line otherwise
+  const isDiff = props.lang === "diff" || props.lang === "patch";
+  const highlighted = isDiff ? null : highlightCode(body, props.lang);
+  return (
+    <pre style={{
+      margin: "6px 0", padding: 8, borderRadius: 4, overflowX: "auto",
+      background: "var(--zero-sidebar-bg)", border: "1px solid var(--zero-border)",
+      color: "var(--zero-editor-fg)", fontFamily: CODE_FONT, fontSize: 12,
+    }}>
+      {isDiff ? <code>{highlightDiff(body)}</code> : <code>{highlighted ?? body}</code>}
+    </pre>
+  );
+}
+
+/** Renders a chat message body with fenced ```lang code blocks (syntax- or
+ * diff-highlighted, see `CodeBlock`) and inline `code` spans styled as code
+ * rather than as flat pre-wrap text - tool output and code snippets were
+ * previously indistinguishable from prose. */
+function renderMessageContent(text: string): React.ReactNode {
+  const parts = text.split(/```(\w*)\n([\s\S]*?)```/g);
+  // With two capture groups, split() interleaves [text, lang, code, text,
+  // lang, code, ..., text]: index%3===0 is surrounding prose, %3===1 is the
+  // fence's language tag, %3===2 is the code body (consumed alongside its
+  // language tag, so it's skipped when encountered on its own below).
+  return parts.map((part, i) => {
+    const mod = i % 3;
+    if (mod === 2) return null;
+    if (mod === 1) return <CodeBlock key={i} lang={part} code={parts[i + 1] ?? ""} />;
+    if (!part) return null;
+    return <span key={i} style={{ whiteSpace: "pre-wrap" }}>{renderInlineCode(part, String(i))}</span>;
+  });
+}
+
+/** Small "T" badge preceding a tool-result row. User and assistant rows
+ * carry no icon at all - role is already conveyed by which side of the
+ * panel the bubble sits on (see the message-row alignment below) and by
+ * the role label itself. */
+function ToolAvatar() {
+  return (
+    <span aria-hidden style={{
+      width: 18, height: 18, borderRadius: "50%", display: "inline-flex",
+      alignItems: "center", justifyContent: "center", fontSize: 11, flexShrink: 0,
+      background: "var(--zero-status-ok)", color: "#fff",
+    }}>
+      T
+    </span>
+  );
+}
 
 export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chatStore: ChatStore }) {
   const { client, turnStore, chatStore } = props;
+  const [username, setUsername] = useState("you");
+  useEffect(() => {
+    client.request<WhoamiResult>("system/whoami", {})
+      .then((r) => setUsername(r.username))
+      .catch(() => {});
+  }, [client]);
   const [, setVersion] = useState(0);
   useEffect(() => chatStore.subscribe(() => setVersion((v) => v + 1)), [chatStore]);
 
@@ -15,7 +122,8 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
   const [banner, setBanner] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ turnId: string; call: ChatToolCall; preview: string } | null>(null);
   const [status, setStatus] = useState<{ activeModel: string | null; reason: string | null }>({ activeModel: null, reason: null });
-  const turnIdRef = useRef<string | null>(null);
+  const [turnId, setTurnId] = useState<string | null>(null);
+  const [pinnedToBottom, setPinnedToBottom] = useState(true);
   // Settles the in-flight `send()` promise (unsubscribes from TurnStore,
   // resolves) for the current turn, if any. `chat/abort` only signals the
   // daemon's AbortController - AgentRuntime.sendMessage returns silently on
@@ -25,12 +133,14 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
   // close, unmount) must call this alongside `chat/abort` to avoid a leaked
   // listener and a `busy` state stuck true forever.
   const finishTurnRef = useRef<(() => void) | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   function abortCurrentTurn(): void {
-    const turnId = turnIdRef.current;
     if (turnId) client.request("chat/abort", { turnId }).catch(() => {});
     finishTurnRef.current?.();
     setPendingApproval(null);
+    setTurnId(null);
   }
 
   const sessions = chatStore.getSessions();
@@ -38,6 +148,13 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
 
   function reportError(message: string): void {
     setBanner(message);
+  }
+
+  function handleScroll(): void {
+    const el = listRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setPinnedToBottom(distanceFromBottom < 40);
   }
 
   function refreshStatus(sessionId: string): void {
@@ -80,6 +197,24 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
     refreshStatus(id);
     return () => { cancelled = true; };
   }, [client, activeId]);
+
+  // Auto-scroll to bottom when pinned and new messages/streaming text/an
+  // approval prompt arrive - the approval prompt now renders inline in this
+  // same scroll area (not a separate fixed section), so it needs the same
+  // "pull it into view" treatment as a new message.
+  useEffect(() => {
+    if (pinnedToBottom) listRef.current?.scrollTo({ top: listRef.current?.scrollHeight ?? 0 });
+  }, [messages.length, streaming.length, pinnedToBottom, pendingApproval]);
+
+  // Return focus to the textbox once a send/response cycle finishes (busy
+  // true -> false), matching where the user was typing - otherwise it's lost
+  // to whatever the browser focused last (often nothing), forcing a click
+  // back into the box before the next message.
+  const prevBusyRef = useRef(busy);
+  useEffect(() => {
+    if (prevBusyRef.current && !busy) inputRef.current?.focus();
+    prevBusyRef.current = busy;
+  }, [busy]);
 
   // Fix #4: Cleanup on unmount - abort any in-flight turn, reading the
   // current turnId from the ref (via abortCurrentTurn) so this always targets
@@ -126,7 +261,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
 
     try {
       const { turnId } = await client.request<{ turnId: string }>("chat/turn", { sessionId, userText: text });
-      turnIdRef.current = turnId;
+      setTurnId(turnId);
       await new Promise<void>((resolve) => {
         // `finish` is declared before use but assigned after `onEvent`
         // registers the listener below - safe because `onEvent` only stores
@@ -173,7 +308,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
     } catch (e) {
       reportError(`failed to send: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      turnIdRef.current = null;
+      setTurnId(null);
       setBusy(false);
       chatStore.touchSession(sessionId);
       // Guard against a status response for a session the user has since
@@ -184,17 +319,32 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)" }}>
-      <div className="zero-tabstrip" role="tablist">
-        {sessions.map((s) => (
-          <div key={s.id} className="zero-tab" role="tab" aria-selected={s.id === activeId} onClick={() => chatStore.setActive(s.id)}>
-            <span>{s.title}</span>
-            <button className="zero-tab-close" aria-label={`Close chat ${s.title}`}
-              onClick={(e) => { e.stopPropagation(); closeSession(s.id); }}>
-              ×
-            </button>
-          </div>
-        ))}
-        <button aria-label="New chat" onClick={() => void newSession()} style={{ marginLeft: 4 }}>+</button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderBottom: "1px solid var(--zero-border)" }}>
+        {sessions.length > 0 && (
+          <>
+            <span style={{ opacity: 0.7, fontSize: 13 }}>Sessions</span>
+            <select
+              aria-label="Chat session"
+              value={activeId ?? ""}
+              onChange={(e) => chatStore.setActive(e.target.value)}
+              style={{
+                background: "var(--zero-sidebar-bg)",
+                color: "var(--zero-sidebar-fg)",
+                border: "1px solid var(--zero-border)",
+                borderRadius: 4,
+                padding: "4px 8px",
+              }}
+            >
+              {sessions.map((s) => (
+                <option key={s.id} value={s.id}>{s.title ?? s.id}</option>
+              ))}
+            </select>
+          </>
+        )}
+        <button onClick={() => void newSession()} title="Start a new chat session">+ New session</button>
+        {sessions.length > 1 && (
+          <button onClick={() => activeId && closeSession(activeId)} title="Delete current chat session">Delete</button>
+        )}
         <div style={{ marginLeft: "auto", padding: "4px 8px" }}>
           <div
             title={status.reason ?? undefined}
@@ -203,7 +353,8 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
               border: "1px solid var(--zero-border)", fontSize: 14, color: "var(--zero-statusbar-fg)",
             }}
           >
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: status.activeModel !== null ? "#2ecc71" : "#999", flexShrink: 0 }} />
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: status.activeModel !== null ? "var(--zero-status-ok)" : "var(--zero-status-idle)", flexShrink: 0 }} />
+            <span style={{ opacity: 0.7, marginRight: 4 }}>Chat:</span>
             {status.activeModel ?? "no chat model"}
           </div>
         </div>
@@ -212,43 +363,119 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
         <div
           style={{
             display: "flex", justifyContent: "space-between", alignItems: "center",
-            padding: "4px 8px", background: "#5a1f1f", color: "#fff", fontSize: 13,
+            padding: "4px 8px", background: "var(--zero-error-bg)", color: "var(--zero-error-fg)", fontSize: 13,
           }}
         >
           <span>⚠ {banner}</span>
           <button onClick={() => setBanner(null)} aria-label="Dismiss error">×</button>
         </div>
       )}
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 8 }}>
-        {!activeId ? (
-          <div style={{ padding: 16, opacity: 0.6 }}>No chat open</div>
-        ) : (
-          <>
-            {messages.filter((m) => m.role !== "system").map((m, i) => (
-              <div key={i} style={{ marginBottom: 8 }}>
-                <strong>{m.role === "tool" ? `tool:${m.toolName}` : m.role}</strong>
-                <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
-              </div>
-            ))}
-            {streaming && (
-              <div style={{ marginBottom: 8 }}>
-                <strong>assistant</strong>
-                <div style={{ whiteSpace: "pre-wrap" }}>{streaming}</div>
-              </div>
-            )}
-          </>
+      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        <div ref={listRef} onScroll={handleScroll} style={{ height: "100%", overflowY: "auto", padding: 8 }}>
+          {!activeId ? (
+            <div style={{ padding: 16, opacity: 0.6 }}>No chat open</div>
+          ) : (
+            <>
+              {messages.filter((m) => m.role !== "system").map((m, i) => {
+                const isUser = m.role === "user";
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 8 }}>
+                    <div style={{
+                      maxWidth: "80%", padding: "6px 10px", borderRadius: 12,
+                      background: isUser ? "var(--zero-accent)" : "var(--zero-editor-bg)",
+                      color: isUser ? "var(--zero-accent-fg)" : "var(--zero-editor-fg)",
+                      border: isUser ? "none" : "1px solid var(--zero-border)",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                        {m.role === "tool" && <ToolAvatar />}
+                        <strong>{roleLabel(m.role, m.toolName, username)}</strong>
+                        <span
+                          style={{ marginLeft: "auto", fontSize: 11, opacity: 0.7 }}
+                          title={m.createdAt ? new Date(m.createdAt).toLocaleString() : undefined}
+                        >
+                          {m.createdAt ? humanizeTimestamp(m.createdAt) : null}
+                        </span>
+                      </div>
+                      <div>
+                        {m.role === "tool" ? (
+                          <pre style={{
+                            margin: 0, padding: 8, borderRadius: 4, overflowX: "auto", maxHeight: 320,
+                            background: "var(--zero-sidebar-bg)", border: "1px solid var(--zero-border)",
+                            color: "var(--zero-editor-fg)", fontFamily: CODE_FONT, fontSize: 12,
+                          }}>
+                            {m.content}
+                          </pre>
+                        ) : (
+                          renderMessageContent(m.content)
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {streaming && (
+                <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 8 }}>
+                  <div style={{
+                    maxWidth: "80%", padding: "6px 10px", borderRadius: 12,
+                    background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)",
+                    border: "1px solid var(--zero-border)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                      <strong>Zero</strong>
+                      <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.7 }}>
+                        {humanizeTimestamp(Date.now())}
+                      </span>
+                    </div>
+                    <div>{renderMessageContent(streaming)}</div>
+                  </div>
+                </div>
+              )}
+              {pendingApproval && (
+                <div style={{
+                  marginBottom: 8, padding: "6px 10px", borderRadius: 6,
+                  background: "var(--zero-editor-bg)", border: "1px solid var(--zero-accent)",
+                }}>
+                  <div style={{ fontSize: 13, marginBottom: 4 }}>Approve {pendingApproval.call.name}?</div>
+                  <pre style={{ maxHeight: 200, overflow: "auto", fontSize: 12, whiteSpace: "pre-wrap", background: "var(--zero-sidebar-bg)", border: "1px solid var(--zero-border)", borderRadius: 4, padding: 6 }}>{pendingApproval.preview}</pre>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      onClick={() => void approve(true)}
+                      style={{ background: "var(--zero-accent)", color: "var(--zero-accent-fg)", border: "none" }}
+                    >
+                      Approve
+                    </button>
+                    <button onClick={() => void approve(false)}>Deny</button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        {!pinnedToBottom && (
+          <button
+            aria-label="Scroll to new messages"
+            onClick={() => { listRef.current?.scrollTo({ top: listRef.current?.scrollHeight ?? 0, behavior: "smooth" }); setPinnedToBottom(true); }}
+            style={{
+              position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)",
+              borderRadius: 16, padding: "6px 12px",
+              background: "var(--zero-accent)", color: "var(--zero-accent-fg)", border: "none", cursor: "pointer",
+            }}
+          >
+            ↓ New messages
+          </button>
         )}
       </div>
-      {pendingApproval && (
-        <div style={{ padding: 8, borderTop: "1px solid var(--zero-border)", background: "var(--zero-editor-bg)" }}>
-          <div style={{ fontSize: 13, marginBottom: 4 }}>Approve {pendingApproval.call.name}?</div>
-          <pre style={{ maxHeight: 160, overflow: "auto", fontSize: 12, whiteSpace: "pre-wrap" }}>{pendingApproval.preview}</pre>
-          <button onClick={() => void approve(true)}>Approve</button>
-          <button onClick={() => void approve(false)}>Deny</button>
+      {turnId && turnStore.isActive(turnId) && (
+        <div role="status" style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--zero-statusbar-fg)", opacity: 0.8, padding: "4px 10px", borderTop: "1px solid var(--zero-border)", background: "var(--zero-editor-bg)" }}>
+          <span className="zero-typing-dot" />
+          <span className="zero-typing-dot" />
+          <span className="zero-typing-dot" />
+          <span>Zero is thinking…</span>
         </div>
       )}
       <div style={{ display: "flex", gap: 4, padding: 8, borderTop: "1px solid var(--zero-border)" }}>
         <input
+          ref={inputRef}
           style={{ flex: 1 }}
           value={input}
           disabled={!activeId || busy}
@@ -259,6 +486,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
         <button
           onClick={() => (busy ? abortCurrentTurn() : void send())}
           disabled={!activeId || (!busy && !input.trim())}
+          style={!busy && activeId && input.trim() ? { background: "var(--zero-accent)", color: "var(--zero-accent-fg)", border: "none" } : undefined}
         >
           {busy ? "Stop" : "Send"}
         </button>

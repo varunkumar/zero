@@ -104,12 +104,15 @@ body {
 }
 
 .zero-sidebar-toggle button {
-  flex: 1;
-  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
   font-size: 14px;
   background: transparent;
   color: var(--zero-sidebar-fg);
   border: none;
+  border-radius: 0;
   border-bottom: 2px solid transparent;
   cursor: pointer;
 }
@@ -117,4 +120,42 @@ body {
 .zero-sidebar-toggle button[aria-pressed="true"] {
   border-bottom-color: var(--zero-accent);
   color: var(--zero-accent);
+}
+
+/* Typing indicator animation for chat agent response. Three dots pulse
+ * with staggered timing to show activity. */
+@keyframes zero-typing-pulse {
+  0%, 60%, 100% {
+    opacity: 0.4;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.zero-typing-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: zero-typing-pulse 1.4s infinite;
+}
+
+.zero-typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.zero-typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Subtle separators between status-bar sections. Items are conditionally
+ * rendered (a status with no data renders nothing, not a hidden element),
+ * so :not(:first-child) naturally skips a separator before whichever item
+ * ends up first in the DOM. */
+.zero-statusbar-section > * + * {
+  padding-left: 10px;
+  margin-left: 2px;
+  border-left: 1px solid var(--zero-border);
 }

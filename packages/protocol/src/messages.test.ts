@@ -121,7 +121,7 @@ test("chat turn/approval wire shapes are plain JSON-serializable", () => {
   const payload: ChatTurnEventPayload = { turnId: "t1", event: events[0]! };
   const approve: ChatApproveParams = { turnId: "t1", callId: "c1", approved: true };
   const abort: ChatAbortParams = { turnId: "t1" };
-  const status: ChatStatusResult = { activeModel: "m", reason: null };
+  const status: ChatStatusResult = { activeModel: "m", reason: null, usedTokens: 42, contextWindowTokens: 100_000 };
   for (const shape of [turnParams, turnResult, payload, approve, abort, status]) {
     expect(JSON.parse(JSON.stringify(shape))).toEqual(shape);
   }

@@ -35,6 +35,29 @@ test("fs methods over the wire, watcher broadcasts", async () => {
   ws.close(); d.stop();
 });
 
+test("fs/create, fs/rename, fs/delete over the wire", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  await client.request("fs/create", { path: "a.txt", kind: "file" });
+  expect((await client.request<{ content: string }>("fs/read", { path: "a.txt" })).content).toBe("");
+
+  await client.request("fs/rename", { path: "a.txt", newPath: "b.txt" });
+  expect((await client.request<{ entries: { path: string }[] }>("fs/tree")).entries
+    .map((e) => e.path)).toContain("b.txt");
+
+  await client.request("fs/delete", { path: "b.txt" });
+  expect((await client.request<{ entries: { path: string }[] }>("fs/tree")).entries
+    .map((e) => e.path)).not.toContain("b.txt");
+
+  ws.close(); d.stop();
+});
+
 test("fs/search and settings RPCs over the wire", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   writeFileSync(join(root, "a.ts"), "const target = 1;\n");
@@ -123,6 +146,24 @@ test("pty methods over the wire: open, input/output, resize, close", async () =>
   expect(listedAfter.sessions).toEqual([]);
 
   ws.close(); d.stop();
+});
+
+test("pty/* RPCs are available on the same startZero path bin/zero.ts's serve command uses", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const session = await client.request<{ sessionId: string; shell: string }>("pty/open", { cols: 80, rows: 24 });
+  expect(session.sessionId).toBeTruthy();
+  const list = await client.request<{ sessions: unknown[] }>("pty/list");
+  expect(list.sessions.length).toBeGreaterThan(0);
+
+  ws.close();
+  d.stop();
 });
 
 test("plugin/list and graph/status over the wire", async () => {
@@ -221,10 +262,10 @@ test("chat/status doesn't construct a runtime for a never-turned session, and re
   // neutral "no chat model" status without erroring or requiring a real
   // provider - status checks must not be a side-effecting construction
   // trigger (the web ChatPanel calls chat/status on every session switch).
-  const status = await client.request<{ activeModel: string | null; reason: string | null }>(
+  const status = await client.request<{ activeModel: string | null; reason: string | null; usedTokens: number | null; contextWindowTokens: number | null }>(
     "chat/status", { sessionId: id },
   );
-  expect(status).toEqual({ activeModel: null, reason: null });
+  expect(status).toEqual({ activeModel: null, reason: null, usedTokens: null, contextWindowTokens: null });
 
   // Start (and let finish) a turn so the pool actually has an entry for this
   // session, then delete the session and confirm chat/status still degrades
@@ -242,16 +283,18 @@ test("chat/status doesn't construct a runtime for a never-turned session, and re
   // Now that a turn has actually run, the pool has a real cached runtime
   // for this session, and chat/status reflects its (non-neutral) status -
   // distinguishing this from the "never constructed" neutral default above.
-  const statusAfterTurn = await client.request<{ activeModel: string | null; reason: string | null }>(
+  const statusAfterTurn = await client.request<{ activeModel: string | null; reason: string | null; usedTokens: number | null; contextWindowTokens: number | null }>(
     "chat/status", { sessionId: id },
   );
   expect(statusAfterTurn.reason).toBe("no chat model available");
 
   await client.request("chat/delete", { id });
-  const statusAfterDelete = await client.request<{ activeModel: string | null; reason: string | null }>(
+  const statusAfterDelete = await client.request<{ activeModel: string | null; reason: string | null; usedTokens: number | null; contextWindowTokens: number | null }>(
     "chat/status", { sessionId: id },
   );
-  expect(statusAfterDelete).toEqual({ activeModel: null, reason: null });
+  expect(statusAfterDelete).toEqual({
+    activeModel: null, reason: null, usedTokens: null, contextWindowTokens: null,
+  });
 
   ws.close(); d.stop();
 });
@@ -399,4 +442,49 @@ test("a second chat/turn for a session with an already-active turn is rejected, 
   expect(turnEvents.map((e) => e.event)).toEqual([{ type: "error", message: "no chat model available" }]);
 
   ws.close(); d.stop();
+});
+
+test("git/status returns null outside a git repo, and real data inside one", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const before = await client.request<{ status: unknown }>("git/status");
+  expect(before.status).toBeNull();
+
+  ws.close(); d.stop();
+
+  // "Real data inside one": init a repo under `root` itself after the fact
+  // (rather than a second daemon/tmpdir) so this test isn't tripped up by
+  // the daemon's own async `.zero/` bookkeeping writes racing the git
+  // status check - that behavior belongs to SessionStore/Workspace, not to
+  // git/status, and is already covered unit-wise in gitInfo.test.ts.
+  async function git(cwd: string, args: string[]) {
+    const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+    await proc.exited;
+  }
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["config", "user.email", "t@example.com"]);
+  await git(root, ["config", "user.name", "t"]);
+  await git(root, ["add", "-A"]);
+  await git(root, ["commit", "-m", "init"]);
+
+  const d2 = await startZero({ root });
+  const ws2 = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d2.port}/rpc?token=${d2.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client2 = new RpcClient(wsAdapter(ws2));
+
+  const after = await client2.request<{
+    status: { branch: string; dirtyCount: number; ahead: number; behind: number; remoteUrl: string | null } | null;
+  }>("git/status");
+  expect(after.status?.branch).toBe("main");
+  expect(after.status?.remoteUrl).toBeNull();
+
+  ws2.close(); d2.stop();
 });

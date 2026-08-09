@@ -30,10 +30,11 @@ export function StatusPill(props: { engine: CompletionEngine }) {
           width: 8,
           height: 8,
           borderRadius: "50%",
-          background: active ? "#2ecc71" : "#999",
+          background: active ? "var(--zero-status-ok)" : "var(--zero-status-idle)",
           flexShrink: 0,
         }}
       />
+      <span style={{ opacity: 0.7, marginRight: 4 }}>Completion:</span>
       {status.activeModel ?? "no model"}
     </div>
   );

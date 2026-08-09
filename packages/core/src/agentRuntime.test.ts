@@ -50,7 +50,9 @@ test("happy path with no tool calls: streams text, persists the turn", async () 
   ]);
   const persisted = client.saved.at(-1)!;
   expect(persisted.map((m) => m.role)).toEqual(["user", "assistant"]);
-  expect(runtime.status()).toEqual({ activeModel: "m", reason: null });
+  expect(runtime.status()).toEqual({
+    activeModel: "m", reason: null, usedTokens: expect.any(Number), contextWindowTokens: expect.any(Number),
+  });
 });
 
 test("tool-call loop: executes tools, feeds results back, stops when the model replies without tool calls", async () => {
@@ -93,7 +95,20 @@ test("no available provider: yields a degraded status and an error event", async
 
   const events = await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
   expect(events).toEqual([{ type: "error", message: "no chat model available" }]);
-  expect(runtime.status()).toEqual({ activeModel: null, reason: "no chat model available" });
+  expect(runtime.status()).toEqual({
+    activeModel: null, reason: "no chat model available", usedTokens: null, contextWindowTokens: null,
+  });
+});
+
+test("status reports used and context-window token counts once a turn starts", async () => {
+  const provider = fakeProvider({ id: "m", contextWindowTokens: 100_000, reply: () => ({ text: "hello there" }) });
+  const client = fakeClient([{ role: "user", content: "hello there", createdAt: 0 }]);
+  const runtime = new AgentRuntime({ providers: [provider], tools: [], client, workspace: () => ({}) });
+
+  await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
+  const status = runtime.status();
+  expect(status.contextWindowTokens).toBeGreaterThan(0);
+  expect(status.usedTokens).toBeGreaterThan(0);
 });
 
 test("compacts history before the turn once usage exceeds 90% of the context budget", async () => {
@@ -341,14 +356,14 @@ test("onStatusChange returns a disposer that stops further updates to that liste
   const seen: (string | null)[] = [];
   const unsubscribe = runtime.onStatusChange((s) => seen.push(s.activeModel));
   await collect(runtime.sendMessage("s1", "hi", new AbortController().signal));
-  expect(seen).toEqual(["m"]);
+  expect(seen).toEqual(["m", "m"]);
 
   unsubscribe();
   const provider2 = fakeProvider({ id: "m2", reply: () => ({ text: "ok" }) });
   const runtime2 = new AgentRuntime({ providers: [provider2], tools: [], client: fakeClient(), workspace: () => ({}) });
   // Re-use the same listener registered on `runtime`, but confirm unsubscribe stops updates on `runtime` itself
   await collect(runtime.sendMessage("s1", "hi again", new AbortController().signal));
-  expect(seen).toEqual(["m"]); // no new entries after unsubscribe
+  expect(seen).toEqual(["m", "m"]); // no new entries after unsubscribe
 });
 
 test("chat/get rejecting yields an error event instead of an unhandled rejection", async () => {

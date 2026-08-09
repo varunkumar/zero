@@ -22,6 +22,12 @@ export function TerminalPanel(props: { client: RpcClient; ptyStore: PtyStore; th
     ptyStore.removeSession(sessionId);
   }
 
+  function renameTerminal(session: { sessionId: string; shell: string; name?: string }): void {
+    const name = window.prompt("Terminal name", session.name ?? session.shell.split("/").at(-1));
+    if (!name) return;
+    ptyStore.renameSession(session.sessionId, name);
+  }
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)" }}>
       <div className="zero-tabstrip" role="tablist">
@@ -32,8 +38,10 @@ export function TerminalPanel(props: { client: RpcClient; ptyStore: PtyStore; th
             role="tab"
             aria-selected={s.sessionId === activeId}
             onClick={() => ptyStore.setActive(s.sessionId)}
+            onDoubleClick={() => renameTerminal(s)}
+            title="Double-click to rename"
           >
-            <span>{s.shell.split("/").at(-1)}</span>
+            <span>{s.name ?? s.shell.split("/").at(-1)}</span>
             <button className="zero-tab-close" aria-label={`Close terminal ${s.sessionId}`}
               onClick={(e) => { e.stopPropagation(); closeTerminal(s.sessionId); }}>
               ×

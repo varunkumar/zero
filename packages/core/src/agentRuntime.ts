@@ -1,5 +1,7 @@
 import type { ChatCapableProvider, ChatMessage, ChatToolCall, ChatToolSpec, ToolProvider } from "./chatTypes";
-import { capToolOutput, needsCompaction, selectForCompaction, COMPACTION_SYSTEM_PROMPT } from "./tokenLedger";
+import {
+  capToolOutput, estimateMessagesTokens, needsCompaction, selectForCompaction, COMPACTION_SYSTEM_PROMPT,
+} from "./tokenLedger";
 import { buildSystemPrompt, type WorkspaceInfo } from "./systemPrompt";
 import { ProviderGateway } from "./providerGateway";
 
@@ -15,7 +17,12 @@ export interface AgentRuntimeClient {
   request<R>(method: string, params?: unknown): Promise<R>;
 }
 
-export interface AgentRuntimeStatus { activeModel: string | null; reason: string | null }
+export interface AgentRuntimeStatus {
+  activeModel: string | null;
+  reason: string | null;
+  usedTokens: number | null;
+  contextWindowTokens: number | null;
+}
 
 export interface AgentRuntimeOpts {
   providers: ChatCapableProvider[];
@@ -31,7 +38,7 @@ export class AgentRuntime {
   #tools: ToolProvider[];
   #client: AgentRuntimeClient;
   #workspace: () => WorkspaceInfo;
-  #status: AgentRuntimeStatus = { activeModel: null, reason: null };
+  #status: AgentRuntimeStatus = { activeModel: null, reason: null, usedTokens: null, contextWindowTokens: null };
   #listeners = new Set<(s: AgentRuntimeStatus) => void>();
   #pendingApprovals = new Map<string, (approved: boolean) => void>();
 
@@ -82,11 +89,11 @@ export class AgentRuntime {
     const provider = await this.#pick();
     if (!provider) {
       const reason = "no chat model available";
-      this.#setStatus({ activeModel: null, reason });
+      this.#setStatus({ activeModel: null, reason, usedTokens: null, contextWindowTokens: null });
       yield { type: "error", message: reason };
       return;
     }
-    this.#setStatus({ activeModel: provider.id, reason: null });
+    this.#setStatus({ activeModel: provider.id, reason: null, usedTokens: null, contextWindowTokens: null });
 
     let loaded: { messages: ChatMessage[] };
     try {
@@ -103,6 +110,13 @@ export class AgentRuntime {
       if (compacted.error) yield { type: "error", message: compacted.error };
     }
     if (signal.aborted) return;
+
+    this.#setStatus({
+      activeModel: provider.id,
+      reason: null,
+      usedTokens: estimateMessagesTokens(history),
+      contextWindowTokens: provider.capabilities().contextWindowTokens,
+    });
 
     history = [...history, { role: "user", content: userText, createdAt: Date.now() }];
     const toolSpecs: ChatToolSpec[] = provider.supportsTools()

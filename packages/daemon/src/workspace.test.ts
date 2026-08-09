@@ -131,6 +131,135 @@ test("search skips binary files", async () => {
   expect(result.matches.some((m) => m.path === "bin.dat")).toBe(false);
 });
 
+test("create makes a file, and a directory", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.create("a.txt", "file");
+  expect(await ws.read("a.txt")).toBe("");
+  await ws.create("sub", "dir");
+  expect((await ws.tree()).some((e) => e.path === "sub" && e.kind === "dir")).toBe(true);
+});
+
+test("create rejects a path outside the workspace root", async () => {
+  const ws = new Workspace(makeProject());
+  await expect(ws.create("../escape.txt", "file")).rejects.toThrow(PathOutsideWorkspaceError);
+});
+
+test("create blocks a file through a not-yet-existing path behind a symlinked directory", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await expect(ws.create("outdir/new.txt", "file")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "new.txt"))).toBe(false);
+});
+
+test("create blocks a directory through a not-yet-existing path behind a symlinked directory", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await expect(ws.create("outdir/newdir", "dir")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "newdir"))).toBe(false);
+});
+
+test("create rejects a nested path through a symlinked directory without creating any intermediate directory outside the root", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await expect(ws.create("outdir/sub/new.txt", "file")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "sub"))).toBe(false);
+
+  await expect(ws.create("outdir/sub/newdir", "dir")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "sub"))).toBe(false);
+});
+
+test("rename moves a file to a new relative path", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.rename("a.txt", "b.txt");
+  expect(await ws.read("b.txt")).toBe("hi");
+  await expect(ws.read("a.txt")).rejects.toThrow();
+});
+
+test("delete removes a file", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.delete("a.txt");
+  await expect(ws.read("a.txt")).rejects.toThrow();
+});
+
+test("delete removes a directory recursively", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("dir/a.txt", "hi");
+  await ws.delete("dir");
+  expect((await ws.tree()).some((e) => e.path.startsWith("dir"))).toBe(false);
+});
+
+test("move relocates a file into another directory", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.create("dest", "dir");
+  await ws.move("a.txt", "dest/a.txt");
+  expect(await ws.read("dest/a.txt")).toBe("hi");
+});
+
+test("copy duplicates a file, leaving the original in place", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.copy("a.txt", "b.txt");
+  expect(await ws.read("a.txt")).toBe("hi");
+  expect(await ws.read("b.txt")).toBe("hi");
+});
+
+test("copy onto an existing path rejects rather than overwriting", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await ws.write("b.txt", "existing");
+  await expect(ws.copy("a.txt", "b.txt")).rejects.toThrow();
+  expect(await ws.read("b.txt")).toBe("existing");
+});
+
+test("create rejects a file that already exists", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await expect(ws.create("a.txt", "file")).rejects.toThrow();
+  expect(await ws.read("a.txt")).toBe("hi");
+});
+
+test("delete rejects a path outside the workspace root", async () => {
+  const ws = new Workspace(makeProject());
+  await expect(ws.delete("../escape.txt")).rejects.toThrow(PathOutsideWorkspaceError);
+});
+
+test("rename rejects when destination is outside the workspace root", async () => {
+  const ws = new Workspace(makeProject());
+  await ws.write("a.txt", "hi");
+  await expect(ws.rename("a.txt", "../escape.txt")).rejects.toThrow(PathOutsideWorkspaceError);
+});
+
+test("rename blocks a destination through a symlinked directory without moving the file outside the root", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await ws.write("a.txt", "hi");
+  await expect(ws.rename("a.txt", "outdir/escaped.txt")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "escaped.txt"))).toBe(false);
+  expect(await ws.read("a.txt")).toBe("hi"); // source untouched
+});
+
+test("copy blocks a destination through a symlinked directory without copying the file outside the root", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await ws.write("a.txt", "hi");
+  await expect(ws.copy("a.txt", "outdir/escaped.txt")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "escaped.txt"))).toBe(false);
+  expect(await ws.read("a.txt")).toBe("hi"); // source untouched
+});
+
 test("readSetting returns undefined when nothing has been written", async () => {
   const ws = new Workspace(makeProject());
   expect(await ws.readSetting("workbench")).toBeUndefined();

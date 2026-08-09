@@ -11,10 +11,34 @@
   --zero-tab-active-fg: #cdd6f4;
   --zero-border: #313244;
   --zero-accent: #74c7ec;
+  /* Text color for content sitting ON a --zero-accent-filled surface (chat
+   * bubbles, primary buttons) - distinct from --zero-accent itself, which
+   * is also used as a *text* color directly on the dark editor background
+   * (e.g. the active sidebar-toggle label) and reads fine there. This
+   * theme's accent is a pale cyan, so white text on top of it is low-
+   * contrast (the bug this token fixes); a near-black reads clearly. */
+  --zero-accent-fg: #11111b;
   --zero-dirty-dot: #f9e2af;
   --zero-error-fg: #f38ba8;
+  --zero-error-bg: #5a1f1f;
   --zero-selection-bg: #313244;
   --zero-selection-fg: #cdd6f4;
+  --zero-status-ok: #2ecc71;
+  --zero-status-idle: #8a8a8a;
+  --zero-code-keyword: #cba6f7;
+  --zero-code-string: #a6e3a1;
+  --zero-code-comment: #9399b2;
+  --zero-code-number: #fab387;
+  --zero-code-function: #89b4fa;
+  --zero-code-type: #f9e2af;
+  --zero-code-property: #74c7ec;
+  --zero-code-punctuation: #9399b2;
+  --zero-code-invalid: #f38ba8;
+  --zero-diff-add-bg: #2ecc7126;
+  --zero-diff-add-fg: #a6e3a1;
+  --zero-diff-del-bg: #f38ba826;
+  --zero-diff-del-fg: #f38ba8;
+  --zero-diff-hunk-fg: #89b4fa;
 }
 
 :root[data-theme="light"] {
@@ -30,13 +54,112 @@
   --zero-tab-active-fg: #1e1e2e;
   --zero-border: #d1d1d6;
   --zero-accent: #007aff;
+  /* This theme's accent is a saturated blue, so white reads clearly on it -
+   * see the dark-theme block above for why this token exists separately
+   * from --zero-accent. */
+  --zero-accent-fg: #ffffff;
   --zero-dirty-dot: #c48f00;
   --zero-error-fg: #b3261e;
+  --zero-error-bg: #fff5f5;
   --zero-selection-bg: #e5e5ea;
   --zero-selection-fg: #1e1e2e;
+  --zero-status-ok: #2ecc71;
+  --zero-status-idle: #8a8a8a;
+  --zero-code-keyword: #9333ea;
+  --zero-code-string: #1a7f37;
+  --zero-code-comment: #6e7781;
+  --zero-code-number: #d97706;
+  --zero-code-function: #0550ae;
+  --zero-code-type: #953800;
+  --zero-code-property: #0550ae;
+  --zero-code-punctuation: #57606a;
+  --zero-code-invalid: #cf222e;
+  --zero-diff-add-bg: #1a7f3720;
+  --zero-diff-add-fg: #1a7f37;
+  --zero-diff-del-bg: #cf222e1a;
+  --zero-diff-del-fg: #cf222e;
+  --zero-diff-hunk-fg: #0550ae;
 }
 
 [data-theme] {
   background: var(--zero-editor-bg);
   color: var(--zero-editor-fg);
 }
+
+/* Base theming for native form controls. Without this, every <button>,
+ * <input>, <select>, and <textarea> in the app falls back to unthemed
+ * browser UA chrome (light-gray, always-light) regardless of --zero-theme,
+ * since none of those elements inherit background/color from an ancestor
+ * by default. Individual components may still override further (e.g. a
+ * primary "Send" button), but this is the shared floor every control gets
+ * for free. */
+/* :where() keeps this whole block at zero specificity beyond the element
+ * selector itself, so any component-specific rule elsewhere (e.g.
+ * `.zero-sidebar-toggle button`, `.zero-tab-close`) wins regardless of CSS
+ * import order - this is only ever a fallback floor, never a fight. */
+:where([data-theme]) button,
+:where([data-theme]) input,
+:where([data-theme]) select,
+:where([data-theme]) textarea {
+  font: inherit;
+  color: var(--zero-editor-fg);
+  background: var(--zero-sidebar-bg);
+  border: 1px solid var(--zero-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+:where([data-theme]) button {
+  cursor: pointer;
+}
+
+:where([data-theme]) button:hover:not(:disabled) {
+  background: var(--zero-selection-bg);
+}
+
+:where([data-theme]) button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+:where([data-theme]) input:focus,
+:where([data-theme]) select:focus,
+:where([data-theme]) textarea:focus {
+  outline: 1px solid var(--zero-accent);
+  outline-offset: -1px;
+}
+
+/* dockview's resize sashes are transparent by default in every built-in
+ * theme except its own "replit" theme; without this the drag handle between
+ * panels (e.g. the editor and the Terminal/Chat panel below it) gives no
+ * visual affordance that it's there, let alone draggable. */
+.zero-dockview {
+  --dv-active-sash-color: var(--zero-accent);
+}
+
+/* Syntax-highlighting token colors for chat code blocks (see
+ * ../chat/codeHighlight.tsx). Same tag groupings as ./syntaxHighlighting.ts
+ * (the live editor's CodeMirror highlighter), reimplemented as plain CSS
+ * classes since code blocks here are static React output, not a mounted
+ * CodeMirror EditorView - there's no EditorView for a HighlightStyle's
+ * generated stylesheet to attach to. */
+.zero-tok-keyword { color: var(--zero-code-keyword); }
+.zero-tok-string { color: var(--zero-code-string); }
+.zero-tok-comment { color: var(--zero-code-comment); font-style: italic; }
+.zero-tok-number { color: var(--zero-code-number); }
+.zero-tok-function { color: var(--zero-code-function); }
+.zero-tok-definition { color: var(--zero-editor-fg); }
+.zero-tok-variable { color: var(--zero-editor-fg); }
+.zero-tok-type { color: var(--zero-code-type); }
+.zero-tok-property { color: var(--zero-code-property); }
+.zero-tok-punctuation { color: var(--zero-code-punctuation); }
+.zero-tok-invalid { color: var(--zero-code-invalid); }
+
+/* Line-based coloring for ```diff/```patch code blocks (see
+ * highlightDiff in ../chat/codeHighlight.tsx) - a GitHub-style unified
+ * diff, tinted per line rather than per token. */
+.zero-diff-add { background: var(--zero-diff-add-bg); color: var(--zero-diff-add-fg); }
+.zero-diff-del { background: var(--zero-diff-del-bg); color: var(--zero-diff-del-fg); }
+.zero-diff-hunk { color: var(--zero-diff-hunk-fg); opacity: 0.85; }
+.zero-diff-file { opacity: 0.7; }
+.zero-diff-context { color: var(--zero-editor-fg); }

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Tree, type NodeRendererProps } from "react-arborist";
+import { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import type { RpcClient, TreeEntry, FsTreeResult } from "@zero/protocol";
 import { iconFor } from "../icons/iconFor";
 
@@ -8,6 +8,29 @@ interface Node {
   name: string;
   kind: "file" | "dir";
   children?: Node[];
+}
+
+/** Imperative actions exposed to `Workbench.tsx` so its keybindings
+ * (New File, New Folder, Rename, Delete) can act on whatever's currently
+ * selected in the tree without duplicating the RPC-calling logic that
+ * already lives here for the context menu. */
+export interface FileTreeActions {
+  newFileInSelectedDir: () => void;
+  newFolderInSelectedDir: () => void;
+  renameSelected: () => void;
+  deleteSelected: () => void;
+  /** Whether the file tree DOM subtree currently has focus - used by
+   * `Workbench.tsx` to scope the New File/New Folder/Rename/Delete
+   * keybindings to when this panel is actually focused, not merely when
+   * "Files" is the selected sidebar *view* (which stays true even while
+   * typing in the editor, since it's the default). Without this,
+   * `$mod+Backspace` for Delete collides with CodeMirror's own
+   * word-delete binding. */
+  hasFocus: () => boolean;
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 function buildTree(entries: TreeEntry[]): Node[] {
@@ -29,7 +52,95 @@ function buildTree(entries: TreeEntry[]): Node[] {
   return roots;
 }
 
+/** The directory a "new file/folder" created from `path` should land in: the
+ * node itself when it's a directory, otherwise its parent. `null`/root falls
+ * back to the workspace root ("" ). */
+export function containingDir(path: string | null, kind: "file" | "dir" | undefined): string {
+  if (!path) return "";
+  if (kind === "dir") return path;
+  return path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+}
+
+/** Join a parent directory (possibly "" for the workspace root) and a leaf
+ * name into a workspace-relative path. */
+export function joinPath(dir: string, name: string): string {
+  return dir ? `${dir}/${name}` : name;
+}
+
+// The pure RPC-calling actions below are exported so tests can assert the
+// exact `fs/*` calls each menu/keybinding action issues without going
+// through DOM events (this package has no DOM test shim - see
+// FileOpener.test.ts's rankPaths for the same extract-the-logic precedent).
+
+export async function createEntry(client: RpcClient, parentDir: string, kind: "file" | "dir", name: string): Promise<void> {
+  await client.request("fs/create", { path: joinPath(parentDir, name), kind });
+}
+
+export async function renameEntry(client: RpcClient, path: string, newName: string): Promise<void> {
+  // Renaming (unlike creating) never targets `path` itself as a
+  // destination directory, so passing "file" here always yields `path`'s
+  // parent - correct for renaming a directory too, since a directory's new
+  // name still belongs alongside it, one level up.
+  const newPath = joinPath(containingDir(path, "file"), newName);
+  await client.request("fs/rename", { path, newPath });
+}
+
+export async function deleteEntry(client: RpcClient, path: string): Promise<void> {
+  await client.request("fs/delete", { path });
+}
+
+/** Guards the delete RPC behind a confirmation, matching `TabStrip`'s
+ * "ask before discarding" precedent for destructive actions. Returns
+ * whether the delete actually ran, so callers can skip the tree refresh
+ * when the user backs out. */
+export async function confirmAndDelete(
+  client: RpcClient,
+  path: string,
+  confirm: (message: string) => boolean,
+): Promise<boolean> {
+  if (!confirm(`Delete ${path}? This cannot be undone.`)) return false;
+  await deleteEntry(client, path);
+  return true;
+}
+
+export async function pasteEntry(
+  client: RpcClient,
+  clipboard: { path: string; mode: "cut" | "copy" },
+  targetDir: string,
+): Promise<void> {
+  const name = clipboard.path.split("/").at(-1)!;
+  const newPath = joinPath(targetDir, name);
+  await client.request(clipboard.mode === "cut" ? "fs/move" : "fs/copy", { path: clipboard.path, newPath });
+}
+
+function MenuItem(props: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  return (
+    <div
+      role="menuitem"
+      aria-disabled={props.disabled}
+      onClick={props.disabled ? undefined : props.onClick}
+      style={{
+        padding: "4px 10px",
+        cursor: props.disabled ? "default" : "pointer",
+        opacity: props.disabled ? 0.5 : 1,
+        borderRadius: 3,
+      }}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+/** Lets the externally-defined `Row` renderer (react-arborist calls it, so
+ * it can't take arbitrary extra props) reach the context-menu handler that
+ * lives in `FileTreePanel`'s state, without recreating `Row` itself every
+ * render. */
+const RowActionsContext = createContext<{
+  onContextMenu: (e: React.MouseEvent, node: NodeApi<Node>) => void;
+} | null>(null);
+
 function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
+  const actions = useContext(RowActionsContext);
   const indent = typeof style.paddingLeft === "number" ? style.paddingLeft : 0;
   return (
     <div
@@ -46,6 +157,14 @@ function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
       onClick={() => {
         if (node.data.kind === "dir") node.toggle();
       }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        // Stop this from also reaching the container's own onContextMenu
+        // (the root-level "New File"/"New Folder" menu), which would
+        // otherwise fire right after this one for every row right-click.
+        e.stopPropagation();
+        actions?.onContextMenu(e, node);
+      }}
     >
       <img src={iconFor(node.data.name, node.data.kind === "dir")} alt="" width={16} height={16} style={{ flexShrink: 0 }} />
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.data.name}</span>
@@ -53,16 +172,39 @@ function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
   );
 }
 
-export function FileTreePanel(props: {
-  client: RpcClient;
-  activePath: string | null;
-  onOpen: (path: string) => void;
-  refreshToken: number;
-}) {
+export const FileTreePanel = forwardRef<
+  FileTreeActions,
+  {
+    client: RpcClient;
+    activePath: string | null;
+    onOpen: (path: string) => void;
+    refreshToken: number;
+    /** Called after any create/rename/delete/move/copy so the parent can
+     * bump whatever token drives `fs/tree` refetches (same one it already
+     * bumps on `fs/changed`). */
+    onTreeChanged: () => void;
+    /** Surfaces a failed `fs/*` RPC to the status bar - mirrors
+     * `Workbench.tsx`'s own `report()` helper ("Silence is the worst
+     * outcome here"), reused by every create/rename/delete/paste handler
+     * below rather than letting a rejection become an unhandled promise
+     * rejection with no user-visible feedback. */
+    onError: (message: string) => void;
+  }
+>(function FileTreePanel(props, ref) {
   const [entries, setEntries] = useState<TreeEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 240, height: 500 });
+  // `node: null` represents the root/empty-area menu (right-click below the
+  // last row, or on an empty tree) - it only offers New File/New Folder/
+  // Paste, targeting the workspace root, since there's no entry to rename,
+  // delete, cut, or copy.
+  const [menu, setMenu] = useState<{ x: number; y: number; node: NodeApi<Node> | null } | null>(null);
+  const [clipboard, setClipboard] = useState<{ path: string; mode: "cut" | "copy" } | null>(null);
+  // The last node selected in the tree (file or directory), independent of
+  // `activePath` (which only tracks the *open* file) - keyboard-driven
+  // create/rename/delete need this to know what they're acting on.
+  const [selected, setSelected] = useState<{ path: string; kind: "file" | "dir" } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,29 +244,159 @@ export function FileTreePanel(props: {
 
   const data = useMemo(() => buildTree(entries), [entries]);
 
+  async function handleCreate(kind: "file" | "dir", parentDir: string): Promise<void> {
+    const name = window.prompt(kind === "file" ? "New file name" : "New folder name");
+    if (!name) return;
+    try {
+      await createEntry(props.client, parentDir, kind, name);
+      props.onTreeChanged();
+    } catch (e) {
+      props.onError(`Could not create ${joinPath(parentDir, name)}: ${errorText(e)}`);
+    }
+  }
+
+  async function handleRename(path: string): Promise<void> {
+    const name = window.prompt("Rename to", path.split("/").at(-1));
+    if (!name) return;
+    try {
+      await renameEntry(props.client, path, name);
+      props.onTreeChanged();
+    } catch (e) {
+      props.onError(`Could not rename ${path}: ${errorText(e)}`);
+    }
+  }
+
+  async function handleDelete(path: string): Promise<void> {
+    try {
+      const didDelete = await confirmAndDelete(props.client, path, window.confirm.bind(window));
+      if (didDelete) props.onTreeChanged();
+    } catch (e) {
+      props.onError(`Could not delete ${path}: ${errorText(e)}`);
+    }
+  }
+
+  async function handlePaste(targetDir: string): Promise<void> {
+    if (!clipboard) return;
+    try {
+      await pasteEntry(props.client, clipboard, targetDir);
+      setClipboard(null);
+      props.onTreeChanged();
+    } catch (e) {
+      props.onError(`Could not paste ${clipboard.path}: ${errorText(e)}`);
+    }
+  }
+
+  useImperativeHandle(ref, () => ({
+    newFileInSelectedDir: () => {
+      void handleCreate("file", containingDir(selected?.path ?? null, selected?.kind));
+    },
+    newFolderInSelectedDir: () => {
+      void handleCreate("dir", containingDir(selected?.path ?? null, selected?.kind));
+    },
+    renameSelected: () => {
+      if (selected) void handleRename(selected.path);
+    },
+    deleteSelected: () => {
+      if (selected) void handleDelete(selected.path);
+    },
+    hasFocus: () => containerRef.current?.contains(document.activeElement) ?? false,
+    // selected/handleCreate/etc close over props.client and clipboard, so
+    // they must be rebuilt whenever any of those change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [selected, props.client, clipboard]);
+
   return (
     <div
       ref={containerRef}
       style={{ height: "100%", width: "100%", background: "var(--zero-sidebar-bg)", color: "var(--zero-sidebar-fg)" }}
+      onContextMenu={(e) => {
+        // Only reached for right-clicks on empty space - any row's own
+        // onContextMenu already stopped propagation before this fires.
+        e.preventDefault();
+        setSelected(null);
+        setMenu({ x: e.clientX, y: e.clientY, node: null });
+      }}
     >
       {error && (
         <div role="alert" style={{ padding: 8, fontSize: 14, color: "var(--zero-error-fg, crimson)" }}>
           Could not load file tree: {error}
         </div>
       )}
-      <Tree
-        data={data}
-        openByDefault={false}
-        width={size.width}
-        height={size.height}
-        selection={props.activePath ?? undefined}
-        onSelect={(nodes) => {
-          const node = nodes[0];
-          if (node && node.data.kind === "file") props.onOpen(node.data.id);
+      <RowActionsContext.Provider
+        value={{
+          onContextMenu: (e, node) => {
+            setSelected({ path: node.data.id, kind: node.data.kind });
+            setMenu({ x: e.clientX, y: e.clientY, node });
+          },
         }}
       >
-        {Row}
-      </Tree>
+        <Tree
+          data={data}
+          openByDefault={false}
+          width={size.width}
+          height={size.height}
+          selection={props.activePath ?? undefined}
+          onSelect={(nodes) => {
+            const node = nodes[0];
+            if (!node) return;
+            setSelected({ path: node.data.id, kind: node.data.kind });
+            if (node.data.kind === "file") props.onOpen(node.data.id);
+          }}
+        >
+          {Row}
+        </Tree>
+      </RowActionsContext.Provider>
+      {menu && (
+        <div
+          role="menu"
+          style={{
+            position: "fixed", left: menu.x, top: menu.y, zIndex: 1000,
+            background: "var(--zero-sidebar-bg)", border: "1px solid var(--zero-border)",
+            borderRadius: 4, padding: 4, minWidth: 140,
+          }}
+          onMouseLeave={() => setMenu(null)}
+        >
+          {menu.node === null ? (
+            <>
+              <MenuItem onClick={() => { void handleCreate("file", ""); setMenu(null); }}>New File</MenuItem>
+              <MenuItem onClick={() => { void handleCreate("dir", ""); setMenu(null); }}>New Folder</MenuItem>
+              <MenuItem
+                disabled={!clipboard}
+                onClick={() => {
+                  if (!clipboard) return;
+                  void handlePaste("");
+                  setMenu(null);
+                }}
+              >
+                Paste
+              </MenuItem>
+            </>
+          ) : (
+            <>
+              {menu.node.data.kind === "dir" && (
+                <MenuItem onClick={() => { void handleCreate("file", menu.node!.data.id); setMenu(null); }}>New File</MenuItem>
+              )}
+              {menu.node.data.kind === "dir" && (
+                <MenuItem onClick={() => { void handleCreate("dir", menu.node!.data.id); setMenu(null); }}>New Folder</MenuItem>
+              )}
+              <MenuItem onClick={() => { void handleRename(menu.node!.data.id); setMenu(null); }}>Rename</MenuItem>
+              <MenuItem onClick={() => { void handleDelete(menu.node!.data.id); setMenu(null); }}>Delete</MenuItem>
+              <MenuItem onClick={() => { setClipboard({ path: menu.node!.data.id, mode: "cut" }); setMenu(null); }}>Cut</MenuItem>
+              <MenuItem onClick={() => { setClipboard({ path: menu.node!.data.id, mode: "copy" }); setMenu(null); }}>Copy</MenuItem>
+              <MenuItem
+                disabled={!clipboard}
+                onClick={() => {
+                  if (!clipboard) return;
+                  void handlePaste(menu.node!.data.kind === "dir" ? menu.node!.data.id : containingDir(menu.node!.data.id, "file"));
+                  setMenu(null);
+                }}
+              >
+                Paste
+              </MenuItem>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
-}
+});

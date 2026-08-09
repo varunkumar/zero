@@ -34,6 +34,11 @@ export interface FsChangedEvent { path: string }
 export interface FsSearchParams { query: string; caseSensitive?: boolean }
 export interface FsSearchMatch { path: string; line: number; column: number; text: string }
 export interface FsSearchResult { matches: FsSearchMatch[]; truncated: boolean }
+export interface FsCreateParams { path: string; kind: "file" | "dir" }
+export interface FsRenameParams { path: string; newPath: string }
+export interface FsDeleteParams { path: string }
+export interface FsMoveParams { path: string; newPath: string }
+export interface FsCopyParams { path: string; newPath: string }
 export interface SettingsGetParams { key: string }
 export interface SettingsGetResult { value: unknown }
 export interface SettingsSetParams { key: string; value: unknown }
@@ -151,4 +156,21 @@ export interface ChatTurnResult { turnId: string }
 export interface ChatTurnEventPayload { turnId: string; event: ChatTurnEvent }
 export interface ChatApproveParams { turnId: string; callId: string; approved: boolean }
 export interface ChatAbortParams { turnId: string }
-export interface ChatStatusResult { activeModel: string | null; reason: string | null }
+export interface ChatStatusResult {
+  activeModel: string | null;
+  reason: string | null;
+  usedTokens: number | null;
+  contextWindowTokens: number | null;
+}
+
+export interface GitStatusResult {
+  branch: string;
+  dirtyCount: number;
+  ahead: number;
+  behind: number;
+  remoteUrl: string | null;
+}
+
+export interface WhoamiResult {
+  username: string;
+}
