@@ -63,7 +63,7 @@ export function StatusBar(props: {
           </span>
         )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div className="zero-statusbar-section" style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {props.lspStatus && props.lspStatus.failed && (
           <span role="status" title={`Language server unavailable for ${props.lspStatus.path}`}
             style={{ color: "var(--zero-statusbar-fg)", opacity: 0.7 }}>
