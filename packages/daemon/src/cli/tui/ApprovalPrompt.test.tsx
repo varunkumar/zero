@@ -3,6 +3,12 @@ import React from "react";
 import { render } from "ink-testing-library";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 
+// Ink attaches its raw-mode stdin listener inside a useEffect, which runs
+// asynchronously after the initial render commits. The first stdin.write()
+// against a freshly rendered instance must wait a tick first, or Ink has
+// nothing listening yet and the keypress is silently dropped.
+const tick = () => new Promise((r) => setTimeout(r, 20));
+
 test("renders the tool name and preview", () => {
   const { lastFrame } = render(
     <ApprovalPrompt call={{ id: "c1", name: "fs_write", args: { path: "a.ts" } }} preview="+hello" onResolve={() => {}} />,
@@ -11,29 +17,32 @@ test("renders the tool name and preview", () => {
   expect(lastFrame()).toContain("+hello");
 });
 
-test("pressing y resolves with approved=true", () => {
+test("pressing y resolves with approved=true", async () => {
   let resolved: boolean | undefined;
   const { stdin } = render(
     <ApprovalPrompt call={{ id: "c1", name: "fs_write", args: {} }} preview="" onResolve={(approved) => { resolved = approved; }} />,
   );
+  await tick();
   stdin.write("y");
   expect(resolved).toBe(true);
 });
 
-test("pressing n resolves with approved=false", () => {
+test("pressing n resolves with approved=false", async () => {
   let resolved: boolean | undefined;
   const { stdin } = render(
     <ApprovalPrompt call={{ id: "c1", name: "fs_write", args: {} }} preview="" onResolve={(approved) => { resolved = approved; }} />,
   );
+  await tick();
   stdin.write("n");
   expect(resolved).toBe(false);
 });
 
-test("pressing escape resolves with approved=false", () => {
+test("pressing escape resolves with approved=false", async () => {
   let resolved: boolean | undefined;
   const { stdin } = render(
     <ApprovalPrompt call={{ id: "c1", name: "fs_write", args: {} }} preview="" onResolve={(approved) => { resolved = approved; }} />,
   );
-  stdin.write("");
+  await tick();
+  stdin.write("\x1b");
   expect(resolved).toBe(false);
 });
