@@ -206,7 +206,9 @@ export async function startZero(opts: DaemonOptions) {
       // runtime the first time chat/turn actually runs for it - that's the
       // correct trigger point. Until then, report the neutral "no chat
       // model" status without building anything.
-      if (!runtimeFor.has(p.sessionId)) return { activeModel: null, reason: null };
+      if (!runtimeFor.has(p.sessionId)) {
+        return { activeModel: null, reason: null, usedTokens: null, contextWindowTokens: null };
+      }
       return (await runtimeFor(p.sessionId)).status();
     });
 

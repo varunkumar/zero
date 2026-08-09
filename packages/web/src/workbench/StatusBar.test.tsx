@@ -48,3 +48,37 @@ describe("StatusBar git pill", () => {
     expect(html).not.toContain("GitHub");
   });
 });
+
+describe("StatusBar token pill", () => {
+  function renderWithTokenStatus(
+    tokenStatus: { usedTokens: number | null; contextWindowTokens: number | null } | null,
+  ) {
+    return renderToStaticMarkup(
+      <StatusBar
+        engine={fakeEngine}
+        path={null}
+        cursor={null}
+        theme="dark"
+        onToggleTheme={() => {}}
+        lspStatus={null}
+        gitStatus={null}
+        tokenStatus={tokenStatus}
+      />,
+    );
+  }
+
+  test("renders nothing when tokenStatus is null", () => {
+    const html = renderWithTokenStatus(null);
+    expect(html).not.toContain("tokens");
+  });
+
+  test("renders nothing when a turn hasn't run yet (both fields null)", () => {
+    const html = renderWithTokenStatus({ usedTokens: null, contextWindowTokens: null });
+    expect(html).not.toContain("tokens");
+  });
+
+  test("renders the used/total token counts, comma-formatted", () => {
+    const html = renderWithTokenStatus({ usedTokens: 1234, contextWindowTokens: 128_000 });
+    expect(html).toContain("1,234 / 128,000 tokens");
+  });
+});

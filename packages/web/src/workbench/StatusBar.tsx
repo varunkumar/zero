@@ -32,6 +32,10 @@ export function StatusBar(props: {
   /** Git branch/dirty/remote status from `git/status`, polled by Workbench.
    * Null when `root` isn't inside a git work tree. */
   gitStatus?: { branch: string; dirtyCount: number; remoteUrl: string | null } | null;
+  /** Chat context-window token usage from `chat/status`, polled by Workbench
+   * for the active chat session. Null/absent fields mean no turn has run yet
+   * for that session (or no session is active). */
+  tokenStatus?: { usedTokens: number | null; contextWindowTokens: number | null } | null;
 }) {
   return (
     <div
@@ -92,6 +96,11 @@ export function StatusBar(props: {
               <a href={toHttpsUrl(props.gitStatus.remoteUrl)} target="_blank" rel="noreferrer"
                 style={{ color: "inherit" }} title="Open repository on GitHub">GitHub</a>
             )}
+          </span>
+        )}
+        {props.tokenStatus?.usedTokens != null && props.tokenStatus.contextWindowTokens != null && (
+          <span title="Chat context window usage">
+            {props.tokenStatus.usedTokens.toLocaleString()} / {props.tokenStatus.contextWindowTokens.toLocaleString()} tokens
           </span>
         )}
         <StatusPill engine={props.engine} />

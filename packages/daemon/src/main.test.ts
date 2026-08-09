@@ -244,10 +244,10 @@ test("chat/status doesn't construct a runtime for a never-turned session, and re
   // neutral "no chat model" status without erroring or requiring a real
   // provider - status checks must not be a side-effecting construction
   // trigger (the web ChatPanel calls chat/status on every session switch).
-  const status = await client.request<{ activeModel: string | null; reason: string | null }>(
+  const status = await client.request<{ activeModel: string | null; reason: string | null; usedTokens: number | null; contextWindowTokens: number | null }>(
     "chat/status", { sessionId: id },
   );
-  expect(status).toEqual({ activeModel: null, reason: null });
+  expect(status).toEqual({ activeModel: null, reason: null, usedTokens: null, contextWindowTokens: null });
 
   // Start (and let finish) a turn so the pool actually has an entry for this
   // session, then delete the session and confirm chat/status still degrades
@@ -265,16 +265,18 @@ test("chat/status doesn't construct a runtime for a never-turned session, and re
   // Now that a turn has actually run, the pool has a real cached runtime
   // for this session, and chat/status reflects its (non-neutral) status -
   // distinguishing this from the "never constructed" neutral default above.
-  const statusAfterTurn = await client.request<{ activeModel: string | null; reason: string | null }>(
+  const statusAfterTurn = await client.request<{ activeModel: string | null; reason: string | null; usedTokens: number | null; contextWindowTokens: number | null }>(
     "chat/status", { sessionId: id },
   );
   expect(statusAfterTurn.reason).toBe("no chat model available");
 
   await client.request("chat/delete", { id });
-  const statusAfterDelete = await client.request<{ activeModel: string | null; reason: string | null }>(
+  const statusAfterDelete = await client.request<{ activeModel: string | null; reason: string | null; usedTokens: number | null; contextWindowTokens: number | null }>(
     "chat/status", { sessionId: id },
   );
-  expect(statusAfterDelete).toEqual({ activeModel: null, reason: null });
+  expect(statusAfterDelete).toEqual({
+    activeModel: null, reason: null, usedTokens: null, contextWindowTokens: null,
+  });
 
   ws.close(); d.stop();
 });

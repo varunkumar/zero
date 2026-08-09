@@ -156,7 +156,12 @@ export interface ChatTurnResult { turnId: string }
 export interface ChatTurnEventPayload { turnId: string; event: ChatTurnEvent }
 export interface ChatApproveParams { turnId: string; callId: string; approved: boolean }
 export interface ChatAbortParams { turnId: string }
-export interface ChatStatusResult { activeModel: string | null; reason: string | null }
+export interface ChatStatusResult {
+  activeModel: string | null;
+  reason: string | null;
+  usedTokens: number | null;
+  contextWindowTokens: number | null;
+}
 
 export interface GitStatusResult {
   branch: string;

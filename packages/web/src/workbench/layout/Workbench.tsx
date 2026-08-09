@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import type { EditorView } from "@codemirror/view";
-import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent, ChatTurnEventPayload } from "@zero/protocol";
+import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent, ChatTurnEventPayload, ChatStatusResult } from "@zero/protocol";
 import { Editor } from "../../Editor";
 import { createCompletion } from "../../completionSetup";
 import { CommandRegistry } from "../commands/registry";
@@ -346,6 +346,11 @@ export function Workbench(props: { client: RpcClient }) {
     behind: number;
     remoteUrl: string | null;
   } | null>(null);
+  const [tokenStatus, setTokenStatus] = useState<{
+    usedTokens: number | null;
+    contextWindowTokens: number | null;
+  } | null>(null);
+  const [chatVersion, setChatVersion] = useState(0);
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -455,6 +460,41 @@ export function Workbench(props: { client: RpcClient }) {
       clearInterval(id);
     };
   }, [client]);
+
+  // Poll chat context-window token usage for the status bar, for whichever
+  // session is currently active. Mirrors the graph/status and git/status
+  // polling above: same interval, same "degrade to null rather than take
+  // the editor down" failure mode. Lives here (not in ChatPanel, which
+  // already polls chat/status for its own model pill) so StatusBar can stay
+  // fed the same way as the other polled pills without threading state up
+  // out of ChatPanel.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const sessionId = chatStore.getActiveId();
+      if (!sessionId) {
+        if (!cancelled) setTokenStatus(null);
+        return;
+      }
+      try {
+        const status = await client.request<ChatStatusResult>("chat/status", { sessionId });
+        if (!cancelled) setTokenStatus({ usedTokens: status.usedTokens, contextWindowTokens: status.contextWindowTokens });
+      } catch {
+        if (!cancelled) setTokenStatus(null);
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [client, chatStore, chatVersion]);
+
+  // Re-run the token-status poll immediately on session switch (rather than
+  // waiting up to 2s for the next tick) by bumping a version the effect above
+  // depends on.
+  useEffect(() => chatStore.subscribe(() => setChatVersion((v) => v + 1)), [chatStore]);
 
   useEffect(() => tabStore.subscribe(() => setTabsVersion((v) => v + 1)), [tabStore]);
 
@@ -976,6 +1016,7 @@ export function Workbench(props: { client: RpcClient }) {
               : null}
             graphStatus={graphStatus}
             gitStatus={gitStatus}
+            tokenStatus={tokenStatus}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
