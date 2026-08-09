@@ -1,4 +1,5 @@
 import { writeFile, mkdir } from "node:fs/promises";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { createDaemon, type DaemonOptions } from "./server";
@@ -73,6 +74,12 @@ export async function startZero(opts: DaemonOptions) {
   // never throw" convention for optional subsystems.
   daemon.rpc.register("git/status", z.object({}).optional().transform(() => ({})),
     async () => ({ status: await getGitStatus(opts.root) }));
+  // The local OS account running the daemon - used client-side purely as a
+  // display label (chat message avatars/authorship), not for auth. Falls
+  // back to "you" if the OS refuses to report a username (has happened in
+  // some minimal container images).
+  daemon.rpc.register("system/whoami", z.object({}).optional().transform(() => ({})),
+    async () => ({ username: (() => { try { return userInfo().username; } catch { return "you"; } })() }));
 
   daemon.rpc.register("pty/open", z.object({ shell: z.string().optional(), cols: z.number(), rows: z.number() }),
     async (p) => pty.open(p.shell, p.cols, p.rows));

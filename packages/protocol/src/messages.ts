@@ -170,3 +170,7 @@ export interface GitStatusResult {
   behind: number;
   remoteUrl: string | null;
 }
+
+export interface WhoamiResult {
+  username: string;
+}

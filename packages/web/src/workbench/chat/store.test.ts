@@ -13,12 +13,25 @@ test("addSession makes it active; removeSession falls back to the next session",
   expect(store.getActiveId()).toBeNull();
 });
 
-test("setSessions replaces the list and clears activeId if it no longer exists", () => {
+test("setSessions replaces the list and falls back to the first session if the active one no longer exists", () => {
   const store = new ChatStore();
   store.addSession({ id: "a", title: "A", updatedAt: 1, messageCount: 0 });
   store.setSessions([{ id: "b", title: "B", updatedAt: 2, messageCount: 0 }]);
   expect(store.getSessions()).toEqual([{ id: "b", title: "B", updatedAt: 2, messageCount: 0 }]);
+  expect(store.getActiveId()).toBe("b");
+});
+
+test("setSessions clears activeId when the new list is empty", () => {
+  const store = new ChatStore();
+  store.addSession({ id: "a", title: "A", updatedAt: 1, messageCount: 0 });
+  store.setSessions([]);
   expect(store.getActiveId()).toBeNull();
+});
+
+test("setSessions auto-selects the first session on initial load (activeId starts null)", () => {
+  const store = new ChatStore();
+  store.setSessions([{ id: "only", title: "Only", updatedAt: 1, messageCount: 0 }]);
+  expect(store.getActiveId()).toBe("only");
 });
 
 test("touchSession updates title and bumps updatedAt without changing activeId", () => {

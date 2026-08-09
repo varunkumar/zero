@@ -19,7 +19,18 @@ export class ChatStore {
 
   setSessions(sessions: ChatSessionSummary[]): void {
     this.#sessions = sessions;
-    if (this.#activeId && !sessions.some((s) => s.id === this.#activeId)) this.#activeId = null;
+    // Two cases land here with a stale/absent activeId: the very first
+    // `chat/list` response after mount (activeId starts null) and a list
+    // refresh where the previously-active session is gone. Either way,
+    // falling back to null would leave a perfectly loadable session sitting
+    // in the dropdown with nothing selected underneath it - the dropdown's
+    // native "select first option by default" rendering then makes it
+    // *look* selected, but ChatPanel's `chat/get` effect never fires
+    // (guarded on activeId), so the messages just never load. Default to
+    // the first session instead, same as `addSession` already does.
+    if (!this.#activeId || !sessions.some((s) => s.id === this.#activeId)) {
+      this.#activeId = sessions[0]?.id ?? null;
+    }
     this.#notify();
   }
 
