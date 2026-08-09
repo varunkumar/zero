@@ -238,6 +238,28 @@ test("rename rejects when destination is outside the workspace root", async () =
   await expect(ws.rename("a.txt", "../escape.txt")).rejects.toThrow(PathOutsideWorkspaceError);
 });
 
+test("rename blocks a destination through a symlinked directory without moving the file outside the root", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await ws.write("a.txt", "hi");
+  await expect(ws.rename("a.txt", "outdir/escaped.txt")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "escaped.txt"))).toBe(false);
+  expect(await ws.read("a.txt")).toBe("hi"); // source untouched
+});
+
+test("copy blocks a destination through a symlinked directory without copying the file outside the root", async () => {
+  const root = makeProject();
+  const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));
+  symlinkSync(outside, join(root, "outdir"));
+  const ws = new Workspace(root);
+  await ws.write("a.txt", "hi");
+  await expect(ws.copy("a.txt", "outdir/escaped.txt")).rejects.toThrow(PathOutsideWorkspaceError);
+  expect(existsSync(join(outside, "escaped.txt"))).toBe(false);
+  expect(await ws.read("a.txt")).toBe("hi"); // source untouched
+});
+
 test("readSetting returns undefined when nothing has been written", async () => {
   const ws = new Workspace(makeProject());
   expect(await ws.readSetting("workbench")).toBeUndefined();

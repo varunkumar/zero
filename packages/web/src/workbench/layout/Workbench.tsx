@@ -283,12 +283,17 @@ export function BottomPanel() {
         <button aria-pressed={w.bottomView === "terminal"} onClick={() => w.setBottomView("terminal")}>Terminal</button>
         <button aria-pressed={w.bottomView === "chat"} onClick={() => w.setBottomView("chat")}>Chat</button>
       </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        {w.bottomView === "terminal" ? (
-          <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />
-        ) : (
-          <ChatPanel client={w.client} turnStore={w.turnStore} chatStore={w.chatStore} />
-        )}
+      {/* Both panels stay mounted at all times and are toggled via `display`
+          rather than a ternary: unmounting TerminalPanel would tear down its
+          TerminalHost(s), disposing the live xterm instance and dropping the
+          PtyStore output subscription (PtyStore keeps no buffer for
+          unsubscribed listeners), permanently losing scrollback and any
+          output emitted while Chat was showing. */}
+      <div style={{ flex: 1, minHeight: 0, display: w.bottomView === "terminal" ? "flex" : "none", flexDirection: "column" }}>
+        <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: w.bottomView === "chat" ? "flex" : "none", flexDirection: "column" }}>
+        <ChatPanel client={w.client} turnStore={w.turnStore} chatStore={w.chatStore} />
       </div>
     </div>
   );

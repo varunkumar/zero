@@ -116,8 +116,7 @@ export class Workspace {
 
   async rename(rel: string, newRel: string): Promise<void> {
     const from = await this.#resolveReal(rel);
-    const to = this.#resolve(newRel);
-    await fs.mkdir(dirname(to), { recursive: true });
+    const to = await this.#resolveContainedForCreate(newRel);
     await fs.rename(from, to);
   }
 
@@ -132,8 +131,7 @@ export class Workspace {
 
   async copy(rel: string, newRel: string): Promise<void> {
     const from = await this.#resolveReal(rel);
-    const to = this.#resolve(newRel);
-    await fs.mkdir(dirname(to), { recursive: true });
+    const to = await this.#resolveContainedForCreate(newRel);
     await fs.cp(from, to, { recursive: true, errorOnExist: true });
   }
 

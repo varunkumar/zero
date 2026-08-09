@@ -54,13 +54,16 @@ describe("BottomPanel", () => {
     expect(html).not.toContain("aria-pressed=\"true\">Chat<");
   });
 
-  test("swapping bottomView to chat renders ChatPanel instead of TerminalPanel", () => {
+  test("swapping bottomView to chat keeps TerminalPanel mounted but hidden, and shows ChatPanel", () => {
     const html = renderBottomPanel("chat");
-    // ChatPanel's empty state has no open sessions; TerminalPanel's
-    // terminal-only "No terminals open" copy must not appear once Chat is
-    // the active view - the two panels are mutually exclusive, mirroring how
-    // SidebarPanel only ever mounts one of Files/Search at a time.
-    expect(html).not.toContain("No terminals open");
+    // Both TerminalPanel and ChatPanel stay mounted at all times (toggled via
+    // CSS `display`, not a ternary) so switching tabs never disposes the live
+    // xterm instance or drops its PtyStore output subscription. So
+    // TerminalPanel's "No terminals open" copy is still present in the
+    // markup - it's just inside a `display:none` wrapper - unlike
+    // SidebarPanel's Files/Search, which really do mount only one at a time.
+    expect(html).toContain("No terminals open");
+    expect(html).toContain("display:none");
     expect(html).toContain("aria-pressed=\"true\">Chat<");
     // Also check that Terminal is not pressed in this state
     expect(html).not.toContain("aria-pressed=\"true\">Terminal<");
