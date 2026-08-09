@@ -148,6 +148,24 @@ test("pty methods over the wire: open, input/output, resize, close", async () =>
   ws.close(); d.stop();
 });
 
+test("pty/* RPCs are available on the same startZero path bin/zero.ts's serve command uses", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const session = await client.request<{ sessionId: string; shell: string }>("pty/open", { cols: 80, rows: 24 });
+  expect(session.sessionId).toBeTruthy();
+  const list = await client.request<{ sessions: unknown[] }>("pty/list");
+  expect(list.sessions.length).toBeGreaterThan(0);
+
+  ws.close();
+  d.stop();
+});
+
 test("plugin/list and graph/status over the wire", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   writeFileSync(join(root, "a.ts"), "export function foo() { return 1; }\n");
