@@ -1,5 +1,30 @@
 import { expect, test } from "bun:test";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { existsSync, statSync, chmodSync } from "node:fs";
 import { PtyService } from "./pty";
+
+/**
+ * Locate node-pty's native spawn-helper binary the same way node-pty's own
+ * lib/utils.js#loadNativeModule (and pty-worker.js's ensureNativeHelperExecutable
+ * self-heal) does: build/Release, build/Debug, then prebuilds/<platform>-<arch>,
+ * each checked relative to both the package root and lib/. Returns undefined
+ * on platforms with no spawn-helper binary (Windows uses conpty instead).
+ */
+function findSpawnHelper(): string | undefined {
+  if (process.platform === "win32") return undefined;
+  const require = createRequire(import.meta.url);
+  const pkgDir = dirname(require.resolve("node-pty/package.json"));
+  const dirs = ["build/Release", "build/Debug", `prebuilds/${process.platform}-${process.arch}`];
+  const roots = [pkgDir, join(pkgDir, "lib")];
+  for (const d of dirs) {
+    for (const root of roots) {
+      const helperPath = join(root, d, "spawn-helper");
+      if (existsSync(helperPath)) return helperPath;
+    }
+  }
+  return undefined;
+}
 
 test("open spawns a shell, input/output round-trips, close kills it", async () => {
   const output: { sessionId: string; data: string }[] = [];
@@ -88,6 +113,46 @@ test("two concurrent sessions keep independent output streams (second terminal t
   expect(output.some((o) => o.sessionId === b && o.data.includes("aaaa11"))).toBe(false);
 
   service.closeAll();
+}, 10000);
+
+test("open recovers when node-pty's spawn-helper binary lost its executable bit (fresh-install permission bug)", async () => {
+  // Root cause reproduced directly in this repo: bun (and, per node-pty
+  // issue reports, npm in some layouts) extracts node-pty's prebuilt
+  // "spawn-helper" native binary without the executable permission bit
+  // set. node-pty's pty.spawn() then throws synchronously
+  // ("Error: posix_spawnp failed") for *every* session, forever - which is
+  // exactly what "the terminal panel doesn't load" looks like from the
+  // outside. This is a filesystem-permission bug, not a startup race.
+  const helperPath = findSpawnHelper();
+  if (!helperPath) return; // e.g. win32, which has no spawn-helper binary
+
+  const originalMode = statSync(helperPath).mode;
+  chmodSync(helperPath, 0o644); // simulate the broken fresh-install state
+  expect(statSync(helperPath).mode & 0o111).toBe(0); // confirm it's actually non-executable now
+
+  try {
+    const output: string[] = [];
+    // Constructing the service (and thus spawning the pty-worker.js child)
+    // happens *after* we stripped the executable bit, mirroring a daemon
+    // that starts up right after a fresh `bun install` left the binary
+    // broken - the worker's own self-heal (ensureNativeHelperExecutable in
+    // pty-worker.js) must restore it before ever calling pty.spawn().
+    const service = new PtyService(process.cwd(), (_id, data) => output.push(data), () => {});
+    const { sessionId } = service.open("/bin/bash", 80, 24);
+    service.input(sessionId, "echo pty_ready\n");
+
+    await new Promise<void>((resolve, reject) => {
+      const start = Date.now();
+      const iv = setInterval(() => {
+        if (output.join("").includes("pty_ready")) { clearInterval(iv); resolve(); }
+        if (Date.now() - start > 10000) { clearInterval(iv); reject(new Error("timed out waiting for pty output")); }
+      }, 20);
+    });
+
+    service.closeAll();
+  } finally {
+    chmodSync(helperPath, originalMode);
+  }
 }, 10000);
 
 test("resize does not throw for a live session", () => {
