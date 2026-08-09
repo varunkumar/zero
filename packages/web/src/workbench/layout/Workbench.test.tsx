@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { RpcClient } from "@zero/protocol";
-import { BottomPanel, WorkbenchContext, getBottomPanelAction } from "./Workbench";
+import { BottomPanel, TabStrip, WorkbenchContext, getBottomPanelAction } from "./Workbench";
 import { PtyStore } from "../terminal/store";
 import { ChatStore } from "../chat/store";
 import { TurnStore } from "../chat/turnStore";
+import { iconFor } from "../icons/iconFor";
 
 // Task 4: Terminal and Chat now share a single dockview panel (`bottom`)
 // instead of being separately stacked, following the same locally-toggled
@@ -108,5 +109,35 @@ describe("getBottomPanelAction", () => {
     // showBottomPanel will update the view but won't add the panel again
     const action = getBottomPanelAction(true, "terminal", "chat");
     expect(action).toBe("switch");
+  });
+});
+
+function renderTabStrip(tabs: Array<{ id: string; path: string; dirty: boolean }>, activeTabId: string | null = null) {
+  // TabStrip only reads a subset of WorkbenchContextValue; the test doesn't
+  // need to provide the full value.
+  const contextValue = {
+    confirmingTabId: null,
+    cancelCloseTab: () => {},
+    setActiveGroupId: () => {},
+    tabStore: {
+      setActiveTab: () => {},
+    },
+  };
+  return renderToStaticMarkup(
+    <WorkbenchContext.Provider value={contextValue as any}>
+      <TabStrip groupId="group-1" tabs={tabs as any} activeTabId={activeTabId} />
+    </WorkbenchContext.Provider>,
+  );
+}
+
+describe("TabStrip", () => {
+  test("editor tabs render a file-type icon matching iconFor", () => {
+    const html = renderTabStrip([
+      { id: "tab-1", path: "src/index.ts", dirty: false },
+    ], "tab-1");
+    const filename = "index.ts";
+    const expectedIconSrc = iconFor(filename, false);
+    // Check that an img element with the correct src is rendered
+    expect(html).toContain(`<img src="${expectedIconSrc}"`);
   });
 });

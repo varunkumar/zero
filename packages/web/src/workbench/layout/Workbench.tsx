@@ -20,6 +20,7 @@ import { TerminalPanel } from "../terminal/TerminalPanel";
 import { ChatStore } from "../chat/store";
 import { TurnStore } from "../chat/turnStore";
 import { ChatPanel } from "../chat/ChatPanel";
+import { iconFor } from "../icons/iconFor";
 import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
 
@@ -151,7 +152,7 @@ function SidebarPanel() {
   );
 }
 
-function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | null }) {
+export function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | null }) {
   const w = useWorkbench();
   // The dirty tab asking to confirm its own close (per the design spec an
   // inline bar in the tab itself, never a modal) is Workbench state, so that
@@ -173,6 +174,7 @@ function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: string | n
               w.tabStore.setActiveTab(props.groupId, tab.id);
             }}
           >
+            <img src={iconFor(tab.path.split("/").at(-1) ?? "", false)} alt="" width={14} height={14} style={{ flexShrink: 0 }} />
             <span>{tab.path.split("/").at(-1)}</span>
             {tab.dirty && <span className="zero-dirty-dot" aria-label="unsaved changes" />}
             {confirming ? (
