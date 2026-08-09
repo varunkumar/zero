@@ -13,8 +13,11 @@
   --zero-accent: #74c7ec;
   --zero-dirty-dot: #f9e2af;
   --zero-error-fg: #f38ba8;
+  --zero-error-bg: #5a1f1f;
   --zero-selection-bg: #313244;
   --zero-selection-fg: #cdd6f4;
+  --zero-status-ok: #2ecc71;
+  --zero-status-idle: #8a8a8a;
 }
 
 :root[data-theme="light"] {
@@ -32,8 +35,11 @@
   --zero-accent: #007aff;
   --zero-dirty-dot: #c48f00;
   --zero-error-fg: #b3261e;
+  --zero-error-bg: #fff5f5;
   --zero-selection-bg: #e5e5ea;
   --zero-selection-fg: #1e1e2e;
+  --zero-status-ok: #2ecc71;
+  --zero-status-idle: #8a8a8a;
 }
 
 [data-theme] {

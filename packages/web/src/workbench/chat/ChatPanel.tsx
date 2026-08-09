@@ -203,7 +203,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
               border: "1px solid var(--zero-border)", fontSize: 14, color: "var(--zero-statusbar-fg)",
             }}
           >
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: status.activeModel !== null ? "#2ecc71" : "#999", flexShrink: 0 }} />
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: status.activeModel !== null ? "var(--zero-status-ok)" : "var(--zero-status-idle)", flexShrink: 0 }} />
             {status.activeModel ?? "no chat model"}
           </div>
         </div>
@@ -212,7 +212,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
         <div
           style={{
             display: "flex", justifyContent: "space-between", alignItems: "center",
-            padding: "4px 8px", background: "#5a1f1f", color: "#fff", fontSize: 13,
+            padding: "4px 8px", background: "var(--zero-error-bg)", color: "var(--zero-error-fg)", fontSize: 13,
           }}
         >
           <span>⚠ {banner}</span>
@@ -225,15 +225,23 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
         ) : (
           <>
             {messages.filter((m) => m.role !== "system").map((m, i) => (
-              <div key={i} style={{ marginBottom: 8 }}>
-                <strong>{m.role === "tool" ? `tool:${m.toolName}` : m.role}</strong>
-                <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+              <div key={i} style={{
+                marginBottom: 8, padding: "6px 10px", borderRadius: 6,
+                background: m.role === "user" ? "var(--zero-selection-bg)" : "var(--zero-editor-bg)",
+                border: "1px solid var(--zero-border)",
+              }}>
+                <strong style={{ color: "var(--zero-statusbar-fg)" }}>{m.role === "tool" ? `tool:${m.toolName}` : m.role}</strong>
+                <div style={{ whiteSpace: "pre-wrap", color: "var(--zero-editor-fg)" }}>{m.content}</div>
               </div>
             ))}
             {streaming && (
-              <div style={{ marginBottom: 8 }}>
-                <strong>assistant</strong>
-                <div style={{ whiteSpace: "pre-wrap" }}>{streaming}</div>
+              <div style={{
+                marginBottom: 8, padding: "6px 10px", borderRadius: 6,
+                background: "var(--zero-editor-bg)",
+                border: "1px solid var(--zero-border)",
+              }}>
+                <strong style={{ color: "var(--zero-statusbar-fg)" }}>assistant</strong>
+                <div style={{ whiteSpace: "pre-wrap", color: "var(--zero-editor-fg)" }}>{streaming}</div>
               </div>
             )}
           </>
