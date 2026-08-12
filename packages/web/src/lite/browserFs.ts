@@ -1,5 +1,12 @@
-import type { TreeEntry } from "@zero/protocol";
+import ignore, { type Ignore } from "ignore";
+import type { FsSearchResult, TreeEntry } from "@zero/protocol";
 import { assertSafePath } from "./paths";
+
+const SKIP_NAMES = new Set([".git", "node_modules"]);
+const MAX_SEARCH_MATCHES = 200;
+const MAX_SEARCH_FILE_BYTES = 1_048_576;
+const SEARCH_TIME_MS = 2000;
+const BINARY_SNIFF = 8192;
 
 export interface FileHandle {
   name: string;
@@ -68,18 +75,90 @@ export class BrowserFSWorkspace {
     await w.close();
   }
 
+  async #loadIgnores(dirPath: string[]): Promise<Ignore> {
+    const ig = ignore();
+    try {
+      const dir = await this.#dir(dirPath, false);
+      const file = await dir.getFileHandle(".gitignore");
+      ig.add(await (await file.getFile()).text());
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+    return ig;
+  }
+
+  #ignored(ancestors: { ig: Ignore; prefix: string }[], path: string, isDir: boolean): boolean {
+    for (const { ig, prefix } of ancestors) {
+      const rel = prefix ? path.slice(prefix.length + 1) : path;
+      if (ig.ignores(isDir ? `${rel}/` : rel)) return true;
+    }
+    return false;
+  }
+
   async tree(): Promise<TreeEntry[]> {
     const out: TreeEntry[] = [];
-    const walk = async (dir: DirHandle, prefix: string) => {
+    const walk = async (dir: DirHandle, prefix: string, ancestors: { ig: Ignore; prefix: string }[]) => {
+      const dirPath = prefix ? prefix.split("/") : [];
+      const next = [...ancestors, { ig: await this.#loadIgnores(dirPath), prefix }];
       for await (const [name, handle] of dir.entries()) {
-        if (name === ".git" || name === "node_modules") continue;
+        if (SKIP_NAMES.has(name)) continue;
         const path = joinRel(prefix, name);
-        out.push({ path, kind: handle.kind === "directory" ? "dir" : "file" });
-        if (handle.kind === "directory") await walk(handle, path);
+        const isDir = handle.kind === "directory";
+        if (this.#ignored(next, path, isDir)) continue;
+        out.push({ path, kind: isDir ? "dir" : "file" });
+        if (isDir) await walk(handle, path, next);
       }
     };
-    await walk(this.#root, "");
+    await walk(this.#root, "", []);
     return out;
+  }
+
+  async search(query: string, caseSensitive = false): Promise<FsSearchResult> {
+    const started = Date.now();
+    const entries = await this.tree();
+    const matches: FsSearchResult["matches"] = [];
+    const needle = caseSensitive ? query : query.toLowerCase();
+    let truncated = false;
+
+    for (const entry of entries) {
+      if (Date.now() - started >= SEARCH_TIME_MS) {
+        truncated = true;
+        break;
+      }
+      if (entry.kind !== "file") continue;
+
+      const { parent, name } = await this.#parentAndName(entry.path, false);
+      let file: FileHandle;
+      try {
+        file = await parent.getFileHandle(name);
+      } catch {
+        continue;
+      }
+      const blob = await file.getFile();
+      if (blob.size > MAX_SEARCH_FILE_BYTES) continue;
+      const text = await blob.text();
+      if (text.slice(0, BINARY_SNIFF).includes("\0")) continue;
+
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (Date.now() - started >= SEARCH_TIME_MS) {
+          truncated = true;
+          break;
+        }
+        const line = lines[i]!;
+        const haystack = caseSensitive ? line : line.toLowerCase();
+        const column = haystack.indexOf(needle);
+        if (column === -1) continue;
+        matches.push({ path: entry.path, line: i + 1, column: column + 1, text: line });
+        if (matches.length >= MAX_SEARCH_MATCHES) {
+          truncated = true;
+          break;
+        }
+      }
+      if (truncated) break;
+    }
+
+    return { matches, truncated };
   }
 
   async #existsIn(parent: DirHandle, name: string): Promise<boolean> {

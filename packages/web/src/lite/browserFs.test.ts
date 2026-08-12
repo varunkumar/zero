@@ -90,3 +90,40 @@ test("rename and move of a path onto itself do not delete", async () => {
   await ws.move("src/a.ts", "src/a.ts");
   expect(await ws.read("src/a.ts")).toBe("hello");
 });
+
+test("search finds a literal with 1-based line and column", async () => {
+  const ws = await seeded();
+  await ws.write("src/a.ts", "alpha\nhello world\n");
+  const res = await ws.search("hello");
+  expect(res.truncated).toBe(false);
+  expect(res.matches).toEqual([{ path: "src/a.ts", line: 2, column: 1, text: "hello world" }]);
+});
+
+test("search is case-insensitive by default and honors caseSensitive", async () => {
+  const ws = await seeded();
+  await ws.write("src/a.ts", "Hello");
+  expect((await ws.search("hello")).matches).toHaveLength(1);
+  expect((await ws.search("hello", true)).matches).toHaveLength(0);
+});
+
+test("search and tree honor .gitignore and still skip node_modules", async () => {
+  const ws = await seeded();
+  await ws.write(".gitignore", "secret.txt\n");
+  await ws.write("secret.txt", "nope");
+  await ws.write("src/ok.ts", "hello");
+  const paths = (await ws.tree()).map((e) => e.path);
+  expect(paths).not.toContain("secret.txt");
+  expect(paths).toContain("src/ok.ts");
+  const res = await ws.search("nope");
+  expect(res.matches).toEqual([]);
+  expect((await ws.read("secret.txt"))).toBe("nope");
+});
+
+test("search sets truncated when the match cap is hit", async () => {
+  const ws = await seeded();
+  const lines = Array.from({ length: 250 }, (_, i) => `hit ${i}`).join("\n");
+  await ws.write("src/a.ts", lines);
+  const res = await ws.search("hit");
+  expect(res.matches.length).toBe(200);
+  expect(res.truncated).toBe(true);
+});
