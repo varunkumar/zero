@@ -31,3 +31,4 @@ export { ProviderGateway } from "./providerGateway";
 export {
   anthropicRequestToChat, chatDeltaToSseEvents, finalSseEvents, createSseState, type SseState,
 } from "./anthropicTranslate";
+export { diffPreview } from "./diffPreview";
