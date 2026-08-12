@@ -70,3 +70,23 @@ test("rejects .. in read", async () => {
   const ws = await seeded();
   await expect(ws.read("../outside")).rejects.toThrow();
 });
+
+test("create propagates non-NotFound probe errors", async () => {
+  const ws = await seeded();
+  await expect(ws.create("src", "file")).rejects.toMatchObject({ name: "TypeMismatchError" });
+});
+
+test("copy does not overwrite an existing destination", async () => {
+  const ws = await seeded();
+  await ws.write("src/b.ts", "other");
+  await expect(ws.copy("src/a.ts", "src/b.ts")).rejects.toThrow("already exists");
+  expect(await ws.read("src/b.ts")).toBe("other");
+});
+
+test("rename and move of a path onto itself do not delete", async () => {
+  const ws = await seeded();
+  await ws.rename("src/a.ts", "src/a.ts");
+  expect(await ws.read("src/a.ts")).toBe("hello");
+  await ws.move("src/a.ts", "src/a.ts");
+  expect(await ws.read("src/a.ts")).toBe("hello");
+});

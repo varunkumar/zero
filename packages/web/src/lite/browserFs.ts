@@ -25,6 +25,12 @@ function joinRel(prefix: string, name: string): string {
   return prefix ? `${prefix}/${name}` : name;
 }
 
+function sameRelPath(a: string, b: string): boolean {
+  const left = assertSafePath(a);
+  const right = assertSafePath(b);
+  return left.length === right.length && left.every((seg, i) => seg === right[i]);
+}
+
 export class BrowserFSWorkspace {
   #root: DirHandle;
 
@@ -76,27 +82,52 @@ export class BrowserFSWorkspace {
     return out;
   }
 
+  async #existsIn(parent: DirHandle, name: string): Promise<boolean> {
+    try {
+      await parent.getFileHandle(name);
+      return true;
+    } catch (err) {
+      if (isNotFound(err)) {
+        try {
+          await parent.getDirectoryHandle(name);
+          return true;
+        } catch (dirErr) {
+          if (isNotFound(dirErr)) return false;
+          throw dirErr;
+        }
+      }
+      try {
+        await parent.getDirectoryHandle(name);
+        return true;
+      } catch (dirErr) {
+        if (isNotFound(dirErr)) throw err;
+        throw dirErr;
+      }
+    }
+  }
+
   async create(path: string, kind: "file" | "dir"): Promise<void> {
     const { parent, name } = await this.#parentAndName(path, true);
     try {
       if (kind === "file") await parent.getFileHandle(name);
       else await parent.getDirectoryHandle(name);
-      throw new Error("already exists");
     } catch (err) {
-      if (err instanceof Error && err.message === "already exists") throw err;
-      if (!isNotFound(err)) throw new Error("already exists");
+      if (!isNotFound(err)) throw err;
+      if (kind === "file") {
+        const file = await parent.getFileHandle(name, { create: true });
+        const w = await file.createWritable();
+        await w.write("");
+        await w.close();
+      } else {
+        await parent.getDirectoryHandle(name, { create: true });
+      }
+      return;
     }
-    if (kind === "file") {
-      const file = await parent.getFileHandle(name, { create: true });
-      const w = await file.createWritable();
-      await w.write("");
-      await w.close();
-    } else {
-      await parent.getDirectoryHandle(name, { create: true });
-    }
+    throw new Error("already exists");
   }
 
   async rename(path: string, newPath: string): Promise<void> {
+    if (sameRelPath(path, newPath)) return;
     await this.copy(path, newPath);
     await this.delete(path);
   }
@@ -112,13 +143,20 @@ export class BrowserFSWorkspace {
 
   async copy(path: string, newPath: string): Promise<void> {
     const src = await this.#parentAndName(path, false);
+    let file: FileHandle | undefined;
     try {
-      const file = await src.parent.getFileHandle(src.name);
+      file = await src.parent.getFileHandle(src.name);
+    } catch (err) {
+      if (isNotFound(err)) throw err;
+    }
+
+    const dest = await this.#parentAndName(newPath, true);
+    if (await this.#existsIn(dest.parent, dest.name)) throw new Error("already exists");
+
+    if (file) {
       const content = await (await file.getFile()).text();
       await this.write(newPath, content);
       return;
-    } catch (err) {
-      if (isNotFound(err)) throw err;
     }
 
     const dir = await src.parent.getDirectoryHandle(src.name);
