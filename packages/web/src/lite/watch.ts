@@ -13,7 +13,8 @@ type ChangeRecord = {
   changedHandle?: { name?: string };
 };
 
-type FileSystemObserverCtor = new (
+/** Constructor shape for FileSystemObserver (global or injected). */
+export type FileSystemObserverCtor = new (
   callback: (records: ChangeRecord[]) => void,
 ) => FileSystemObserverLike;
 
@@ -24,23 +25,50 @@ function pathFromRecord(record: ChangeRecord): string | null {
   return record.changedHandle?.name ?? null;
 }
 
-function startObserver(
+function safeDisconnect(obs: FileSystemObserverLike): void {
+  try {
+    obs.disconnect?.();
+  } catch {
+    // no-op-safe disconnect
+  }
+}
+
+/**
+ * Start observing `root` if the constructor yields an instance with `observe`.
+ * Returns null when observing cannot be started so the caller can poll instead.
+ */
+function tryStartObserver(
   Ctor: FileSystemObserverCtor,
   onChanged: (path: string) => void,
-): Watcher {
-  const obs = new Ctor((records) => {
-    for (const record of records) {
-      const path = pathFromRecord(record);
-      if (path != null && path !== "") onChanged(path);
-    }
-  });
+  root: unknown,
+): Watcher | null {
+  let obs: FileSystemObserverLike;
+  try {
+    obs = new Ctor((records) => {
+      for (const record of records) {
+        const path = pathFromRecord(record);
+        if (path != null && path !== "") onChanged(path);
+      }
+    });
+  } catch {
+    return null;
+  }
+
+  if (typeof obs.observe !== "function") {
+    safeDisconnect(obs);
+    return null;
+  }
+
+  try {
+    void obs.observe(root);
+  } catch {
+    safeDisconnect(obs);
+    return null;
+  }
+
   return {
     stop() {
-      try {
-        obs.disconnect?.();
-      } catch {
-        // no-op-safe disconnect
-      }
+      safeDisconnect(obs);
     },
   };
 }
@@ -89,13 +117,13 @@ function startPoll(
 }
 
 function resolveObserverCtor(
-  observer: FileSystemObserverLike | null | undefined,
+  observer: FileSystemObserverCtor | null | undefined,
 ): FileSystemObserverCtor | null {
   // Explicit null forces poll (tests).
   if (observer === null) return null;
 
   if (typeof observer === "function") {
-    return observer as unknown as FileSystemObserverCtor;
+    return observer;
   }
 
   const g = globalThis as unknown as { FileSystemObserver?: FileSystemObserverCtor };
@@ -111,14 +139,24 @@ export function startWatch(
   opts?: {
     intervalMs?: number;
     now?: () => number;
-    observer?: FileSystemObserverLike | null;
+    /** Injected constructor, or `null` to force poll. Defaults to `globalThis.FileSystemObserver`. */
+    observer?: FileSystemObserverCtor | null;
+    /** Root handle for `observe`. Without it, falls back to poll even if a constructor exists. */
+    root?: unknown;
   },
 ): Watcher {
+  const intervalMs = opts?.intervalMs ?? 3000;
   const Ctor = resolveObserverCtor(
     opts && "observer" in opts ? opts.observer : undefined,
   );
-  if (Ctor) {
-    return startObserver(Ctor, onChanged);
+  const root = opts?.root;
+
+  // Only use the observer path when we can actually call observe(root).
+  // A present-but-unwired FileSystemObserver must not disable watching.
+  if (Ctor && root != null) {
+    const watched = tryStartObserver(Ctor, onChanged, root);
+    if (watched) return watched;
   }
-  return startPoll(ws, onChanged, opts?.intervalMs ?? 3000);
+
+  return startPoll(ws, onChanged, intervalMs);
 }
