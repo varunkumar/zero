@@ -108,6 +108,8 @@ export function Editor(props: {
   onCursorChange?: (pos: { line: number; column: number }) => void;
   diagnostics?: LspDiagnostic[];
   client: RpcClient;
+  /** When false, skip hover/definition RPC. Defaults true so daemon call sites stay unchanged. */
+  lspEnabled?: boolean;
   onGoToDefinition?: (path: string, line: number, character: number) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -124,6 +126,7 @@ export function Editor(props: {
   const loadedPathRef = useRef<string | null>(null);
 
   async function goToDefinition(doc: EditorState["doc"], pos: number, line: ReturnType<EditorState["doc"]["lineAt"]>): Promise<void> {
+    if (!(propsRef.current.lspEnabled ?? true)) return;
     const position = { line: line.number - 1, character: pos - line.from };
     let result: LspDefinitionResult;
     try {
@@ -173,6 +176,7 @@ export function Editor(props: {
           ghostText((s) => propsRef.current.requestCompletion?.(s)),
           linter(() => toCmDiagnostics(view.current!.state.doc, propsRef.current.diagnostics ?? [])),
           hoverTooltip(async (view, pos) => {
+            if (!(propsRef.current.lspEnabled ?? true)) return null;
             const line = view.state.doc.lineAt(pos);
             const position = { line: line.number - 1, character: pos - line.from };
             let result: LspHoverResult;

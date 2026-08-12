@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import type { EditorView } from "@codemirror/view";
-import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent, ChatTurnEventPayload, ChatStatusResult } from "@zero/protocol";
+import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent, ChatTurnEventPayload, ChatStatusResult, WorkspaceCapabilities } from "@zero/protocol";
 import { Editor } from "../../Editor";
 import { createCompletion } from "../../completionSetup";
 import { CommandRegistry } from "../commands/registry";
@@ -69,6 +69,7 @@ export function getBottomPanelAction(
  * context from above `<DockviewReact>` does reach them. */
 interface WorkbenchContextValue {
   client: RpcClient;
+  capabilities: WorkspaceCapabilities;
   tabStore: TabStore;
   activeGroupId: string;
   setActiveGroupId: (groupId: string) => void;
@@ -259,6 +260,7 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
             onViewChange={(view) => w.registerView(groupId, view)}
             diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
             client={w.client}
+            lspEnabled={w.capabilities.lsp}
             onGoToDefinition={(path, line, character) => {
               w.openFile(path);
               // Cursor placement after open happens once the tab's EditorView mounts;
@@ -287,7 +289,9 @@ export function BottomPanel() {
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)" }}>
       <div className="zero-sidebar-toggle" style={{ justifyContent: "space-between" }}>
         <div style={{ display: "flex" }}>
-          <button aria-pressed={w.bottomView === "terminal"} onClick={() => w.setBottomView("terminal")}><TerminalTabIcon />Terminal</button>
+          {w.capabilities.pty && (
+            <button aria-pressed={w.bottomView === "terminal"} onClick={() => w.setBottomView("terminal")}><TerminalTabIcon />Terminal</button>
+          )}
           <button aria-pressed={w.bottomView === "chat"} onClick={() => w.setBottomView("chat")}><ChatTabIcon />Chat</button>
         </div>
         <button
@@ -305,9 +309,11 @@ export function BottomPanel() {
           PtyStore output subscription (PtyStore keeps no buffer for
           unsubscribed listeners), permanently losing scrollback and any
           output emitted while Chat was showing. */}
-      <div style={{ flex: 1, minHeight: 0, display: w.bottomView === "terminal" ? "flex" : "none", flexDirection: "column" }}>
-        <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />
-      </div>
+      {w.capabilities.pty && (
+        <div style={{ flex: 1, minHeight: 0, display: w.bottomView === "terminal" ? "flex" : "none", flexDirection: "column" }}>
+          <TerminalPanel client={w.client} ptyStore={w.ptyStore} theme={w.theme} />
+        </div>
+      )}
       <div style={{ flex: 1, minHeight: 0, display: w.bottomView === "chat" ? "flex" : "none", flexDirection: "column" }}>
         <ChatPanel client={w.client} turnStore={w.turnStore} chatStore={w.chatStore} />
       </div>
@@ -327,8 +333,8 @@ function useConst<T>(factory: () => T): T {
   return ref.current;
 }
 
-export function Workbench(props: { client: RpcClient }) {
-  const { client } = props;
+export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCapabilities }) {
+  const { client, capabilities } = props;
   const registry = useConst(() => new CommandRegistry());
   const tabStore = useConst(() => new TabStore());
   const settingsStore = useConst(() => new SettingsStore(client, window.localStorage));
@@ -338,7 +344,7 @@ export function Workbench(props: { client: RpcClient }) {
 
   const [settings, setSettings] = useState(() => settingsStore.getSnapshot());
   const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
-  const [bottomView, setBottomView] = useState<"terminal" | "chat">("terminal");
+  const [bottomView, setBottomView] = useState<"terminal" | "chat">(capabilities.pty ? "terminal" : "chat");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [openerOpen, setOpenerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -432,6 +438,7 @@ export function Workbench(props: { client: RpcClient }) {
   // Poll graphify indexer status for the status bar. Failures surface as
   // "Graph off" rather than taking the editor down.
   useEffect(() => {
+    if (!capabilities.graph) return;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -452,13 +459,14 @@ export function Workbench(props: { client: RpcClient }) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [client]);
+  }, [client, capabilities.graph]);
 
   // Poll git branch/dirty/remote status for the status bar. Failures
   // surface as no pill at all (null) rather than taking the editor down -
   // git/status itself already degrades to null server-side when `root`
   // isn't a git work tree, so an unreachable daemon gets the same result.
   useEffect(() => {
+    if (!capabilities.git) return;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -482,7 +490,7 @@ export function Workbench(props: { client: RpcClient }) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [client]);
+  }, [client, capabilities.git]);
 
   // Poll chat context-window token usage for the status bar, for whichever
   // session is currently active. Mirrors the graph/status and git/status
@@ -633,6 +641,7 @@ export function Workbench(props: { client: RpcClient }) {
   // keep only the ones this browser previously knew about (persisted below),
   // and reveal the terminal panel if any were restored.
   useEffect(() => {
+    if (!capabilities.pty) return;
     let cancelled = false;
     void client
       .request<PtyListResult>("pty/list")
@@ -659,7 +668,7 @@ export function Workbench(props: { client: RpcClient }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client]);
+  }, [client, capabilities.pty]);
 
   // Persist the session id list on every PtyStore mutation (new terminal,
   // closed terminal, exited terminal) so the reattach effect above can find
@@ -682,6 +691,7 @@ export function Workbench(props: { client: RpcClient }) {
   // edit (and, via the tabsVersion dependency, immediately on openFile and
   // saveTab too).
   useEffect(() => {
+    if (!capabilities.lsp) return;
     if (!activeTab) return;
     clearTimeout(lspSyncDebounceRef.current);
     lspSyncDebounceRef.current = setTimeout(() => {
@@ -709,7 +719,7 @@ export function Workbench(props: { client: RpcClient }) {
     // depending on tabsVersion + activeTab?.path avoids re-debouncing on
     // unrelated state changes elsewhere in the tree.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, activeTab?.path, activeTab?.content]);
+  }, [client, capabilities.lsp, activeTab?.path, activeTab?.content]);
 
   function openFile(path: string): void {
     void client
@@ -930,8 +940,10 @@ export function Workbench(props: { client: RpcClient }) {
       { id: "view.closeEditorGroup", title: "Close Editor Group", run: () => actionsRef.current.closeEditorGroup(), keybinding: "$mod+Shift+Backslash" },
       { id: "view.toggleTheme", title: "Toggle Theme", run: () => actionsRef.current.toggleTheme() },
       { id: "preferences.open", title: "Preferences: Open Settings", run: () => actionsRef.current.openSettings() },
-      { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleBottomPanel("terminal"), keybinding: "Control+Backquote" },
-      { id: "terminal.new", title: "New Terminal", run: () => actionsRef.current.newTerminal() },
+      ...(capabilities.pty ? [
+        { id: "view.toggleTerminal", title: "Toggle Terminal", run: () => actionsRef.current.toggleBottomPanel("terminal"), keybinding: "Control+Backquote" },
+        { id: "terminal.new", title: "New Terminal", run: () => actionsRef.current.newTerminal() },
+      ] : []),
       { id: "view.toggleChat", title: "Toggle Chat", run: () => actionsRef.current.toggleBottomPanel("chat"), keybinding: "Control+Shift+KeyC" },
       { id: "files.newFile", title: "New File", run: () => actionsRef.current.newFileInSelectedDir(), keybinding: "$mod+Alt+KeyN" },
       { id: "files.newFolder", title: "New Folder", run: () => actionsRef.current.newFolderInSelectedDir(), keybinding: "$mod+Alt+Shift+KeyN" },
@@ -944,7 +956,7 @@ export function Workbench(props: { client: RpcClient }) {
       detach();
       for (const command of commands) registry.unregister(command.id);
     };
-  }, [registry]);
+  }, [registry, capabilities.pty]);
 
   function onReady(event: DockviewReadyEvent): void {
     dockApi.current = event.api;
@@ -991,6 +1003,7 @@ export function Workbench(props: { client: RpcClient }) {
 
   const contextValue: WorkbenchContextValue = {
     client,
+    capabilities,
     tabStore,
     activeGroupId,
     setActiveGroupId,
@@ -1041,7 +1054,7 @@ export function Workbench(props: { client: RpcClient }) {
             theme={theme}
             onToggleTheme={() => registry.run("view.toggleTheme")}
             message={statusMessage}
-            lspStatus={activePath
+            lspStatus={capabilities.lsp && activePath
               ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length, failed: lspFailedByPath.get(activePath) ?? false }
               : null}
             graphStatus={graphStatus}

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { RpcClient } from "@zero/protocol";
+import type { RpcClient, WorkspaceCapabilities } from "@zero/protocol";
 import { BottomPanel, TabStrip, WorkbenchContext, getBottomPanelAction } from "./Workbench";
 import { PtyStore } from "../terminal/store";
 import { ChatStore } from "../chat/store";
@@ -22,7 +22,15 @@ const fakeClient = {
   onNotification: () => {},
 } as unknown as RpcClient;
 
-function renderBottomPanel(bottomView: "terminal" | "chat") {
+const ALL_CAPABILITIES: WorkspaceCapabilities = {
+  pty: true,
+  lsp: true,
+  graph: true,
+  git: true,
+  models: ["nano"],
+};
+
+function renderBottomPanel(bottomView: "terminal" | "chat", capabilities: WorkspaceCapabilities = ALL_CAPABILITIES) {
   // BottomPanel only reads these fields from context; the test doesn't need
   // to provide or type-check the full WorkbenchContextValue.
   const contextValue = {
@@ -34,6 +42,7 @@ function renderBottomPanel(bottomView: "terminal" | "chat") {
     bottomView,
     setBottomView: () => {},
     closeBottomPanel: () => {},
+    capabilities,
   };
   return renderToStaticMarkup(
     <WorkbenchContext.Provider value={contextValue as any}>
@@ -77,6 +86,13 @@ describe("BottomPanel", () => {
     expect(chatButton).toContain("aria-pressed=\"true\"");
     // Also check that Terminal is not pressed in this state
     expect(terminalButton).not.toContain("aria-pressed=\"true\"");
+  });
+
+  test("BottomPanel hides the Terminal toggle when pty is false", () => {
+    const html = renderBottomPanel("chat", { pty: false, lsp: false, graph: false, git: false, models: ["nano"] });
+    const buttons = html.split("</button>");
+    expect(buttons.find((b) => b.endsWith("Terminal"))).toBeUndefined();
+    expect(buttons.find((b) => b.endsWith("Chat"))).toBeDefined();
   });
 });
 
