@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { stat, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcClient, type SocketLike } from "@zero/protocol";
+import { RpcClient, type SocketLike, type SessionHelloResult } from "@zero/protocol";
 import { startZero } from "./main";
 import { useTempZeroHome } from "./testSupport/zeroHome";
 
@@ -441,6 +441,24 @@ test("a second chat/turn for a session with an already-active turn is rejected, 
   expect([...turnIds][0]).toBe(fulfilled[0].value.turnId);
   expect(turnEvents.map((e) => e.event)).toEqual([{ type: "error", message: "no chat model available" }]);
 
+  ws.close(); d.stop();
+});
+
+test("session/hello reports full daemon capabilities and the workspace basename", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-hello-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+  const hello = await client.request<SessionHelloResult>("session/hello");
+  expect(hello.capabilities).toEqual({
+    pty: true, lsp: true, graph: true, git: true,
+    models: ["nano", "openai-compat"],
+  });
+  expect(hello.workspace.kind).toBe("daemon");
+  expect(hello.workspace.name).toBe(root.split("/").pop());
   ws.close(); d.stop();
 });
 

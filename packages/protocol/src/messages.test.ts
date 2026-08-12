@@ -104,6 +104,18 @@ import type {
   ChatTurnEvent, ChatTurnParams, ChatTurnResult, ChatTurnEventPayload,
   ChatApproveParams, ChatAbortParams, ChatStatusResult,
 } from "./messages";
+import type { SessionHelloResult } from "./messages";
+
+test("session/hello result is a plain JSON-serializable shape", () => {
+  const hello: SessionHelloResult = {
+    capabilities: {
+      pty: true, lsp: true, graph: true, git: true,
+      models: ["nano", "openai-compat"],
+    },
+    workspace: { name: "zero", kind: "daemon" },
+  };
+  expect(JSON.parse(JSON.stringify(hello))).toEqual(hello);
+});
 
 test("chat turn/approval wire shapes are plain JSON-serializable", () => {
   const events: ChatTurnEvent[] = [
