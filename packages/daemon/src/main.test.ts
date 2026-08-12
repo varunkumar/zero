@@ -458,7 +458,7 @@ test("session/hello reports full daemon capabilities and the workspace basename"
     models: ["nano", "openai-compat"],
   });
   expect(hello.workspace.kind).toBe("daemon");
-  expect(hello.workspace.name).toBe(root.split("/").pop());
+  expect(hello.workspace.name).toBe(root.split("/").pop()!);
   ws.close(); d.stop();
 });
 
