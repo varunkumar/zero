@@ -49,12 +49,22 @@ M0–M5 are implemented on `main`:
   repo in the dashboard). Build command: `bun install && bun run --cwd
   packages/web build`. Output directory: `packages/web/dist`. Live at
   [zero.varunkumar.dev](https://zero.varunkumar.dev).
+- **M7** Zero Claude Plugin (Nano bridge): `zero claude [path]` starts the
+  daemon with its model gateway always on and prints an
+  `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` line. Open the printed URL in
+  Chrome or Edge to attach that tab as the Nano host — reverse-RPC lets the
+  daemon call into it, running `ChromeNanoProvider` in-browser and emulating
+  tool calls via Prompt API constrained JSON decoding. Point
+  `ANTHROPIC_BASE_URL` at the printed gateway and run `claude` for a fully
+  offline Claude Code. Falls back to the Ollama-compatible provider when no
+  tab is attached.
 
 Design and plugin docs:
 
 - [M3 design](docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md)
 - [M4 design](docs/superpowers/specs/2026-08-06-m4-chat-agentruntime-design.md)
 - [M5 design](docs/superpowers/specs/2026-08-07-m5-zero-agents-design.md)
+- [M7 design](docs/superpowers/specs/2026-08-13-m7-zero-claude-plugin-design.md)
 - [Plugins](docs/plugins.md)
 
 See the design spec for the full roadmap (Nano bridge, Claude plugin, Zero IDE,
@@ -104,6 +114,8 @@ Command surface:
   headlessly (for scripts/CI)
 - `zero serve [path] [--gateway-port <port>]` - start the web daemon
   (editor/terminal/chat over HTTP/WS)
+- `zero claude [path] [--gateway-port <port>]` - start the daemon, bridging
+  Claude Code to Gemini Nano running in an attached browser tab
 - `zero --version` - print the installed version
 
 ## Zero Lite
@@ -119,6 +131,25 @@ The badge at the top tracks the `Workers Builds: zero-lite` check on `main`
 — the Cloudflare Pages build of `packages/web`. Green means the latest
 `main` build passed and published `dist/`; red or pending is the current
 build, not a static "deployed" label.
+
+## Zero Claude Plugin
+
+```
+zero claude
+```
+
+prints a URL and an `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` line. Open the
+URL in Chrome or Edge with Gemini Nano available, then in another terminal:
+
+```
+ANTHROPIC_BASE_URL=http://127.0.0.1:<port> ANTHROPIC_API_KEY=<key> claude
+```
+
+Claude Code now runs fully offline against Nano. Only one browser tab
+serves as the Nano host at a time — whichever is currently in the
+foreground; closing or backgrounding it hands off to another open Zero tab
+if one exists. Nano is a small model: expect a working offline agent, not
+cloud-Claude parity on tool-choice accuracy.
 
 ## Development
 
