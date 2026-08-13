@@ -31,6 +31,20 @@ test("rename updates the title reported by list", async () => {
   expect((await store.list()).find((s) => s.id === id)?.title).toBe("new");
 });
 
+test("rename bumps updatedAt so the renamed session sorts to the front of list", async () => {
+  const store = new LiteSessionStore("r", createMemorySessionDb());
+  const older = await store.create("older");
+  await new Promise((r) => setTimeout(r, 5));
+  const newer = await store.create("newer");
+  // Without a doctored updatedAt, "newer" (created after "older") would
+  // already sort first - rename "older" and confirm it jumps ahead.
+  await new Promise((r) => setTimeout(r, 5));
+  await store.rename(older, "older-renamed");
+  const ids = (await store.list()).map((s) => s.id);
+  expect(ids[0]).toBe(older);
+  expect(ids[1]).toBe(newer);
+});
+
 test("delete removes the session", async () => {
   const store = new LiteSessionStore("r", createMemorySessionDb());
   const id = await store.create();

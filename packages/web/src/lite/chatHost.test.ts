@@ -78,6 +78,33 @@ test("chat/list and chat/rename and chat/delete round-trip", async () => {
   await expect(host.handle("chat/get", { id })).rejects.toThrow();
 });
 
+test("dispose aborts every in-flight turn and evicts the runtime pool", async () => {
+  let aborted = false;
+  const host = await makeHost({
+    providers: [{
+      ...stubProvider("x"),
+      chat: (async function* (_m, _t, signal) {
+        yield { text: "x" };
+        await new Promise<void>((r) => signal.addEventListener("abort", () => { aborted = true; r(); }, { once: true }));
+      }) as ChatCapableProvider["chat"],
+    }],
+    notify: () => {},
+  });
+  const { id } = (await host.handle("chat/create", {})) as { id: string };
+  await host.handle("chat/turn", { sessionId: id, userText: "one" });
+  await Bun.sleep(10);
+
+  host.dispose();
+  await Bun.sleep(10);
+
+  expect(aborted).toBe(true);
+  // evictAll() dropped the pooled runtime, so chat/status reports "no
+  // model" again exactly as it would before any turn ever ran.
+  expect(await host.handle("chat/status", { sessionId: id })).toEqual({
+    activeModel: null, reason: null, usedTokens: null, contextWindowTokens: null,
+  });
+});
+
 test("fs_write executed by the agent notifies fs/changed", async () => {
   const notifications: { method: string; params: unknown }[] = [];
   const hostRef: { current?: Awaited<ReturnType<typeof makeHost>> } = {};

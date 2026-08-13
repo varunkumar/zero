@@ -130,7 +130,7 @@ export class LiteSessionStore {
     this.#checkId(id);
     const existing = await this.db.get(id);
     if (!existing || existing.rootId !== this.rootId) return;
-    await this.db.put({ ...existing, title });
+    await this.db.put({ ...existing, title, updatedAt: Date.now() });
   }
 
   async delete(id: string): Promise<void> {

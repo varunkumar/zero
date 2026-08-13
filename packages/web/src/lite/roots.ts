@@ -13,12 +13,44 @@ export interface LiteRoot {
   id: string;
   name: string;
   handle: DirHandle & Partial<PermissionQueryableHandle>;
+  /** `Date.now()` of the most recent open (fresh pick, reopen, or
+   * auto-open). Missing on records written before this field existed -
+   * treat as `0` (least recently used). Drives ordering in the mount-time
+   * auto-open loop so the *most recently used* granted root wins, not
+   * whichever IndexedDB happens to return first. */
+  lastOpenedAt?: number;
 }
 
 export interface RootStore {
   list(): Promise<LiteRoot[]>;
   save(root: LiteRoot): Promise<void>;
   remove(id: string): Promise<void>;
+}
+
+/** Returns the stored root whose handle is the same folder as `handle`
+ * (per `FileSystemDirectoryHandle.isSameEntry`), if any. Used to dedupe a
+ * fresh `showDirectoryPicker()` pick against a previously persisted root so
+ * picking the same folder twice reuses its `id` (and chat history) instead
+ * of minting a new orphaned one. A handle with no `isSameEntry` (the
+ * in-memory test double) never matches - never throws. */
+export async function findSameRoot(roots: LiteRoot[], handle: DirHandle): Promise<LiteRoot | undefined> {
+  for (const root of roots) {
+    const isSameEntry = root.handle.isSameEntry;
+    if (typeof isSameEntry !== "function") continue;
+    try {
+      if (await isSameEntry.call(root.handle, handle)) return root;
+    } catch {
+      // Treat a handle that can't answer isSameEntry (stale, revoked, or a
+      // fake without full support) as "not the same" rather than throwing.
+    }
+  }
+  return undefined;
+}
+
+/** Most-recently-opened first. Roots with no `lastOpenedAt` (legacy
+ * records) sort last. */
+export function sortByLastOpened(roots: LiteRoot[]): LiteRoot[] {
+  return [...roots].sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
 }
 
 /** In-memory `RootStore`: used in tests, and as a fallback where IndexedDB
@@ -57,6 +89,11 @@ export function openLiteDb(): Promise<IDBDatabase> {
     req.onupgradeneeded = () => ensureLiteStores(req.result);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error("failed to open zero-lite database"));
+    // Fires instead of onsuccess/onupgradeneeded when another open
+    // connection (a different tab) is holding the old version open and
+    // hasn't responded to its `onversionchange`. Without this handler the
+    // request just hangs forever with no error and no resolution.
+    req.onblocked = () => reject(new Error("zero-lite database open blocked by another open tab"));
   });
 }
 

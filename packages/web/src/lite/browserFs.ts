@@ -22,6 +22,12 @@ export interface DirHandle {
   getFileHandle(name: string, opts?: { create?: boolean }): Promise<FileHandle>;
   removeEntry(name: string, opts?: { recursive?: boolean }): Promise<void>;
   entries(): AsyncIterableIterator<[string, DirHandle | FileHandle]>;
+  /** Real `FileSystemDirectoryHandle`s implement this (structural identity,
+   * not reference equality) so a re-pick of the same folder can be matched
+   * back to its stored root. Optional because the in-memory test double
+   * (`createMemRoot`) does not implement it - callers must treat a missing
+   * `isSameEntry` as "not the same" rather than throwing. */
+  isSameEntry?(other: DirHandle): Promise<boolean>;
 }
 
 function isNotFound(err: unknown): boolean {

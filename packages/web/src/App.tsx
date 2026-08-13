@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RpcClient, SessionHelloResult, WorkspaceCapabilities } from "@zero/protocol";
-import { connectDaemon, connectLite, shouldUseDaemon, type Connection } from "./connection";
-import { createIdbRootStore, type LiteRoot } from "./lite/roots";
+import { connectDaemon, connectLite, probeDaemon, shouldUseDaemon, type Connection } from "./connection";
+import { createIdbRootStore, findSameRoot, sortByLastOpened, type LiteRoot } from "./lite/roots";
 import type { DirHandle } from "./lite/browserFs";
 import { Landing } from "./lite/Landing";
 import { Workbench } from "./workbench/layout/Workbench";
@@ -40,75 +40,94 @@ export function App() {
   // `handleChangeFolder` can offer it back as "Reopen" on Landing without
   // auto-resuming it the way the initial-mount effect does.
   const currentRootRef = useRef<LiteRoot | null>(null);
+  // Set once a Lite connection is live, so the background daemon probe
+  // (finding 4) never yanks the user out of a folder they already opened.
+  const liteEnteredRef = useRef(false);
 
   const hasPicker = typeof showDirectoryPicker === "function";
 
   async function enterLite(conn: Connection) {
     closeRef.current = conn.close;
+    liteEnteredRef.current = true;
     const hello = await conn.client.request<SessionHelloResult>("session/hello");
     setClient(conn.client);
     setCapabilities(hello.capabilities);
     setMode("ready");
   }
 
+  async function goDaemon(cancelledRef: { current: boolean }) {
+    try {
+      const conn = await connectDaemon();
+      closeRef.current = conn.close;
+      if (cancelledRef.current || liteEnteredRef.current) {
+        // StrictMode double-invoked this effect and the first run was
+        // cleaned up before connect() resolved, or the user already opened
+        // a Lite folder while this connect was in flight - either way, this
+        // connection is now orphaned.
+        conn.close();
+        return;
+      }
+      const hello = await conn.client.request<SessionHelloResult>("session/hello");
+      if (cancelledRef.current || liteEnteredRef.current) {
+        conn.close();
+        return;
+      }
+      setClient(conn.client);
+      setCapabilities(hello.capabilities);
+      setMode("ready");
+    } catch (e) {
+      if (!cancelledRef.current && !liteEnteredRef.current) {
+        setConnectError(e instanceof Error ? e.message : String(e));
+        setMode("error");
+      }
+    }
+  }
+
   useEffect(() => {
-    let cancelled = false;
+    const cancelledRef = { current: false };
 
     if (shouldUseDaemon(location.search, import.meta.env.VITE_ZERO_TOKEN)) {
-      connectDaemon()
-        .then(async (conn) => {
-          closeRef.current = conn.close;
-          if (cancelled) {
-            // StrictMode double-invoked this effect and the first run was
-            // cleaned up before connect() resolved; close this now-orphaned
-            // connection instead of leaking it.
-            conn.close();
-            return;
-          }
-          const hello = await conn.client.request<SessionHelloResult>("session/hello");
-          if (cancelled) {
-            conn.close();
-            return;
-          }
-          setClient(conn.client);
-          setCapabilities(hello.capabilities);
-          setMode("ready");
-        })
-        .catch((e: unknown) => {
-          if (!cancelled) {
-            setConnectError(e instanceof Error ? e.message : String(e));
-            setMode("error");
-          }
-        });
+      void goDaemon(cancelledRef);
       return () => {
-        cancelled = true;
+        cancelledRef.current = true;
         closeRef.current?.();
       };
     }
 
-    // Lite mode: never opens a WebSocket. Show Landing, and in the
-    // background look for a previously opened root to auto-open (permission
-    // already granted) or offer to reopen (permission needs re-confirming).
+    // No token in the URL. This is the common Lite case (no daemon running
+    // anywhere), but it could also be a daemon-served origin visited
+    // without ?token= (finding 4) - probe for that in the background so the
+    // honest "Failed to connect" wins over a silent, wrong Lite Landing.
+    // Landing renders immediately regardless, so the probe never delays or
+    // flashes the common no-daemon case.
     setMode("landing");
+    void probeDaemon().then((isDaemon) => {
+      if (cancelledRef.current || !isDaemon || liteEnteredRef.current) return;
+      void goDaemon(cancelledRef);
+    });
+
     void (async () => {
-      const roots = await rootStoreRef.current.list();
+      const roots = sortByLastOpened(await rootStoreRef.current.list());
       for (const root of roots) {
-        if (cancelled) return;
+        if (cancelledRef.current) return;
         const state = await root.handle.queryPermission?.({ mode: "readwrite" });
-        if (cancelled) return;
+        if (cancelledRef.current) return;
         if (state === "granted") {
-          const conn = connectLite(root.handle, root.name, root.id);
-          const hello = await conn.client.request<SessionHelloResult>("session/hello");
-          if (cancelled) {
+          const updated: LiteRoot = { ...root, lastOpenedAt: Date.now() };
+          await rootStoreRef.current.save(updated);
+          const conn = connectLite(updated.handle, updated.name, updated.id);
+          if (cancelledRef.current) {
             conn.close();
             return;
           }
-          closeRef.current = conn.close;
-          currentRootRef.current = root;
-          setClient(conn.client);
-          setCapabilities(hello.capabilities);
-          setMode("ready");
+          currentRootRef.current = updated;
+          await enterLite(conn);
           return;
+        }
+        if (state === "denied") {
+          // Stale or revoked - stop offering it on every future boot.
+          await rootStoreRef.current.remove(root.id);
+          continue;
         }
         if (state === "prompt" && !pendingRootRef.current) {
           pendingRootRef.current = root;
@@ -118,27 +137,58 @@ export function App() {
     })();
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
       closeRef.current?.();
     };
   }, []);
 
+  /** True for `showDirectoryPicker()`'s rejection when the user dismisses
+   * the picker (Esc, Cancel) - per spec this stays silently on Landing,
+   * not an error screen. Checked structurally (not `instanceof
+   * DOMException`) since `DOMException` does not reliably subclass `Error`
+   * across engines, and this also has to recognize a plain `{ name:
+   * "AbortError" }`-shaped rejection from a test double. */
+  function isPickerCancelled(err: unknown): boolean {
+    return (
+      typeof err === "object" &&
+      err !== null &&
+      "name" in err &&
+      (err as { name?: unknown }).name === "AbortError"
+    );
+  }
+
   async function handleOpen() {
-    const handle = await showDirectoryPicker({ mode: "readwrite", id: "zero-lite" });
-    const id = crypto.randomUUID();
-    const root: LiteRoot = { id, name: handle.name, handle };
-    await rootStoreRef.current.save(root);
-    currentRootRef.current = root;
-    await enterLite(connectLite(handle, root.name, root.id));
+    try {
+      const handle = await showDirectoryPicker({ mode: "readwrite", id: "zero-lite" });
+      const existingRoots = await rootStoreRef.current.list();
+      const existing = await findSameRoot(existingRoots, handle);
+      const id = existing?.id ?? crypto.randomUUID();
+      const root: LiteRoot = { id, name: handle.name, handle, lastOpenedAt: Date.now() };
+      await rootStoreRef.current.save(root);
+      currentRootRef.current = root;
+      await enterLite(connectLite(handle, root.name, root.id));
+    } catch (err) {
+      if (isPickerCancelled(err)) return;
+      setConnectError(err instanceof Error ? err.message : String(err));
+      setMode("error");
+    }
   }
 
   async function handleReopen() {
     const root = pendingRootRef.current;
     if (!root) return;
-    const state = await root.handle.requestPermission?.({ mode: "readwrite" });
-    if (state !== "granted") return;
-    currentRootRef.current = root;
-    await enterLite(connectLite(root.handle, root.name, root.id));
+    try {
+      const state = await root.handle.requestPermission?.({ mode: "readwrite" });
+      if (state !== "granted") return;
+      const updated: LiteRoot = { ...root, lastOpenedAt: Date.now() };
+      await rootStoreRef.current.save(updated);
+      currentRootRef.current = updated;
+      await enterLite(connectLite(updated.handle, updated.name, updated.id));
+    } catch (err) {
+      if (isPickerCancelled(err)) return;
+      setConnectError(err instanceof Error ? err.message : String(err));
+      setMode("error");
+    }
   }
 
   /** `workspace.changeFolder` (Lite only, Task 11): close the live connection

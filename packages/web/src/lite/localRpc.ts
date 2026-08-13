@@ -22,7 +22,7 @@ export interface LocalRpcOpts {
   extra?: (method: string, params: unknown) => Promise<unknown>;
 }
 
-class MethodNotAvailable extends Error {
+export class MethodNotAvailable extends Error {
   readonly code = -32601;
   constructor() {
     super("method not available in lite");

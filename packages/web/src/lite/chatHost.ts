@@ -14,6 +14,10 @@ interface RuntimePool {
   /** Remove a session's cached runtime from the pool - called on chat/delete
    * so the pool doesn't retain tools/providers for a deleted session forever. */
   evict(sessionId: string): void;
+  /** Drop every cached/in-flight runtime - called on host teardown so a
+   * closed connection doesn't keep pooled runtimes (and their tool/provider
+   * references) alive. */
+  evictAll(): void;
 }
 
 /** Session-scoped `AgentRuntime` cache. Memoizes the *construction Promise*,
@@ -36,6 +40,7 @@ function createRuntimePool(build: (sessionId: string) => Promise<AgentRuntime>):
   } as RuntimePool;
   runtimeFor.has = (sessionId: string) => cache.has(sessionId);
   runtimeFor.evict = (sessionId: string) => { cache.delete(sessionId); };
+  runtimeFor.evictAll = () => { cache.clear(); };
   return runtimeFor;
 }
 
@@ -188,6 +193,18 @@ export class LiteChatHost {
       default:
         throw new Error(`unknown chat method: ${method}`);
     }
+  }
+
+  /** Tears down this host: aborts every turn still in flight (so an
+   * approval granted, or a tool call executing, after the caller has
+   * already moved on can't land a write against a workspace the user left)
+   * and drops the whole runtime pool. Called from `connectLite`'s `close()`
+   * when the user switches folders or the connection is otherwise torn
+   * down. Idempotent - safe to call more than once. */
+  dispose(): void {
+    for (const turn of this.#activeTurns.values()) turn.controller.abort();
+    this.#activeTurns.clear();
+    this.#runtimeFor.evictAll();
   }
 
   async #turn(params: { sessionId: string; userText: string }): Promise<{ turnId: string }> {
