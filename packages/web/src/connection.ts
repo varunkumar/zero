@@ -36,13 +36,23 @@ export function connectDaemon(): Promise<Connection> {
 /** Connects to an in-process Lite "workspace" backed by a browser directory
  * handle: no daemon, no WebSocket. `rootId` identifies the stored
  * `LiteRoot` this connection was opened from (used by callers that need to
- * correlate the live connection back to persisted root state). */
-export function connectLite(handle: DirHandle, workspaceName: string, rootId: string): Connection {
+ * correlate the live connection back to persisted root state). `watchIntervalMs`
+ * is exposed only so tests can drive the fallback poll loop without waiting
+ * out the real default; production callers never pass it. */
+export function connectLite(
+  handle: DirHandle,
+  workspaceName: string,
+  rootId: string,
+  watchIntervalMs?: number,
+): Connection {
   void rootId;
   const workspace = new BrowserFSWorkspace(handle);
   const socket = createLocalSocket({ workspaceName, fs: workspace });
   const client = new RpcClient(socket);
-  const watcher = startWatch(workspace, (path) => socket.notify("fs/changed", { path }), { root: handle });
+  const watcher = startWatch(workspace, (path) => socket.notify("fs/changed", { path }), {
+    root: handle,
+    ...(watchIntervalMs !== undefined ? { intervalMs: watchIntervalMs } : {}),
+  });
   return {
     client,
     close: () => watcher.stop(),
