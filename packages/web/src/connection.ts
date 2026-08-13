@@ -1,4 +1,7 @@
 import { RpcClient, type SocketLike } from "@zero/protocol";
+import { BrowserFSWorkspace, type DirHandle } from "./lite/browserFs";
+import { createLocalSocket } from "./lite/localRpc";
+import { startWatch } from "./lite/watch";
 
 /** A connected RpcClient plus the means to close its underlying socket.
  * `RpcClient` itself exposes no close/dispose method, so callers that need
@@ -8,7 +11,16 @@ export interface Connection {
   close: () => void;
 }
 
-export function connect(): Promise<Connection> {
+/** True iff a daemon session token is available - via the `?token=` query
+ * param (dev proxy / shared links) or an env-injected token (self-hosted
+ * builds). Any non-empty token means daemon mode; its absence means Lite. */
+export function shouldUseDaemon(search: string, envToken = ""): boolean {
+  const token =
+    new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("token") ?? envToken;
+  return Boolean(token);
+}
+
+export function connectDaemon(): Promise<Connection> {
   const params = new URLSearchParams(location.search);
   const base = import.meta.env.VITE_ZERO_URL ?? `ws://${location.host}`;
   const token = params.get("token") ?? import.meta.env.VITE_ZERO_TOKEN ?? "";
@@ -19,4 +31,20 @@ export function connect(): Promise<Connection> {
     ws.onopen = () => resolve({ client: new RpcClient(socket), close: () => ws.close() });
     ws.onerror = () => reject(new Error("daemon unreachable"));
   });
+}
+
+/** Connects to an in-process Lite "workspace" backed by a browser directory
+ * handle: no daemon, no WebSocket. `rootId` identifies the stored
+ * `LiteRoot` this connection was opened from (used by callers that need to
+ * correlate the live connection back to persisted root state). */
+export function connectLite(handle: DirHandle, workspaceName: string, rootId: string): Connection {
+  void rootId;
+  const workspace = new BrowserFSWorkspace(handle);
+  const socket = createLocalSocket({ workspaceName, fs: workspace });
+  const client = new RpcClient(socket);
+  const watcher = startWatch(workspace, (path) => socket.notify("fs/changed", { path }), { root: handle });
+  return {
+    client,
+    close: () => watcher.stop(),
+  };
 }
