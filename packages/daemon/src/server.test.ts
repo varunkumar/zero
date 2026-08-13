@@ -87,6 +87,31 @@ test("requestSocket rejects in-flight requests when the socket disconnects", asy
   d.stop();
 });
 
+test("a response from another socket does not resolve a pending reverse request", async () => {
+  const d = createDaemon({ root: "/tmp" });
+  const wsA = await connect(d.port, d.token);
+  await new Promise((r) => setTimeout(r, 20));
+  const serverA = [...d.sockets][0]!;
+  const wsB = await connect(d.port, d.token);
+  await new Promise((r) => setTimeout(r, 20));
+
+  const received = new Promise<{ id: number }>((r) => { wsA.onmessage = (e) => r(JSON.parse(String(e.data))); });
+  let settled: string | null = null;
+  const resultPromise = d.requestSocket<{ from: string }>(serverA, "ping", {})
+    .then((v) => { settled = v.from; return v; });
+  const req = await received;
+
+  // Impostor: correct id, wrong socket.
+  wsB.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { from: "B" } }));
+  await new Promise((r) => setTimeout(r, 30));
+  expect(settled).toBeNull();
+
+  // The real owner can still answer it.
+  wsA.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { from: "A" } }));
+  expect(await resultPromise).toEqual({ from: "A" });
+  wsA.close(); wsB.close(); d.stop();
+});
+
 test("onSocketClose hooks fire with the closing socket", async () => {
   const d = createDaemon({ root: "/tmp" });
   const closed: unknown[] = [];

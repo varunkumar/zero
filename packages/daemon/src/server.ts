@@ -65,10 +65,14 @@ export function createDaemon(opts: DaemonOptions) {
         try { parsed = parseMessage(str); } catch { parsed = undefined; }
         // A response-shaped message (has result/error, no method) with no
         // matching registered method dispatch answers one of *our* reverse
-        // requests to this socket, not a client-issued call.
+        // requests to this socket, not a client-issued call. The pending
+        // entry must belong to *this* socket: ids are per-daemon, not
+        // per-socket, so another client could otherwise answer (or poison)
+        // a request it was never sent. A non-matching socket falls through
+        // to ordinary dispatch rather than being dropped.
         if (parsed && !("method" in parsed) && "id" in parsed) {
           const pending = reversePending.get(parsed.id);
-          if (pending) {
+          if (pending && pending.ws === ws) {
             reversePending.delete(parsed.id);
             if (parsed.error) pending.reject(new Error(parsed.error.message));
             else pending.resolve(parsed.result);
