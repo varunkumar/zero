@@ -1,5 +1,7 @@
 # Zero
 
+[![Cloudflare Pages](https://img.shields.io/github/check-runs/varunkumar/zero/main?logo=cloudflare&logoColor=white&label=Cloudflare%20Pages)](https://dash.cloudflare.com/0d39754e3ae6404682a9bd4980eb399a/workers/services/view/zero-lite/production/builds)
+
 <p align="center">
   <img src="docs/assets/zero-logo-dark.png" alt="Zero" width="320">
 </p>
@@ -111,6 +113,11 @@ in Chrome or Edge. Click Open folder and pick a project. Gemini Nano
 powers completions and chat. There is no terminal and no language server.
 
 `zero serve` is unchanged and does not offer Lite.
+
+The badge at the top tracks the `Workers Builds: zero-lite` check on `main`
+— the Cloudflare Pages build of `packages/web`. Green means the latest
+`main` build passed and published `dist/`; red or pending is the current
+build, not a static "deployed" label.
 
 ## Development
 
