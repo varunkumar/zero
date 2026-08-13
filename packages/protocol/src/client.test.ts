@@ -36,3 +36,42 @@ test("dispatches notifications", () => {
   sock.receive({ jsonrpc: "2.0", method: "fs/changed", params: { path: "a" } });
   expect(seen).toEqual([["fs/changed", { path: "a" }]]);
 });
+
+test("answers a registered incoming request and sends a response", async () => {
+  const sock = fakeSocket();
+  const client = new RpcClient(sock);
+  client.onRequest("nano/chat", async (params) => ({ echo: params }));
+  sock.receive({ jsonrpc: "2.0", id: 7, method: "nano/chat", params: { a: 1 } });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(JSON.parse(sock.sent.at(-1)!)).toEqual({ jsonrpc: "2.0", id: 7, result: { echo: { a: 1 } } });
+});
+
+test("responds with an error for an unregistered incoming method", async () => {
+  const sock = fakeSocket();
+  const client = new RpcClient(sock);
+  sock.receive({ jsonrpc: "2.0", id: 8, method: "nope" });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(JSON.parse(sock.sent.at(-1)!)).toEqual({
+    jsonrpc: "2.0", id: 8, error: { code: -32601, message: "unknown method nope" },
+  });
+});
+
+test("responds with an error when a request handler throws", async () => {
+  const sock = fakeSocket();
+  const client = new RpcClient(sock);
+  client.onRequest("boom", async () => { throw new Error("kaboom"); });
+  sock.receive({ jsonrpc: "2.0", id: 9, method: "boom" });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(JSON.parse(sock.sent.at(-1)!)).toEqual({
+    jsonrpc: "2.0", id: 9, error: { code: -32000, message: "kaboom" },
+  });
+});
+
+test("sends a fire-and-forget notification with no id", () => {
+  const sock = fakeSocket();
+  const client = new RpcClient(sock);
+  client.notify("nano/chatDelta", { requestId: "r1", delta: { text: "hi" } });
+  expect(JSON.parse(sock.sent[0]!)).toEqual({
+    jsonrpc: "2.0", method: "nano/chatDelta", params: { requestId: "r1", delta: { text: "hi" } },
+  });
+});
