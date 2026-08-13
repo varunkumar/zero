@@ -174,3 +174,16 @@ export interface GitStatusResult {
 export interface WhoamiResult {
   username: string;
 }
+
+export interface WorkspaceCapabilities {
+  pty: boolean;
+  lsp: boolean;
+  graph: boolean;
+  git: boolean;
+  models: Array<"nano" | "openai-compat">;
+}
+
+export interface SessionHelloResult {
+  capabilities: WorkspaceCapabilities;
+  workspace: { name: string; kind: "daemon" | "browser-fs" };
+}

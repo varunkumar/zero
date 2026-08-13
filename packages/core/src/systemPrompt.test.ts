@@ -27,3 +27,13 @@ test("includes the active file when present, omits it when absent", () => {
   const withoutFile = buildSystemPrompt({ tools: [], workspace: {} });
   expect(withoutFile).not.toContain("Active file:");
 });
+
+test("includes workspace name, root, and instructions when provided", () => {
+  const prompt = buildSystemPrompt({
+    tools: [],
+    workspace: { name: "proj", root: "browser-fs:proj", instructions: "# Agents" },
+  });
+  expect(prompt).toContain("Workspace: proj");
+  expect(prompt).toContain("Root: browser-fs:proj");
+  expect(prompt).toContain("# Agents");
+});

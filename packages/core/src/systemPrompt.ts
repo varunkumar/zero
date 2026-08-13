@@ -1,6 +1,11 @@
 import type { ToolProvider } from "./chatTypes";
 
-export interface WorkspaceInfo { activeFile?: string }
+export interface WorkspaceInfo {
+  activeFile?: string;
+  name?: string;
+  root?: string;
+  instructions?: string;
+}
 
 const BASE_LAYER = `You are Zero, an offline coding assistant embedded in the user's editor.
 Answer concisely and precisely. When you need information about the user's
@@ -13,6 +18,14 @@ export function buildSystemPrompt(opts: { tools: ToolProvider[]; workspace: Work
     ? opts.tools.map((t) => `- ${t.name}: ${t.description}`).join("\n")
     : "(no tools available)";
   const workspaceLines = opts.workspace.activeFile ? `Active file: ${opts.workspace.activeFile}` : "";
+  const workspaceMeta = opts.workspace.name
+    ? [`Workspace: ${opts.workspace.name}`, opts.workspace.root ? `Root: ${opts.workspace.root}` : ""]
+        .filter(Boolean)
+        .join("\n")
+    : "";
+  const instructions = opts.workspace.instructions ?? "";
 
-  return [BASE_LAYER, "Available tools:", toolLines, workspaceLines].filter(Boolean).join("\n\n");
+  return [BASE_LAYER, "Available tools:", toolLines, workspaceLines, workspaceMeta, instructions]
+    .filter(Boolean)
+    .join("\n\n");
 }
