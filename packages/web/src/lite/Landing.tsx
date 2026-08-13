@@ -11,7 +11,8 @@ export interface LandingProps {
  * rendered before any workspace connection is made. Offers to open a new
  * folder, or reopen the last one if permission needs re-confirming. */
 export function Landing(props: LandingProps) {
-  const theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  const theme =
+    typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   return (
     <div
       style={{
