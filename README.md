@@ -52,7 +52,7 @@ M0–M5 are implemented on `main`:
 - **M7** Zero Claude Plugin (Nano bridge): `zero claude [path]` starts the
   daemon with its model gateway always on and prints an
   `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` line. Open the printed URL in
-  Chrome or Edge to attach that tab as the Nano host — reverse-RPC lets the
+  Chrome or Edge to attach that tab as the Nano host: reverse-RPC lets the
   daemon call into it, running `ChromeNanoProvider` in-browser and emulating
   tool calls via Prompt API constrained JSON decoding. Point
   `ANTHROPIC_BASE_URL` at the printed gateway and run `claude` for a fully
@@ -146,7 +146,7 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:<port> ANTHROPIC_API_KEY=<key> claude
 ```
 
 Claude Code now runs fully offline against Nano. Only one browser tab
-serves as the Nano host at a time — whichever is currently in the
+serves as the Nano host at a time: whichever is currently in the
 foreground; closing or backgrounding it hands off to another open Zero tab
 if one exists. Nano is a small model: expect a working offline agent, not
 cloud-Claude parity on tool-choice accuracy.
