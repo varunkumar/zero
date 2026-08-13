@@ -57,7 +57,11 @@ export class NanoHostRegistry {
     const onAbort = () => {
       aborted = true;
       finished = true;
-      void Promise.resolve(this.requestSocket(ws, "nano/cancel", { requestId })).catch(() => {});
+      // Fire-and-forget, and never let a dead socket's failure (sync throw
+      // or rejection) escape into the abort event dispatch.
+      try {
+        void Promise.resolve(this.requestSocket(ws, "nano/cancel", { requestId })).catch(() => {});
+      } catch { /* socket already gone */ }
       const w = wake; wake = null; w?.();
     };
     if (signal.aborted) onAbort();

@@ -5,6 +5,9 @@ export interface ClaudeCliDeps {
   pollIntervalMs?: number;
   sleep?: (ms: number) => Promise<void>;
   signal?: AbortSignal;
+  /** Daemon port. Defaults to 4820 (matching `zero serve`); tests pass 0 so
+   * they never collide with a real running instance. */
+  port?: number;
 }
 
 export function claudeLaunchBanner(opts: { webUrl: string; gatewayUrl: string; apiKey: string }): string {
@@ -32,7 +35,7 @@ export async function runClaudeCli(root: string, gatewayPort: number | undefined
   const log = deps.log ?? ((line: string) => console.log(line));
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const webDist = new URL("../../../web/dist", import.meta.url).pathname;
-  const d = await startZero({ root, port: 4820, webDist, gatewayPort: gatewayPort ?? 0 });
+  const d = await startZero({ root, port: deps.port ?? 4820, webDist, gatewayPort: gatewayPort ?? 0 });
 
   // gatewayPort is always defined above (never `undefined` passed to
   // startZero), so startZero's gateway branch always runs and gatewayInfo

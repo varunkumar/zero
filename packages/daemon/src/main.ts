@@ -40,12 +40,25 @@ export async function startZero(opts: DaemonOptions) {
     daemon.requestSocket(ws as Bun.ServerWebSocket<unknown>, method, params));
   daemon.onSocketClose((ws) => nanoHost.unregister(ws));
 
+  // ctx is supplied for every socket-dispatched request (server.ts always
+  // passes { ws }), so a missing one is a programming error, not a case to
+  // paper over with a silent success.
   daemon.rpc.register("nano/register", z.object({}).optional().transform(() => ({})),
-    async (_p, ctx) => { if (ctx) nanoHost.register(ctx.ws); return {}; });
+    async (_p, ctx) => { nanoHost.register(ctx!.ws); return {}; });
   daemon.rpc.register("nano/unregister", z.object({}).optional().transform(() => ({})),
-    async (_p, ctx) => { if (ctx) nanoHost.unregister(ctx.ws); return {}; });
+    async (_p, ctx) => { nanoHost.unregister(ctx!.ws); return {}; });
+  // Validated like every other method here; a malformed notification is
+  // dropped rather than thrown, since there is no id to answer an error on.
+  const chatDeltaParams = z.object({
+    requestId: z.string(),
+    delta: z.object({
+      text: z.string().optional(),
+      toolCalls: z.array(z.object({ id: z.string(), name: z.string(), args: z.unknown() })).optional(),
+    }),
+  });
   daemon.rpc.registerNotification("nano/chatDelta", (params) => {
-    nanoHost.handleChatDelta(params as { requestId: string; delta: ChatDelta });
+    const parsed = chatDeltaParams.safeParse(params);
+    if (parsed.success) nanoHost.handleChatDelta(parsed.data as { requestId: string; delta: ChatDelta });
   });
 
   async function buildProviders() {

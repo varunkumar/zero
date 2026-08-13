@@ -197,7 +197,12 @@ register with).
   `ChatDelta` via `client.notify("nano/chatDelta", {requestId, delta})`,
   then resolves the request with `{requestId, done: true}` once the
   iterable completes. `signal` comes from an `AbortController` this module
-  owns per `requestId`, aborted if the tab is torn down mid-stream.
+  owns per `requestId`, aborted if the tab is torn down mid-stream or if the
+  daemon sends a reverse `nano/cancel` for that `requestId` (which it does
+  when the `/v1/messages` caller aborts, so the tab stops generating instead
+  of streaming into a dead request). Handler invocations are serialized on a
+  promise chain: one shared `ChromeNanoProvider` is one live Nano session, and
+  concurrent `/v1/messages` requests would otherwise interleave turns on it.
 - `document.addEventListener("visibilitychange", ...)`:
   - → `"hidden"`: `client.notify("nano/unregister")` if previously
     registered (best-effort; no ack needed).
@@ -287,10 +292,19 @@ New `packages/core/src/providers/nanoTools.ts`:
   constrained decoding; any other caller that (today) never passes tools
   keeps getting plain streamed text, unchanged.
 - Session reuse: track `#sentCount` (how many of the last-seen `messages`
-  have already been sent to the live session). On `chat()`, if
-  `messages.length < #sentCount` (a new/reset conversation), destroy and
-  recreate the session; otherwise only `prompt()`/`promptStreaming()` the
-  messages from `#sentCount` onward, then update `#sentCount = messages.length`.
+  have already been sent to the live session) plus `#sentFingerprint`, a
+  cheap `role:content` join of exactly those already-sent messages. On
+  `chat()`, destroy and recreate the session if either
+  `messages.length < #sentCount` (a shorter, reset conversation) **or**
+  `fingerprint(messages.slice(0, #sentCount)) !== #sentFingerprint` (an
+  equal-or-longer history that is nonetheless a *different* conversation —
+  the bridge is a shared endpoint serving whatever Claude Code sends next,
+  so length alone cannot detect substitution). Otherwise only
+  `prompt()`/`promptStreaming()` the messages from `#sentCount` onward.
+  `#sentCount`/`#sentFingerprint` are updated together, and only *after* the
+  turn has actually streamed successfully: an abort or a throw mid-stream
+  must not record turns the session never fully received, so on that path
+  the half-fed session is destroyed and the counters reset instead.
   This replaces the current full-transcript-flattening on every call.
 - When `tools.length > 0`: call with `{responseConstraint: buildToolResponseConstraint(tools)}`,
   accumulate the full streamed output (constrained JSON isn't safely

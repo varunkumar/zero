@@ -27,6 +27,9 @@ test("runClaudeCli starts the daemon+gateway, prints the banner, and polls until
   let ticks = 0;
 
   const exitCode = await runClaudeCli(root, undefined, {
+    // Ephemeral port: 4820 (the production default) would collide with a
+    // real `zero serve`/`zero claude` running on the same machine.
+    port: 0,
     log: (l) => lines.push(l),
     signal: controller.signal,
     sleep: async () => { ticks++; if (ticks >= 3) controller.abort(); },
