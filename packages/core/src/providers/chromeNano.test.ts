@@ -113,6 +113,63 @@ test("chat() recreates the session when the conversation resets (shorter history
   expect(createCalls).toBe(2);
 });
 
+test("chat() recreates the session when an equal-length history is a different conversation", async () => {
+  let createCalls = 0;
+  const prompts: string[] = [];
+  const api = {
+    availability: async () => "available" as const,
+    create: async () => {
+      createCalls++;
+      return { inputQuota: 6144, async *promptStreaming(input: string) { prompts.push(input); yield "ok"; }, destroy() {} };
+    },
+  };
+  const provider = new ChromeNanoProvider(api);
+  const convoA = [
+    { role: "user" as const, content: "a1", createdAt: 0 },
+    { role: "assistant" as const, content: "a2", createdAt: 1 },
+  ];
+  for await (const _ of provider.chat(convoA, [], new AbortController().signal)) { /* drain */ }
+
+  // Same length, entirely different content: the live session holds convo A.
+  const convoB = [
+    { role: "user" as const, content: "b1", createdAt: 0 },
+    { role: "assistant" as const, content: "b2", createdAt: 1 },
+    { role: "user" as const, content: "b3", createdAt: 2 },
+  ];
+  for await (const _ of provider.chat(convoB, [], new AbortController().signal)) { /* drain */ }
+
+  expect(createCalls).toBe(2);
+  expect(prompts[1]).toContain("user: b1");
+  expect(prompts[1]).toContain("user: b3");
+});
+
+test("chat() does not mark a turn as sent when the stream throws mid-flight", async () => {
+  const prompts: string[] = [];
+  let fail = true;
+  const api = {
+    availability: async () => "available" as const,
+    create: async () => ({
+      inputQuota: 6144,
+      async *promptStreaming(input: string) {
+        prompts.push(input);
+        yield "partial";
+        if (fail) throw new Error("nano died");
+      },
+      destroy() {},
+    }),
+  };
+  const provider = new ChromeNanoProvider(api);
+  const messages = [{ role: "user" as const, content: "only turn", createdAt: 0 }];
+  await expect((async () => {
+    for await (const _ of provider.chat(messages, [], new AbortController().signal)) { /* drain */ }
+  })()).rejects.toThrow("nano died");
+
+  fail = false;
+  for await (const _ of provider.chat(messages, [], new AbortController().signal)) { /* drain */ }
+  expect(prompts).toHaveLength(2);
+  expect(prompts[1]).toContain("user: only turn");
+});
+
 test("chat() with tools requests constrained decoding and parses a tool_call", async () => {
   let capturedConstraint: unknown;
   const api = {
