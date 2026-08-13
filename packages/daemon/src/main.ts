@@ -20,6 +20,7 @@ import { GitCheckpoint } from "./gitCheckpoint";
 import { execCommand } from "./execCommand";
 import { getGitStatus } from "./gitInfo";
 import { NanoHostRegistry } from "./nanoHost";
+import { NanoBridgeProvider } from "./nanoBridgeProvider";
 
 export async function startZero(opts: DaemonOptions) {
   const daemon = createDaemon(opts);
@@ -271,7 +272,10 @@ export async function startZero(opts: DaemonOptions) {
   let stopGateway: (() => void) | undefined;
   if (opts.gatewayPort !== undefined) {
     const providers = await buildProviders();
-    const gw = startModelGateway({ port: opts.gatewayPort, gateway: new ProviderGateway(providers) });
+    const gw = startModelGateway({
+      port: opts.gatewayPort,
+      gateway: new ProviderGateway([new NanoBridgeProvider(nanoHost), ...providers]),
+    });
     gatewayInfo = { port: gw.port, apiKey: gw.apiKey };
     stopGateway = gw.stop;
     await mkdir(join(opts.root, ".zero"), { recursive: true })
