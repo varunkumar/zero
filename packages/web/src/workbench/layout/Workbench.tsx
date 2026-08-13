@@ -432,6 +432,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
       client,
       () => views.get(activeGroupIdRef.current),
       () => activePathRef.current ?? "",
+      { lite: !capabilities.lsp },
     ),
   );
 
