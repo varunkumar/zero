@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { startZero } from "../src/main";
 import { runAgentCli, positionalArgs, parseGatewayPort } from "../src/cli/agent";
+import { runClaudeCli } from "../src/cli/claude";
 import { runTui } from "../src/cli/tui/runTui";
 import { VERSION } from "../src/version";
 
@@ -18,6 +19,7 @@ usage:
   zero --resume [path]                              launch the TUI, pick a session to resume
   zero -p "task" [--yes] [--session <id>] [path]    run one task headlessly
   zero serve [path] [--gateway-port <port>]         start the web daemon
+  zero claude [path] [--gateway-port <port>]        start the daemon and bridge Claude Code to Gemini Nano
   zero --version                                    print the version`);
   process.exit(0);
 }
@@ -26,7 +28,18 @@ if (argv[0] === "agent") {
   process.exit(1);
 }
 
-if (argv[0] === "serve") {
+if (argv[0] === "claude") {
+  const rest = argv.slice(1);
+  const path = positionalArgs(rest)[0];
+  const root = resolve(path ?? ".");
+  const parsedGatewayPort = parseGatewayPort(rest);
+  if (parsedGatewayPort === "invalid") {
+    console.error("error: --gateway-port requires a numeric value");
+    process.exit(1);
+  }
+  const exitCode = await runClaudeCli(root, parsedGatewayPort);
+  process.exit(exitCode);
+} else if (argv[0] === "serve") {
   const rest = argv.slice(1);
   const path = positionalArgs(rest)[0];
   const root = resolve(path ?? ".");
