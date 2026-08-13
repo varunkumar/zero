@@ -121,24 +121,42 @@ No new wire-format types. `RpcRequest`/`RpcResponse`/`RpcNotification`
     (client notifications are silently dropped, per the existing comment
     `// client notifications: none yet`). Extend `dispatch()` to check this
     map before dropping.
+  - `dispatch(raw: string, ctx?: { ws: Bun.ServerWebSocket<unknown> }): Promise<string | null>` —
+    gains an optional second parameter threaded to registered handlers as
+    `fn(params, ctx)`. Existing `(params) => ...` handlers stay valid: a
+    function accepting fewer parameters than its declared type is
+    assignable in TS, so none of the ~15 existing `daemon.rpc.register`
+    call sites in `main.ts` need to change. This lets `nano/register`/
+    `nano/unregister` (section 6) be ordinary registered methods that read
+    `ctx.ws`, instead of needing special-casing outside `RpcServer`.
 
 - **`server.ts`** (`packages/daemon/src/server.ts`): the `websocket.message`
   handler currently always calls `rpc.dispatch(raw)`. Extend it to first
   classify the parsed message:
-  - Has `method` → existing behavior (`rpc.dispatch`, which now also covers
-    notifications via the new map).
+  - Has `method` → existing behavior, now `rpc.dispatch(raw, { ws })`
+    (covers both requests and, via the new map, notifications).
   - Has `result` or `error`, no `method` → a response to a daemon-initiated
-    reverse request; resolve it from a per-socket pending map instead of
-    calling `rpc.dispatch` (which has no id-issuing counterpart today).
-  - Add `requestSocket<R>(ws, method, params): Promise<R>` on the daemon
-    handle: allocates an id from a per-socket counter, sends
-    `{id, method, params}` to that one `ws`, and resolves/rejects from the
-    pending map. Reject in-flight entries for a socket when it closes.
+    reverse request; resolve it from a pending map (keyed by the id the
+    daemon generated when it sent the reverse request) instead of calling
+    `rpc.dispatch`.
+  - Add `requestSocket<R>(ws, method, params?): Promise<R>` on the daemon
+    handle: allocates an id from a monotonic counter (a separate id space
+    from whatever ids clients pick for their own requests — the two are
+    never compared against each other, only matched by message *shape*,
+    so no collision is possible even if the numbers coincide), sends
+    `{id, method, params}` to that one `ws`, and stores
+    `{resolve, reject, ws}` in the pending map. On that socket's `close`,
+    reject every pending entry whose `ws` matches it. Also add
+    `onSocketClose(fn: (ws) => void): void` on the daemon handle so
+    `NanoHostRegistry` (section 5) can drop a socket the moment it
+    disconnects, and expose the daemon's internal `sockets` set for tests.
 
 This keeps the reverse path fully separate from the existing
 client→daemon `RpcServer` dispatch table — no risk of method-name
-collisions between the two directions, since a given message is either a
-request-shape or a response-shape, never both.
+collisions between the two directions, since a given incoming message is
+either request-shaped (`method` present) or response-shaped (`result`/
+`error` present, no `method`), never both, and the two flows are routed
+by that shape check alone.
 
 ## 5. `NanoHostRegistry`
 
@@ -188,13 +206,25 @@ register with).
   notify (registry's `close` handling on the daemon side is the reliable
   path; this just reduces the disconnect-detection window).
 
-Daemon side: `daemon.rpc.register("nano/register", ..., ws => registry.register(ws))`
-needs the originating socket, which plain `RpcServer.register` handlers
-don't receive today (handlers only get `params`). This one registration
-(and `nano/unregister`) are wired directly in `server.ts`'s message handler
-(where `ws` is in scope) rather than through `RpcServer`, alongside the
-reverse-response classification from section 4 — the cleanest place that
-already has the raw socket.
+Daemon side: `nano/register`/`nano/unregister` need the originating socket,
+which plain `RpcServer.register` handlers don't receive today (handlers
+only get `params`). Rather than special-casing these two methods outside
+`RpcServer`, `RpcServer.dispatch` gains an optional second parameter,
+threaded through from `server.ts`'s message handler where the raw `ws` is
+in scope: `dispatch(raw: string, ctx?: { ws: Bun.ServerWebSocket<unknown> })`,
+and registered handlers may now take `(params, ctx)` — TS's existing
+`(params) => ...` handlers stay valid since a function accepting fewer
+parameters than its declared type is assignable in TS, so none of the
+existing ~15 `daemon.rpc.register` call sites in `main.ts` need to change.
+`nano/register`/`nano/unregister` are then ordinary registrations in
+`main.ts`, alongside the other `chat/*`/`fs/*` methods:
+
+```ts
+daemon.rpc.register("nano/register", z.object({}).optional().transform(() => ({})),
+  async (_p, ctx) => { nanoHost.register(ctx!.ws); return {}; });
+daemon.rpc.register("nano/unregister", z.object({}).optional().transform(() => ({})),
+  async (_p, ctx) => { nanoHost.unregister(ctx!.ws); return {}; });
+```
 
 ## 7. `NanoBridgeProvider`
 
@@ -246,7 +276,16 @@ New `packages/core/src/providers/nanoTools.ts`:
 
 `ChromeNanoProvider` changes (`packages/core/src/providers/chromeNano.ts`):
 
-- `supportsTools()` → `true` (was `false`).
+- `supportsTools()` **stays `false`** (unchanged). That flag is what
+  `AgentRuntime` and `ProviderGateway.pick()` consult to decide whether to
+  offer tools to a provider at all; flipping it would silently turn on
+  tool-calling for every existing `ChromeNanoProvider` consumer, including
+  Lite's in-browser `AgentRuntime` — outside this milestone's scope (section
+  2: "AgentRuntime untouched"). Instead, `chat()` itself honors whatever
+  `tools` array it's given, independent of `supportsTools()`: the bridge
+  path (`NanoBridgeProvider`, section 7) always passes real tools and gets
+  constrained decoding; any other caller that (today) never passes tools
+  keeps getting plain streamed text, unchanged.
 - Session reuse: track `#sentCount` (how many of the last-seen `messages`
   have already been sent to the live session). On `chat()`, if
   `messages.length < #sentCount` (a new/reset conversation), destroy and
