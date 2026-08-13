@@ -26,13 +26,44 @@ export function setupNanoHost(opts: NanoHostOpts): void {
   const provider = new ChromeNanoProvider(opts.nanoApi);
   let registered = false;
 
-  opts.client.onRequest("nano/chat", async (params) => {
-    const { requestId, messages, tools } = params as { requestId: string; messages: ChatMessage[]; tools: ChatToolSpec[] };
-    const controller = new AbortController();
-    for await (const delta of provider.chat(messages, tools, controller.signal)) {
-      opts.client.notify("nano/chatDelta", { requestId, delta });
+  // One shared ChromeNanoProvider drives one live Nano session, so two
+  // overlapping nano/chat requests would interleave turns on it and corrupt
+  // both. Requests are answered in arrival order, one at a time; a rejected
+  // predecessor must not wedge the chain.
+  const inFlight = new Map<string, AbortController>();
+  let queue: Promise<unknown> = Promise.resolve();
+
+  async function runChat(requestId: string, messages: ChatMessage[], tools: ChatToolSpec[], signal: AbortSignal) {
+    try {
+      if (signal.aborted) return { done: true };
+      for await (const delta of provider.chat(messages, tools, signal)) {
+        opts.client.notify("nano/chatDelta", { requestId, delta });
+      }
+      return { done: true };
+    } finally {
+      inFlight.delete(requestId);
     }
-    return { done: true };
+  }
+
+  opts.client.onRequest("nano/chat", (params) => {
+    const { requestId, messages, tools } = params as { requestId: string; messages: ChatMessage[]; tools: ChatToolSpec[] };
+    // Registered before the queue wait so a nano/cancel arriving while this
+    // request is still queued can abort it too.
+    const controller = new AbortController();
+    inFlight.set(requestId, controller);
+    const run = queue.then(
+      () => runChat(requestId, messages, tools, controller.signal),
+      () => runChat(requestId, messages, tools, controller.signal),
+    );
+    queue = run.catch(() => {});
+    return run;
+  });
+
+  opts.client.onRequest("nano/cancel", async (params) => {
+    const { requestId } = params as { requestId: string };
+    inFlight.get(requestId)?.abort();
+    inFlight.delete(requestId);
+    return { cancelled: true };
   });
 
   async function syncRegistration() {

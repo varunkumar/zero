@@ -70,6 +70,30 @@ test("chat() yields deltas pushed via handleChatDelta before resolving", async (
   expect(results).toEqual([{ text: "hi" }, { text: " there" }]);
 });
 
+test("chat() returns promptly on abort and asks the browser to cancel", async () => {
+  const calls: { method: string; params: unknown }[] = [];
+  const registry = new NanoHostRegistry(async (_ws, method, params) => {
+    calls.push({ method, params });
+    // The browser never answers nano/chat: it is mid-generation.
+    if (method === "nano/chat") return await new Promise(() => {});
+    return {};
+  });
+  registry.register("only");
+
+  const controller = new AbortController();
+  const consume = (async () => {
+    for await (const _ of registry.chat([], [], controller.signal)) { /* drain */ }
+  })();
+
+  await new Promise((r) => setTimeout(r, 5));
+  controller.abort();
+  await Promise.race([consume, new Promise((_r, reject) => setTimeout(() => reject(new Error("chat() did not return on abort")), 200))]);
+
+  expect(calls.map((c) => c.method)).toEqual(["nano/chat", "nano/cancel"]);
+  const chatId = (calls[0]!.params as { requestId: string }).requestId;
+  expect((calls[1]!.params as { requestId: string }).requestId).toBe(chatId);
+});
+
 test("handleChatDelta for an unknown requestId is a no-op", () => {
   const registry = new NanoHostRegistry(async () => ({ done: true }));
   expect(() => registry.handleChatDelta({ requestId: "ghost", delta: { text: "x" } })).not.toThrow();

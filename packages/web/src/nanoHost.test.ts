@@ -69,6 +69,88 @@ test("unregisters on visibilitychange to hidden, re-registers on visible", async
   expect(client.requested.map((r) => r.method)).toEqual(["nano/register", "nano/unregister", "nano/register"]);
 });
 
+/** A Nano fake whose generation blocks until `release()` is called, so
+ * overlapping requests are observable. */
+function gatedNanoApi() {
+  const started: string[] = [];
+  let release: (() => void) | null = null;
+  const api: NanoApi = {
+    availability: async () => "available",
+    create: async () => ({
+      inputQuota: 6144,
+      async *promptStreaming(input: string, o?: { signal?: AbortSignal }) {
+        started.push(input);
+        await new Promise<void>((r) => {
+          release = r;
+          o?.signal?.addEventListener("abort", () => r());
+        });
+        if (o?.signal?.aborted) return;
+        yield "done";
+      },
+      destroy() {},
+    }),
+  };
+  return { api, started, release: () => { const r = release; release = null; r?.(); } };
+}
+
+test("nano/chat requests are serialized against the shared Nano session", async () => {
+  const client = fakeClient();
+  const gated = gatedNanoApi();
+  setupNanoHost({ client, nanoApi: gated.api, doc: fakeDoc("visible") });
+
+  const first = client.__invoke("nano/chat", { requestId: "r1", messages: [{ role: "user", content: "one", createdAt: 0 }], tools: [] });
+  const second = client.__invoke("nano/chat", { requestId: "r2", messages: [{ role: "user", content: "two", createdAt: 1 }], tools: [] });
+
+  await new Promise((r) => setTimeout(r, 10));
+  expect(gated.started).toHaveLength(1);
+  expect(gated.started[0]).toContain("user: one");
+
+  gated.release();
+  await first;
+  await new Promise((r) => setTimeout(r, 10));
+  expect(gated.started).toHaveLength(2);
+  expect(gated.started[1]).toContain("user: two");
+
+  gated.release();
+  expect(await second).toEqual({ done: true });
+});
+
+test("nano/cancel aborts only the matching in-flight request", async () => {
+  const client = fakeClient();
+  const gated = gatedNanoApi();
+  setupNanoHost({ client, nanoApi: gated.api, doc: fakeDoc("visible") });
+
+  const first = client.__invoke("nano/chat", { requestId: "r1", messages: [{ role: "user", content: "one", createdAt: 0 }], tools: [] });
+  const second = client.__invoke("nano/chat", { requestId: "r2", messages: [{ role: "user", content: "two", createdAt: 1 }], tools: [] });
+  await new Promise((r) => setTimeout(r, 10));
+
+  // Cancelling the queued r2 must not disturb the running r1.
+  await client.__invoke("nano/cancel", { requestId: "r2" });
+  await new Promise((r) => setTimeout(r, 10));
+  expect(gated.started).toHaveLength(1);
+
+  gated.release();
+  expect(await first).toEqual({ done: true });
+  expect(await second).toEqual({ done: true });
+  // r2 was aborted before it ever reached the session.
+  expect(gated.started).toHaveLength(1);
+  expect(client.sent.map((s) => (s.params as { requestId: string }).requestId)).toEqual(["r1"]);
+});
+
+test("nano/cancel aborts a running request mid-stream", async () => {
+  const client = fakeClient();
+  const gated = gatedNanoApi();
+  setupNanoHost({ client, nanoApi: gated.api, doc: fakeDoc("visible") });
+
+  const first = client.__invoke("nano/chat", { requestId: "r1", messages: [{ role: "user", content: "one", createdAt: 0 }], tools: [] });
+  await new Promise((r) => setTimeout(r, 10));
+  expect(gated.started).toHaveLength(1);
+
+  await client.__invoke("nano/cancel", { requestId: "r1" });
+  expect(await first).toEqual({ done: true });
+  expect(client.sent).toEqual([]);
+});
+
 test("answers nano/chat by running ChromeNanoProvider locally and forwarding deltas as notifications", async () => {
   const client = fakeClient();
   setupNanoHost({ client, nanoApi: readyNanoApi(), doc: fakeDoc("visible") });

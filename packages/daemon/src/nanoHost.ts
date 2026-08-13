@@ -38,6 +38,7 @@ export class NanoHostRegistry {
     const pending: ChatDelta[] = [];
     let wake: (() => void) | null = null;
     let finished = false;
+    let aborted = false;
     let failure: Error | null = null;
 
     this.#deltaListeners.set(requestId, (delta) => {
@@ -49,15 +50,32 @@ export class NanoHostRegistry {
       .catch((e: unknown) => { failure = e instanceof Error ? e : new Error(String(e)); })
       .finally(() => { finished = true; const w = wake; wake = null; w?.(); });
 
+    // Abort has to both unpark the wait loop (nothing else would, since the
+    // browser's reverse request may never settle once it is mid-generation)
+    // and tell the browser to stop generating, rather than just leaving it
+    // to burn tokens into a stream nobody reads.
+    const onAbort = () => {
+      aborted = true;
+      finished = true;
+      void Promise.resolve(this.requestSocket(ws, "nano/cancel", { requestId })).catch(() => {});
+      const w = wake; wake = null; w?.();
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort);
+
     try {
       while (true) {
         if (pending.length) { yield pending.shift()!; continue; }
         if (finished || signal.aborted) break;
         await new Promise<void>((resolve) => { wake = resolve; });
       }
-      await done;
-      if (failure) throw failure;
+      // On abort, return promptly: `done` may never settle.
+      if (!aborted && !signal.aborted) {
+        await done;
+        if (failure) throw failure;
+      }
     } finally {
+      signal.removeEventListener("abort", onAbort);
       this.#deltaListeners.delete(requestId);
     }
   }
