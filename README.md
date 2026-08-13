@@ -47,8 +47,8 @@ M0–M5 are implemented on `main`:
   Chrome or Edge, Nano completions and chat, no terminal/LSP/graph/git.
   Static hosting: Cloudflare Pages project `zero-lite` (connect the GitHub
   repo in the dashboard). Build command: `bun install && bun run --cwd
-  packages/web build`. Output directory: `packages/web/dist`. Intended
-  URL: `https://zero-lite.pages.dev`.
+  packages/web build`. Output directory: `packages/web/dist`. Live at
+  [zero.varunkumar.dev](https://zero.varunkumar.dev).
 
 Design and plugin docs:
 
@@ -108,7 +108,8 @@ Command surface:
 
 ## Zero Lite
 
-Open the Pages URL (or `bun run --cwd packages/web build && bunx vite preview --cwd packages/web`)
+Open **[zero.varunkumar.dev](https://zero.varunkumar.dev)** (or build locally:
+`bun run --cwd packages/web build && bunx vite preview --cwd packages/web`)
 in Chrome or Edge. Click Open folder and pick a project. Gemini Nano
 powers completions and chat. There is no terminal and no language server.
 
