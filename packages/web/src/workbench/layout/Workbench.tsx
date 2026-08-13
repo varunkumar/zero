@@ -56,6 +56,13 @@ export function getBottomPanelAction(
   return "switch";
 }
 
+/** Whether Lite-only workbench commands (currently just "Change Folder")
+ * should be registered: Lite mode has no daemon-spawned pty, so the absence
+ * of that capability is the signal, rather than a separate "isLite" flag. */
+export function liteCommandsEnabled(caps: WorkspaceCapabilities): boolean {
+  return !caps.pty;
+}
+
 /** Value shared with the dockview-hosted panels.
  *
  * dockview captures a panel's React component **once**, at `addPanel` time
@@ -333,8 +340,8 @@ function useConst<T>(factory: () => T): T {
   return ref.current;
 }
 
-export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCapabilities }) {
-  const { client, capabilities } = props;
+export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCapabilities; onChangeFolder?: () => void }) {
+  const { client, capabilities, onChangeFolder } = props;
   const registry = useConst(() => new CommandRegistry());
   const tabStore = useConst(() => new TabStore());
   const settingsStore = useConst(() => new SettingsStore(client, window.localStorage));
@@ -921,6 +928,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
       if (sidebarView !== "files" || !fileTreeActionsRef.current?.hasFocus()) return;
       fileTreeActionsRef.current.deleteSelected();
     },
+    changeFolder: () => onChangeFolder?.(),
   };
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -950,6 +958,11 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
       { id: "files.newFolder", title: "New Folder", run: () => actionsRef.current.newFolderInSelectedDir(), keybinding: "$mod+Alt+Shift+KeyN" },
       { id: "files.rename", title: "Rename", run: () => actionsRef.current.renameSelectedTreeEntry(), keybinding: "F2" },
       { id: "files.delete", title: "Delete", run: () => actionsRef.current.deleteSelectedTreeEntry(), keybinding: "$mod+Backspace" },
+      // Lite-only: closes the current folder and returns to Landing. No
+      // keybinding — palette-only, mirroring file.close above.
+      ...(liteCommandsEnabled(capabilities) ? [
+        { id: "workspace.changeFolder", title: "Change Folder", run: () => actionsRef.current.changeFolder() },
+      ] : []),
     ];
     for (const command of commands) registry.register(command);
     const detach = attachKeybindings(registry);

@@ -36,6 +36,10 @@ export function App() {
   const closeRef = useRef<(() => void) | null>(null);
   const pendingRootRef = useRef<LiteRoot | null>(null);
   const rootStoreRef = useRef(createIdbRootStore());
+  // The root currently backing the live Lite connection (if any), so
+  // `handleChangeFolder` can offer it back as "Reopen" on Landing without
+  // auto-resuming it the way the initial-mount effect does.
+  const currentRootRef = useRef<LiteRoot | null>(null);
 
   const hasPicker = typeof showDirectoryPicker === "function";
 
@@ -100,6 +104,7 @@ export function App() {
             return;
           }
           closeRef.current = conn.close;
+          currentRootRef.current = root;
           setClient(conn.client);
           setCapabilities(hello.capabilities);
           setMode("ready");
@@ -123,6 +128,7 @@ export function App() {
     const id = crypto.randomUUID();
     const root: LiteRoot = { id, name: handle.name, handle };
     await rootStoreRef.current.save(root);
+    currentRootRef.current = root;
     await enterLite(connectLite(handle, root.name, root.id));
   }
 
@@ -131,7 +137,27 @@ export function App() {
     if (!root) return;
     const state = await root.handle.requestPermission?.({ mode: "readwrite" });
     if (state !== "granted") return;
+    currentRootRef.current = root;
     await enterLite(connectLite(root.handle, root.name, root.id));
+  }
+
+  /** `workspace.changeFolder` (Lite only, Task 11): close the live connection
+   * and drop back to Landing without re-running the mount-time auto-open
+   * effect (it only ever fires once, so returning to "landing" alone
+   * couldn't re-trigger it anyway) — but still offer the folder just closed
+   * back via "Reopen" rather than silently forgetting it. */
+  function handleChangeFolder() {
+    closeRef.current?.();
+    closeRef.current = null;
+    setClient(null);
+    setCapabilities(null);
+    const root = currentRootRef.current;
+    currentRootRef.current = null;
+    if (root) {
+      pendingRootRef.current = root;
+      setPending({ id: root.id, name: root.name });
+    }
+    setMode("landing");
   }
 
   if (mode === "error") {
@@ -151,5 +177,5 @@ export function App() {
     return <div style={{ padding: 16 }}>Connecting…</div>;
   }
 
-  return <Workbench client={client} capabilities={capabilities} />;
+  return <Workbench client={client} capabilities={capabilities} onChangeFolder={handleChangeFolder} />;
 }

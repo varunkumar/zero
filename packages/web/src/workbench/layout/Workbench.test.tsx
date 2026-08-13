@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { RpcClient, WorkspaceCapabilities } from "@zero/protocol";
-import { BottomPanel, TabStrip, WorkbenchContext, getBottomPanelAction } from "./Workbench";
+import { BottomPanel, TabStrip, WorkbenchContext, getBottomPanelAction, liteCommandsEnabled } from "./Workbench";
 import { PtyStore } from "../terminal/store";
 import { ChatStore } from "../chat/store";
 import { TurnStore } from "../chat/turnStore";
@@ -138,6 +138,13 @@ describe("getBottomPanelAction", () => {
     // showBottomPanel will update the view but won't add the panel again
     const action = getBottomPanelAction(true, "terminal", "chat");
     expect(action).toBe("switch");
+  });
+});
+
+describe("liteCommandsEnabled", () => {
+  test("is true only when pty is off", () => {
+    expect(liteCommandsEnabled({ pty: false, lsp: false, graph: false, git: false, models: ["nano"] })).toBe(true);
+    expect(liteCommandsEnabled({ pty: true, lsp: true, graph: true, git: true, models: ["nano", "openai-compat"] })).toBe(false);
   });
 });
 
