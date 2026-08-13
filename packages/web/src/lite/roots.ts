@@ -38,25 +38,29 @@ export function createMemoryRootStore(): RootStore {
   };
 }
 
-const DB_NAME = "zero-lite";
+/** Shared IndexedDB database for all Lite persistence (roots, chat sessions,
+ * ...). Bump `LITE_DB_VERSION` and extend `ensureLiteStores` whenever a new
+ * object store is added, so every module opening this database - regardless
+ * of which one happens to run first - converges on the same schema. */
+export const LITE_DB_NAME = "zero-lite";
+export const LITE_DB_VERSION = 2;
 const STORE_NAME = "roots";
-const DB_VERSION = 1;
 
-function openDb(): Promise<IDBDatabase> {
+function ensureLiteStores(db: IDBDatabase): void {
+  if (!db.objectStoreNames.contains("roots")) db.createObjectStore("roots", { keyPath: "id" });
+  if (!db.objectStoreNames.contains("sessions")) db.createObjectStore("sessions", { keyPath: "id" });
+}
+
+export function openLiteDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "id" });
-      }
-    };
+    const req = indexedDB.open(LITE_DB_NAME, LITE_DB_VERSION);
+    req.onupgradeneeded = () => ensureLiteStores(req.result);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error("failed to open zero-lite database"));
   });
 }
 
-function runRequest<T>(store: IDBObjectStore, make: () => IDBRequest<T>): Promise<T> {
+export function runRequest<T>(store: IDBObjectStore, make: () => IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = make();
     req.onsuccess = () => resolve(req.result);
@@ -70,7 +74,7 @@ function runRequest<T>(store: IDBObjectStore, make: () => IDBRequest<T>): Promis
  * via structured clone. */
 export function createIdbRootStore(): RootStore {
   async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => Promise<T>): Promise<T> {
-    const db = await openDb();
+    const db = await openLiteDb();
     try {
       const tx = db.transaction(STORE_NAME, mode);
       const result = await run(tx.objectStore(STORE_NAME));

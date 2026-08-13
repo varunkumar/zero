@@ -42,3 +42,27 @@ test("settings/get has no value so localStorage wins", async () => {
   const { client } = await clientFor();
   expect(await client.request<Record<string, never>>("settings/get", { key: "workbench" })).toEqual({});
 });
+
+test("extra hook routes chat/* methods through RpcClient", async () => {
+  const root = createMemRoot("proj");
+  const fs = new BrowserFSWorkspace(root);
+  const sessions = new Map<string, { id: string; title: string }>();
+  const socket = createLocalSocket({
+    workspaceName: "proj",
+    fs,
+    extra: async (method, params) => {
+      if (method === "chat/create") {
+        const id = crypto.randomUUID();
+        sessions.set(id, { id, title: "New chat" });
+        return { id };
+      }
+      if (method === "chat/list") return { sessions: [...sessions.values()] };
+      throw Object.assign(new Error("method not available in lite"), { code: -32601 });
+    },
+  });
+  const client = new RpcClient(socket);
+  const { id } = await client.request<{ id: string }>("chat/create", {});
+  expect(id).toBeTruthy();
+  const { sessions: list } = await client.request<{ sessions: { id: string }[] }>("chat/list", {});
+  expect(list.map((s) => s.id)).toEqual([id]);
+});

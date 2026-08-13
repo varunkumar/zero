@@ -1,7 +1,10 @@
 import { RpcClient, type SocketLike } from "@zero/protocol";
+import type { NanoApi } from "@zero/core";
 import { BrowserFSWorkspace, type DirHandle } from "./lite/browserFs";
 import { createLocalSocket } from "./lite/localRpc";
 import { startWatch } from "./lite/watch";
+import { LiteChatHost } from "./lite/chatHost";
+import { LiteSessionStore, createIdbSessionDb } from "./lite/sessionStore";
 
 /** A connected RpcClient plus the means to close its underlying socket.
  * `RpcClient` itself exposes no close/dispose method, so callers that need
@@ -45,9 +48,24 @@ export function connectLite(
   rootId: string,
   watchIntervalMs?: number,
 ): Connection {
-  void rootId;
   const workspace = new BrowserFSWorkspace(handle);
-  const socket = createLocalSocket({ workspaceName, fs: workspace });
+  const store = new LiteSessionStore(rootId, createIdbSessionDb());
+  const nanoApi = (globalThis as { LanguageModel?: NanoApi }).LanguageModel;
+  const host = new LiteChatHost({
+    store,
+    fs: workspace,
+    folderName: workspaceName,
+    nanoApi,
+    notify: (method, params) => socket.notify(method, params),
+  });
+  const socket = createLocalSocket({
+    workspaceName,
+    fs: workspace,
+    extra: (method, params) => {
+      if (method.startsWith("chat/")) return host.handle(method, params);
+      throw Object.assign(new Error("method not available in lite"), { code: -32601 });
+    },
+  });
   const client = new RpcClient(socket);
   const watcher = startWatch(workspace, (path) => socket.notify("fs/changed", { path }), {
     root: handle,
