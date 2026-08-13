@@ -1,6 +1,6 @@
 import type { ChatMessage, ChatToolSpec, ChatDelta } from "@zero/core";
 
-export type RequestSocketFn = <R>(ws: unknown, method: string, params?: unknown) => Promise<R>;
+export type RequestSocketFn = (ws: unknown, method: string, params?: unknown) => Promise<unknown>;
 
 /** Tracks which connected browser tab(s) can answer reverse `nano/chat`
  * calls, always routing to the most-recently-registered (foreground) one.
@@ -45,7 +45,7 @@ export class NanoHostRegistry {
       const w = wake; wake = null; w?.();
     });
 
-    const done = this.requestSocket<{ done: true }>(ws, "nano/chat", { requestId, messages, tools })
+    const done = this.requestSocket(ws, "nano/chat", { requestId, messages, tools })
       .catch((e: unknown) => { failure = e instanceof Error ? e : new Error(String(e)); })
       .finally(() => { finished = true; const w = wake; wake = null; w?.(); });
 
