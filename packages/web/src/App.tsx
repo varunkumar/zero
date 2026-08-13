@@ -5,6 +5,8 @@ import { createIdbRootStore, findSameRoot, sortByLastOpened, type LiteRoot } fro
 import type { DirHandle } from "./lite/browserFs";
 import { Landing } from "./lite/Landing";
 import { Workbench } from "./workbench/layout/Workbench";
+import { setupNanoHost } from "./nanoHost";
+import type { NanoApi } from "@zero/core";
 
 /** File System Access API surface not covered by TypeScript's bundled DOM
  * lib. Kept minimal and local to this file, the only place that calls the
@@ -75,6 +77,7 @@ export function App() {
       setClient(conn.client);
       setCapabilities(hello.capabilities);
       setMode("ready");
+      setupNanoHost({ client: conn.client, nanoApi: (globalThis as { LanguageModel?: NanoApi }).LanguageModel });
     } catch (e) {
       if (!cancelledRef.current && !liteEnteredRef.current) {
         setConnectError(e instanceof Error ? e.message : String(e));
