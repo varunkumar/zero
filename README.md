@@ -41,6 +41,12 @@ M0–M5 are implemented on `main`:
   headless `zero -p "task"` CLI, Anthropic Messages API-compatible model
   gateway) — Nano is not yet wired into daemon-side runs; that lands with
   the M7 Nano bridge
+- **M6** Zero Lite (same workbench, no daemon): open a local folder in
+  Chrome or Edge, Nano completions and chat, no terminal/LSP/graph/git.
+  Static hosting: Cloudflare Pages project `zero-lite` (connect the GitHub
+  repo in the dashboard). Build command: `bun install && bun run --cwd
+  packages/web build`. Output directory: `packages/web/dist`. Intended
+  URL: `https://zero-lite.pages.dev`.
 
 Design and plugin docs:
 
@@ -49,8 +55,8 @@ Design and plugin docs:
 - [M5 design](docs/superpowers/specs/2026-08-07-m5-zero-agents-design.md)
 - [Plugins](docs/plugins.md)
 
-See the roadmap in the design spec for what follows (Zero Agents, Zero Lite,
-Claude plugin, Zero IDE).
+See the design spec for the full roadmap (Nano bridge, Claude plugin, Zero IDE,
+and beyond).
 
 ## Architecture
 
@@ -97,6 +103,14 @@ Command surface:
 - `zero serve [path] [--gateway-port <port>]` - start the web daemon
   (editor/terminal/chat over HTTP/WS)
 - `zero --version` - print the installed version
+
+## Zero Lite
+
+Open the Pages URL (or `bun run --cwd packages/web build && bunx vite preview --cwd packages/web`)
+in Chrome or Edge. Click Open folder and pick a project. Gemini Nano
+powers completions and chat. There is no terminal and no language server.
+
+`zero serve` is unchanged and does not offer Lite.
 
 ## Development
 
