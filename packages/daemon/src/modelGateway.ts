@@ -43,7 +43,7 @@ export function startModelGateway(opts: ModelGatewayOpts): { port: number; apiKe
         try {
           const content =
             prompt +
-            " Reply with only the code continuation, no explanation, no markdown code fences, and keep it under a few lines.";
+            " Reply with only the code continuation, no explanation, no markdown code fences, no usage examples, and keep it under a few lines.";
           const messages = [{ role: "user" as const, content, createdAt: Date.now() }];
           for await (const delta of provider.chat(messages, [], controller.signal)) {
             if (delta.text) text += delta.text;

@@ -98,3 +98,26 @@ test("complete() strips a fenced response with no language tag", async () => {
   for await (const chunk of provider.complete("const x = ", new AbortController().signal)) chunks.push(chunk);
   expect(chunks).toEqual(["const y = 2;"]);
 });
+
+test("complete() drops a fenced example-usage block appended after real code", async () => {
+  // Reproduces a real response: unfenced completion followed by a fenced
+  // "here's how you'd call it" block - the fence must not leak literal
+  // backticks into the editor as ghost text.
+  const text = [
+    "function add(a, b) {",
+    "  return a + b;",
+    "}",
+    "",
+    "```javascript",
+    "let result = add(5, 7);",
+    "console.log(result); // 12",
+    "```",
+  ].join("\n");
+  const provider = new GatewayCompletionProvider({
+    baseUrl: "http://127.0.0.1:4821", apiKey: "k",
+    fetchImpl: (async () => new Response(JSON.stringify({ text }), { status: 200 })) as unknown as typeof fetch,
+  });
+  const chunks: string[] = [];
+  for await (const chunk of provider.complete("", new AbortController().signal)) chunks.push(chunk);
+  expect(chunks).toEqual(["function add(a, b) {\n  return a + b;\n}\n"]);
+});

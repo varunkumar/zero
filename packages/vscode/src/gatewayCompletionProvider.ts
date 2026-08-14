@@ -69,13 +69,25 @@ export class GatewayCompletionProvider implements ModelProvider {
 // closing fence.
 export function stripCodeFence(text: string): string {
   const trimmed = text.trim();
-  if (!trimmed.startsWith("```")) return text;
+  if (trimmed.startsWith("```")) {
+    const firstNewline = trimmed.indexOf("\n");
+    if (firstNewline === -1) return text;
 
-  const firstNewline = trimmed.indexOf("\n");
-  if (firstNewline === -1) return text;
+    const closingIndex = trimmed.lastIndexOf("```");
+    if (closingIndex <= firstNewline) return text; // no matching closing fence
 
-  const closingIndex = trimmed.lastIndexOf("```");
-  if (closingIndex <= firstNewline) return text; // no matching closing fence
+    return trimmed.slice(firstNewline + 1, closingIndex).replace(/\n$/, "");
+  }
 
-  return trimmed.slice(firstNewline + 1, closingIndex).replace(/\n$/, "");
+  // The model sometimes answers with real code followed by a fenced
+  // "example usage" block (see gatewayCompletionProvider.test.ts). A fence
+  // starting on its own line after real content is never part of the
+  // completion itself, so drop it and everything after rather than
+  // inlining literal backtick markers into the editor.
+  const appendedFence = trimmed.indexOf("\n```");
+  if (appendedFence !== -1) {
+    return trimmed.slice(0, appendedFence);
+  }
+
+  return text;
 }
