@@ -12,13 +12,15 @@ import { PluginHost } from "./plugins/host";
 import { createGraphify } from "./plugins/graphify";
 import { SessionStore } from "./sessions";
 import type { ChatMessage } from "@zero/protocol";
-import { AgentRuntime, ProviderGateway, OpenAICompatProvider } from "@zero/core";
+import { AgentRuntime, ProviderGateway, OpenAICompatProvider, type ChatDelta } from "@zero/core";
 import { createChatTools } from "./chatTools";
 import { createAgentRuntimeClient } from "./agentClient";
 import { createRuntimePool } from "./agentRuntimePool";
 import { GitCheckpoint } from "./gitCheckpoint";
 import { execCommand } from "./execCommand";
 import { getGitStatus } from "./gitInfo";
+import { NanoHostRegistry } from "./nanoHost";
+import { NanoBridgeProvider } from "./nanoBridgeProvider";
 
 export async function startZero(opts: DaemonOptions) {
   const daemon = createDaemon(opts);
@@ -26,6 +28,38 @@ export async function startZero(opts: DaemonOptions) {
   const sessions = new SessionStore(ws.root);
   const checkpoint = new GitCheckpoint(opts.root);
   const agentClient = createAgentRuntimeClient(sessions);
+
+  // Wrapped rather than passing daemon.requestSocket directly: that
+  // function's `ws` parameter is typed as the concrete
+  // Bun.ServerWebSocket<unknown>, which under strictFunctionTypes is not
+  // assignable to NanoHostRegistry's intentionally opaque `unknown` ws
+  // parameter (contravariant parameter checking). The wrapper's own
+  // signature is declared exactly as NanoHostRegistry expects, so the cast
+  // lives here in one place instead of leaking into nanoHost.ts or its tests.
+  const nanoHost = new NanoHostRegistry((ws, method, params) =>
+    daemon.requestSocket(ws as Bun.ServerWebSocket<unknown>, method, params));
+  daemon.onSocketClose((ws) => nanoHost.unregister(ws));
+
+  // ctx is supplied for every socket-dispatched request (server.ts always
+  // passes { ws }), so a missing one is a programming error, not a case to
+  // paper over with a silent success.
+  daemon.rpc.register("nano/register", z.object({}).optional().transform(() => ({})),
+    async (_p, ctx) => { nanoHost.register(ctx!.ws); return {}; });
+  daemon.rpc.register("nano/unregister", z.object({}).optional().transform(() => ({})),
+    async (_p, ctx) => { nanoHost.unregister(ctx!.ws); return {}; });
+  // Validated like every other method here; a malformed notification is
+  // dropped rather than thrown, since there is no id to answer an error on.
+  const chatDeltaParams = z.object({
+    requestId: z.string(),
+    delta: z.object({
+      text: z.string().optional(),
+      toolCalls: z.array(z.object({ id: z.string(), name: z.string(), args: z.unknown() })).optional(),
+    }),
+  });
+  daemon.rpc.registerNotification("nano/chatDelta", (params) => {
+    const parsed = chatDeltaParams.safeParse(params);
+    if (parsed.success) nanoHost.handleChatDelta(parsed.data as { requestId: string; delta: ChatDelta });
+  });
 
   async function buildProviders() {
     const baseUrl = (await ws.readSetting("zero.ollamaUrl")) as string | undefined ?? "http://127.0.0.1:11434/v1";
@@ -251,7 +285,10 @@ export async function startZero(opts: DaemonOptions) {
   let stopGateway: (() => void) | undefined;
   if (opts.gatewayPort !== undefined) {
     const providers = await buildProviders();
-    const gw = startModelGateway({ port: opts.gatewayPort, gateway: new ProviderGateway(providers) });
+    const gw = startModelGateway({
+      port: opts.gatewayPort,
+      gateway: new ProviderGateway([new NanoBridgeProvider(nanoHost), ...providers]),
+    });
     gatewayInfo = { port: gw.port, apiKey: gw.apiKey };
     stopGateway = gw.stop;
     await mkdir(join(opts.root, ".zero"), { recursive: true })
@@ -264,6 +301,7 @@ export async function startZero(opts: DaemonOptions) {
     ...daemon,
     pluginsReady,
     gatewayInfo,
+    nanoHost,
     stop: () => {
       unwatch();
       pty.closeAll();

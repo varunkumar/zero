@@ -13,6 +13,13 @@ export function startModelGateway(opts: ModelGatewayOpts): { port: number; apiKe
     port: opts.port ?? 0,
     async fetch(req) {
       const url = new URL(req.url);
+      // Deliberately unauthenticated (unlike /v1/messages): a loopback-bound
+      // probe for local health checks and scripts, exposing only a provider
+      // id string and an attach flag, never model input or output.
+      if (url.pathname === "/health" && req.method === "GET") {
+        const provider = await opts.gateway.pick();
+        return Response.json({ nanoHostConnected: provider?.id === "nano-bridge", provider: provider?.id ?? null });
+      }
       if (url.pathname !== "/v1/messages" || req.method !== "POST") {
         return new Response("not found", { status: 404 });
       }

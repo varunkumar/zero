@@ -506,3 +506,38 @@ test("git/status returns null outside a git repo, and real data inside one", asy
 
   ws2.close(); d2.stop();
 });
+
+test("nano/register attaches this socket as the nano host; nano/unregister detaches it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  expect(d.nanoHost.available()).toBe(false);
+  await client.request("nano/register");
+  expect(d.nanoHost.available()).toBe(true);
+  await client.request("nano/unregister");
+  expect(d.nanoHost.available()).toBe(false);
+
+  ws.close(); d.stop();
+});
+
+test("nano host registration clears automatically when the socket disconnects", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+  await client.request("nano/register");
+  expect(d.nanoHost.available()).toBe(true);
+
+  ws.close();
+  await new Promise((r) => setTimeout(r, 50));
+  expect(d.nanoHost.available()).toBe(false);
+  d.stop();
+});

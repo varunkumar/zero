@@ -57,3 +57,157 @@ test("chat() renders messages into a transcript and streams the session's respon
 test("supportsTools() is false", () => {
   expect(new ChromeNanoProvider(undefined).supportsTools()).toBe(false);
 });
+
+test("chat() only sends the new turn on a second call, reusing the session", async () => {
+  let createCalls = 0;
+  const prompts: string[] = [];
+  const api = {
+    availability: async () => "available" as const,
+    create: async () => {
+      createCalls++;
+      return {
+        inputQuota: 6144,
+        async *promptStreaming(input: string) { prompts.push(input); yield "ok"; },
+        destroy() {},
+      };
+    },
+  };
+  const provider = new ChromeNanoProvider(api);
+  const base = [
+    { role: "system" as const, content: "Be helpful.", createdAt: 0 },
+    { role: "user" as const, content: "hello", createdAt: 1 },
+  ];
+  for await (const _ of provider.chat(base, [], new AbortController().signal)) { /* drain */ }
+
+  const grown = [
+    ...base,
+    { role: "assistant" as const, content: "hi", createdAt: 2 },
+    { role: "user" as const, content: "more", createdAt: 3 },
+  ];
+  for await (const _ of provider.chat(grown, [], new AbortController().signal)) { /* drain */ }
+
+  expect(createCalls).toBe(1);
+  expect(prompts).toHaveLength(2);
+  expect(prompts[1]).not.toContain("Be helpful.");
+  expect(prompts[1]).toContain("user: more");
+});
+
+test("chat() recreates the session when the conversation resets (shorter history)", async () => {
+  let createCalls = 0;
+  const api = {
+    availability: async () => "available" as const,
+    create: async () => {
+      createCalls++;
+      return { inputQuota: 6144, async *promptStreaming() { yield "ok"; }, destroy() {} };
+    },
+  };
+  const provider = new ChromeNanoProvider(api);
+  const long = [
+    { role: "system" as const, content: "s", createdAt: 0 },
+    { role: "user" as const, content: "a", createdAt: 1 },
+    { role: "assistant" as const, content: "b", createdAt: 2 },
+  ];
+  for await (const _ of provider.chat(long, [], new AbortController().signal)) { /* drain */ }
+  const shorter = [{ role: "user" as const, content: "new convo", createdAt: 10 }];
+  for await (const _ of provider.chat(shorter, [], new AbortController().signal)) { /* drain */ }
+  expect(createCalls).toBe(2);
+});
+
+test("chat() recreates the session when an equal-length history is a different conversation", async () => {
+  let createCalls = 0;
+  const prompts: string[] = [];
+  const api = {
+    availability: async () => "available" as const,
+    create: async () => {
+      createCalls++;
+      return { inputQuota: 6144, async *promptStreaming(input: string) { prompts.push(input); yield "ok"; }, destroy() {} };
+    },
+  };
+  const provider = new ChromeNanoProvider(api);
+  const convoA = [
+    { role: "user" as const, content: "a1", createdAt: 0 },
+    { role: "assistant" as const, content: "a2", createdAt: 1 },
+  ];
+  for await (const _ of provider.chat(convoA, [], new AbortController().signal)) { /* drain */ }
+
+  // Same length, entirely different content: the live session holds convo A.
+  const convoB = [
+    { role: "user" as const, content: "b1", createdAt: 0 },
+    { role: "assistant" as const, content: "b2", createdAt: 1 },
+    { role: "user" as const, content: "b3", createdAt: 2 },
+  ];
+  for await (const _ of provider.chat(convoB, [], new AbortController().signal)) { /* drain */ }
+
+  expect(createCalls).toBe(2);
+  expect(prompts[1]).toContain("user: b1");
+  expect(prompts[1]).toContain("user: b3");
+});
+
+test("chat() does not mark a turn as sent when the stream throws mid-flight", async () => {
+  const prompts: string[] = [];
+  let fail = true;
+  const api = {
+    availability: async () => "available" as const,
+    create: async () => ({
+      inputQuota: 6144,
+      async *promptStreaming(input: string) {
+        prompts.push(input);
+        yield "partial";
+        if (fail) throw new Error("nano died");
+      },
+      destroy() {},
+    }),
+  };
+  const provider = new ChromeNanoProvider(api);
+  const messages = [{ role: "user" as const, content: "only turn", createdAt: 0 }];
+  await expect((async () => {
+    for await (const _ of provider.chat(messages, [], new AbortController().signal)) { /* drain */ }
+  })()).rejects.toThrow("nano died");
+
+  fail = false;
+  for await (const _ of provider.chat(messages, [], new AbortController().signal)) { /* drain */ }
+  expect(prompts).toHaveLength(2);
+  expect(prompts[1]).toContain("user: only turn");
+});
+
+test("chat() with tools requests constrained decoding and parses a tool_call", async () => {
+  let capturedConstraint: unknown;
+  const api = {
+    availability: async () => "available" as const,
+    create: async () => ({
+      inputQuota: 6144,
+      async *promptStreaming(_input: string, opts?: { responseConstraint?: object }) {
+        capturedConstraint = opts?.responseConstraint;
+        yield JSON.stringify({ kind: "tool_call", tool: "fs_read", input: { path: "a.ts" } });
+      },
+      destroy() {},
+    }),
+  };
+  const provider = new ChromeNanoProvider(api);
+  const tools = [{ name: "fs_read", description: "read", schema: { type: "object" } }];
+  const deltas = [];
+  for await (const d of provider.chat([{ role: "user", content: "read a.ts", createdAt: 0 }], tools, new AbortController().signal)) {
+    deltas.push(d);
+  }
+  expect(deltas).toHaveLength(1);
+  expect(deltas[0]!.toolCalls![0]!.name).toBe("fs_read");
+  expect(capturedConstraint).toBeTruthy();
+});
+
+test("chat() with tools falls back to plain text when the model ignores the constraint", async () => {
+  const api = {
+    availability: async () => "available" as const,
+    create: async () => ({
+      inputQuota: 6144,
+      async *promptStreaming() { yield "I refuse to use tools."; },
+      destroy() {},
+    }),
+  };
+  const provider = new ChromeNanoProvider(api);
+  const tools = [{ name: "fs_read", description: "read", schema: { type: "object" } }];
+  const deltas = [];
+  for await (const d of provider.chat([{ role: "user", content: "hi", createdAt: 0 }], tools, new AbortController().signal)) {
+    deltas.push(d);
+  }
+  expect(deltas).toEqual([{ text: "I refuse to use tools." }]);
+});

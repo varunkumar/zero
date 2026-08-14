@@ -62,3 +62,27 @@ test("returns 503 when no provider is available", async () => {
   expect(res.status).toBe(503);
   gw.stop();
 });
+
+test("GET /health reports the picked provider", async () => {
+  const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([stubProvider("hi")]) });
+  const res = await fetch(`http://127.0.0.1:${gw.port}/health`);
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ nanoHostConnected: false, provider: "stub" });
+  gw.stop();
+});
+
+test("GET /health reports no provider when none is available", async () => {
+  const unavailable = { ...stubProvider("x"), available: async () => false };
+  const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([unavailable]) });
+  const res = await fetch(`http://127.0.0.1:${gw.port}/health`);
+  expect(await res.json()).toEqual({ nanoHostConnected: false, provider: null });
+  gw.stop();
+});
+
+test("GET /health reports nanoHostConnected when the nano bridge is picked", async () => {
+  const nano = { ...stubProvider("x"), id: "nano-bridge" };
+  const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([nano]) });
+  const res = await fetch(`http://127.0.0.1:${gw.port}/health`);
+  expect(await res.json()).toEqual({ nanoHostConnected: true, provider: "nano-bridge" });
+  gw.stop();
+});
