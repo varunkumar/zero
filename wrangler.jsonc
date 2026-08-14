@@ -1,0 +1,13 @@
+{
+  // Cloudflare Workers Builds runs "npx wrangler versions upload" from the
+  // repo root for any branch other than the configured production branch
+  // (main), ignoring the deploy command / root directory used for
+  // production deploys. Without a config file here, that upload fails with
+  // "Missing entry-point to Worker script or to assets directory" - see
+  // packages/web/wrangler.toml for the production config this mirrors.
+  "name": "zero-lite",
+  "compatibility_date": "2026-08-12",
+  "assets": {
+    "directory": "./packages/web/dist"
+  }
+}
