@@ -64,3 +64,40 @@ test("returns no items when the engine has nothing to offer", async () => {
 
   expect(result.items).toEqual([]);
 });
+
+test("discards the result and aborts the signal when cancelled during engine.complete()", async () => {
+  let capturedSignal: AbortSignal | undefined;
+  let started!: () => void;
+  const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+
+  const model: ModelProvider = {
+    id: "stub",
+    available: async () => true,
+    capabilities: (): ModelCapabilities => ({ id: "stub", contextWindowTokens: 1000, supportsFim: false }),
+    async *complete(_prompt, signal) {
+      capturedSignal = signal;
+      started();
+      await gate;
+      yield "ok;";
+    },
+  };
+
+  const engine = new CompletionEngine({ providers: [model], context: [new BufferContext()] });
+  const token = fakeToken();
+  const provider = createInlineCompletionProvider(engine, { sleep: async () => {} });
+
+  const resultPromise = provider.provideInlineCompletionItems(
+    fakeDocument("const x = "), { line: 0, character: 10 }, {}, token
+  );
+
+  await startedPromise;
+  token.cancel();
+  release();
+
+  const result = await resultPromise;
+
+  expect(result.items).toEqual([]);
+  expect(capturedSignal?.aborted).toBe(true);
+});
