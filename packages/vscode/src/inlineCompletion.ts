@@ -17,6 +17,11 @@ export interface InlineCompletionListLike { items: InlineCompletionItemLike[] }
 
 export interface InlineCompletionDeps {
   sleep?: (ms: number) => Promise<void>;
+  /** Invoked right before the engine's completion request is issued (after
+   * the debounce and any cancellation), and again once it settles - lets
+   * callers show/clear a "fetching" indicator scoped to the actual request. */
+  onRequestStart?: () => void;
+  onRequestEnd?: () => void;
 }
 
 export function createInlineCompletionProvider(engine: CompletionEngine, deps: InlineCompletionDeps = {}) {
@@ -37,10 +42,16 @@ export function createInlineCompletionProvider(engine: CompletionEngine, deps: I
       const controller = new AbortController();
       token.onCancellationRequested(() => controller.abort());
 
-      const result = await engine.complete(
-        { path: document.uri.fsPath, prefix: text.slice(0, offset), suffix: text.slice(offset) },
-        controller.signal
-      );
+      deps.onRequestStart?.();
+      let result: string | null;
+      try {
+        result = await engine.complete(
+          { path: document.uri.fsPath, prefix: text.slice(0, offset), suffix: text.slice(offset) },
+          controller.signal
+        );
+      } finally {
+        deps.onRequestEnd?.();
+      }
 
       if (!result || token.isCancellationRequested) return { items: [] };
       return { items: [{ insertText: result }] };

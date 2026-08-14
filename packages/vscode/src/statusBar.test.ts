@@ -18,6 +18,12 @@ test("renders active status with the model id", () => {
   expect(tooltip).toContain("zero-gateway");
 });
 
+test("renders loading status with a spinner icon", () => {
+  const { text, tooltip } = renderStatus({ kind: "loading" });
+  expect(text).toContain("sync~spin");
+  expect(tooltip).toContain("fetching completion");
+});
+
 test("updateStatusBar writes text/tooltip and shows the item", () => {
   const item: StatusBarItemLike = { text: "", tooltip: "", show() { this.shown = true; }, shown: false } as any;
   updateStatusBar(item, { kind: "active", model: "zero-gateway" });

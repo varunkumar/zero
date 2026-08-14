@@ -55,11 +55,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.textDocuments.map((d) => ({ path: d.uri.fsPath, getText: () => d.getText() }))
   );
   const engine = new CompletionEngine({ providers: [gatewayProvider], context: [bufferContext] });
-  engine.onStatusChange((s) => {
-    setStatus(s.activeModel ? { kind: "active", model: s.activeModel } : { kind: "no-model", reason: s.reason });
-  });
 
-  const provider = createInlineCompletionProvider(engine);
+  // The status bar reflects request lifecycle rather than
+  // engine.onStatusChange directly: the engine marks a model "active" as
+  // soon as it picks a provider, which happens before the network call -
+  // wiring that straight to the status bar would flash "active" over the
+  // spinner for the whole duration of the actual request. Show the spinner
+  // for the request's full lifetime instead, then read the engine's
+  // settled status once it ends.
+  const provider = createInlineCompletionProvider(engine, {
+    onRequestStart: () => setStatus({ kind: "loading" }),
+    onRequestEnd: () => {
+      const s = engine.status();
+      setStatus(s.activeModel ? { kind: "active", model: s.activeModel } : { kind: "no-model", reason: s.reason });
+    },
+  });
   context.subscriptions.push(
     vscode.languages.registerInlineCompletionItemProvider({ scheme: "file", pattern: "**" }, provider)
   );

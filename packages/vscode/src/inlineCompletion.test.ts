@@ -40,6 +40,55 @@ test("returns a completion after the debounce window", async () => {
   expect(result.items).toEqual([{ insertText: "ok;" }]);
 });
 
+test("calls onRequestStart/onRequestEnd around the engine call, not the debounce wait", async () => {
+  const events: string[] = [];
+  const engine = new CompletionEngine({ providers: [stubModel("ok;")], context: [new BufferContext()] });
+  const provider = createInlineCompletionProvider(engine, {
+    sleep: async () => { events.push("after-debounce"); },
+    onRequestStart: () => events.push("start"),
+    onRequestEnd: () => events.push("end"),
+  });
+
+  await provider.provideInlineCompletionItems(
+    fakeDocument("const x = "), { line: 0, character: 10 }, {}, fakeToken()
+  );
+
+  expect(events).toEqual(["after-debounce", "start", "end"]);
+});
+
+test("does not call onRequestStart/onRequestEnd when cancelled during the debounce wait", async () => {
+  const events: string[] = [];
+  const engine = new CompletionEngine({ providers: [stubModel("ok;")], context: [new BufferContext()] });
+  const token = fakeToken();
+  const provider = createInlineCompletionProvider(engine, {
+    sleep: async () => { token.cancel(); },
+    onRequestStart: () => events.push("start"),
+    onRequestEnd: () => events.push("end"),
+  });
+
+  await provider.provideInlineCompletionItems(
+    fakeDocument("const x = "), { line: 0, character: 10 }, {}, token
+  );
+
+  expect(events).toEqual([]);
+});
+
+test("calls onRequestEnd even when the engine call throws or is cancelled mid-flight", async () => {
+  const events: string[] = [];
+  const engine = new CompletionEngine({ providers: [stubModel(null)], context: [new BufferContext()] });
+  const provider = createInlineCompletionProvider(engine, {
+    sleep: async () => {},
+    onRequestStart: () => events.push("start"),
+    onRequestEnd: () => events.push("end"),
+  });
+
+  await provider.provideInlineCompletionItems(
+    fakeDocument("const x = "), { line: 0, character: 10 }, {}, fakeToken()
+  );
+
+  expect(events).toEqual(["start", "end"]);
+});
+
 test("returns no items when cancelled during the debounce wait", async () => {
   const engine = new CompletionEngine({ providers: [stubModel("ok;")], context: [new BufferContext()] });
   const token = fakeToken();

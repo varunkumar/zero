@@ -1,7 +1,8 @@
 export type ZeroStatus =
   | { kind: "daemon-not-found" }
   | { kind: "no-model"; reason: string | null }
-  | { kind: "active"; model: string };
+  | { kind: "active"; model: string }
+  | { kind: "loading" };
 
 export interface StatusBarItemLike {
   text: string;
@@ -25,6 +26,11 @@ export function renderStatus(status: ZeroStatus): { text: string; tooltip: strin
       return {
         text: `$(zap) Zero: ${status.model}`,
         tooltip: `Zero completions active, model: ${status.model}`,
+      };
+    case "loading":
+      return {
+        text: "$(sync~spin) Zero",
+        tooltip: "Zero: fetching completion...",
       };
   }
 }
