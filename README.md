@@ -58,6 +58,14 @@ M0–M5 are implemented on `main`:
   `ANTHROPIC_BASE_URL` at the printed gateway and run `claude` for a fully
   offline Claude Code. Falls back to the Ollama-compatible provider when no
   tab is attached.
+- **M7.5a** Zero VS Code Plugin (inline completions): a new `packages/vscode`
+  extension (`@zero/vscode`) provides offline ghost-text completions inside
+  VS Code, reusing `@zero/core`'s `CompletionEngine` against a new
+  `POST /v1/complete` endpoint on the model gateway. Requires the `zero` CLI
+  on `PATH`; the extension finds or starts a daemon for the open workspace
+  folder (`zero.gatewayPort` setting, default `4821`). Copilot custom-model
+  auto-configuration and VS Code Language Model API registration are
+  deferred to a follow-up milestone.
 
 Design and plugin docs:
 
@@ -65,6 +73,7 @@ Design and plugin docs:
 - [M4 design](docs/superpowers/specs/2026-08-06-m4-chat-agentruntime-design.md)
 - [M5 design](docs/superpowers/specs/2026-08-07-m5-zero-agents-design.md)
 - [M7 design](docs/superpowers/specs/2026-08-13-m7-zero-claude-plugin-design.md)
+- [M7.5a design](docs/superpowers/specs/2026-08-14-m7.5-vscode-completions-design.md)
 - [Plugins](docs/plugins.md)
 
 See the design spec for the full roadmap (Nano bridge, Claude plugin, Zero IDE,

@@ -1,5 +1,5 @@
 {
-  "name": "@zero/vscode",
+  "name": "zero-vscode",
   "displayName": "Zero",
   "description": "Offline inline completions powered by the Zero daemon's model gateway (Gemini Nano or a local Ollama-compatible model).",
   "version": "0.7.1",
@@ -7,6 +7,11 @@
   "private": true,
   "publisher": "zero-dev",
   "engines": { "vscode": "^1.90.0" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/varunkumar/zero.git",
+    "directory": "packages/vscode"
+  },
   "categories": ["Programming Languages"],
   "activationEvents": ["onStartupFinished"],
   "main": "./dist/extension.js",
