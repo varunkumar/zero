@@ -4,6 +4,7 @@
     { "path": "packages/protocol" },
     { "path": "packages/core" },
     { "path": "packages/daemon" },
-    { "path": "packages/web" }
+    { "path": "packages/web" },
+    { "path": "packages/vscode" }
   ]
 }

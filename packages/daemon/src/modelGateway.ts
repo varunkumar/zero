@@ -20,6 +20,40 @@ export function startModelGateway(opts: ModelGatewayOpts): { port: number; apiKe
         const provider = await opts.gateway.pick();
         return Response.json({ nanoHostConnected: provider?.id === "nano-bridge", provider: provider?.id ?? null });
       }
+      if (url.pathname === "/v1/complete" && req.method === "POST") {
+        if (req.headers.get("x-api-key") !== apiKey) {
+          return new Response("unauthorized", { status: 401 });
+        }
+        const provider = await opts.gateway.pick();
+        if (!provider) return new Response("no model available", { status: 503 });
+
+        let prompt: unknown;
+        try {
+          ({ prompt } = await req.json());
+        } catch (e) {
+          return new Response(`invalid request body: ${e instanceof Error ? e.message : String(e)}`, { status: 400 });
+        }
+        if (typeof prompt !== "string") {
+          return new Response("invalid request body: prompt must be a string", { status: 400 });
+        }
+
+        const controller = new AbortController();
+        req.signal.addEventListener("abort", () => controller.abort());
+        let text = "";
+        try {
+          const content =
+            prompt +
+            " Reply with only the code continuation, no explanation, no markdown code fences, no usage examples, and keep it under a few lines.";
+          const messages = [{ role: "user" as const, content, createdAt: Date.now() }];
+          for await (const delta of provider.chat(messages, [], controller.signal)) {
+            if (delta.text) text += delta.text;
+          }
+        } catch (e) {
+          return new Response(`completion failed: ${e instanceof Error ? e.message : String(e)}`, { status: 500 });
+        }
+        return Response.json({ text });
+      }
+
       if (url.pathname !== "/v1/messages" || req.method !== "POST") {
         return new Response("not found", { status: 404 });
       }

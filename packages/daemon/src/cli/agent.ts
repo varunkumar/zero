@@ -7,16 +7,26 @@ export type AgentCliOpts = CliOpts;
 // Flags that take a following value - that value must not be mistaken for a
 // positional argument (e.g. `zero --gateway-port 4000` must not treat "4000"
 // as the workspace path).
-const FLAGS_WITH_VALUE = new Set(["-p", "--session", "--gateway-port"]);
+const FLAGS_WITH_VALUE = new Set(["-p", "--session", "--gateway-port", "--port"]);
 
-/** Parses `--gateway-port <value>` out of argv. Returns `undefined` if the
+/** Parses a `<flag> <value>` pair out of argv. Returns `undefined` if the
  * flag is absent, `"invalid"` if present but its value isn't a number (e.g.
  * missing entirely, so `Number(undefined)` is NaN), or the parsed port. */
-export function parseGatewayPort(argv: string[]): number | "invalid" | undefined {
-  const idx = argv.indexOf("--gateway-port");
+function parsePortFlag(argv: string[], flag: string): number | "invalid" | undefined {
+  const idx = argv.indexOf(flag);
   if (idx < 0) return undefined;
   const n = Number(argv[idx + 1]);
   return Number.isNaN(n) ? "invalid" : n;
+}
+
+/** Parses `--gateway-port <value>` out of argv. See {@link parsePortFlag}. */
+export function parseGatewayPort(argv: string[]): number | "invalid" | undefined {
+  return parsePortFlag(argv, "--gateway-port");
+}
+
+/** Parses `--port <value>` out of argv. See {@link parsePortFlag}. */
+export function parsePort(argv: string[]): number | "invalid" | undefined {
+  return parsePortFlag(argv, "--port");
 }
 
 export function positionalArgs(argv: string[]): string[] {

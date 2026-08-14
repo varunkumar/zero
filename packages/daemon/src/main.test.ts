@@ -248,6 +248,25 @@ test("gateway-key is written to a fresh workspace with no prior .zero/ directory
   d.stop();
 });
 
+test("zero.json discovery file is written with mainPort, gatewayPort, and gatewayApiKey", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root, gatewayPort: 0 });
+
+  const content = await readFile(join(root, ".zero", "zero.json"), "utf8");
+  expect(JSON.parse(content)).toEqual({
+    mainPort: d.port,
+    gatewayPort: d.gatewayInfo!.port,
+    gatewayApiKey: d.gatewayInfo!.apiKey,
+  });
+
+  if (process.platform !== "win32") {
+    const st = await stat(join(root, ".zero", "zero.json"));
+    expect(st.mode & 0o777).toBe(0o600);
+  }
+
+  d.stop();
+});
+
 test("chat/status doesn't construct a runtime for a never-turned session, and reflects the pool after chat/delete evicts it", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   const d = await startZero({ root });

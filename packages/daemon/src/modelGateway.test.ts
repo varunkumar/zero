@@ -63,6 +63,54 @@ test("returns 503 when no provider is available", async () => {
   gw.stop();
 });
 
+test("rejects /v1/complete requests without the api key", async () => {
+  const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([stubProvider("hi")]) });
+  const res = await fetch(`http://127.0.0.1:${gw.port}/v1/complete`, {
+    method: "POST", body: JSON.stringify({ prompt: "const x = " }),
+  });
+  expect(res.status).toBe(401);
+  gw.stop();
+});
+
+test("returns completion text for a valid /v1/complete request", async () => {
+  const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([stubProvider("1;")]) });
+  const res = await fetch(`http://127.0.0.1:${gw.port}/v1/complete`, {
+    method: "POST",
+    headers: { "x-api-key": gw.apiKey, "content-type": "application/json" },
+    body: JSON.stringify({ prompt: "const x = " }),
+  });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ text: "1;" });
+  gw.stop();
+});
+
+test("returns 400 for an invalid /v1/complete request body", async () => {
+  const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([stubProvider("hi")]) });
+  const resBadJson = await fetch(`http://127.0.0.1:${gw.port}/v1/complete`, {
+    method: "POST", headers: { "x-api-key": gw.apiKey }, body: "not json",
+  });
+  expect(resBadJson.status).toBe(400);
+
+  const resMissingPrompt = await fetch(`http://127.0.0.1:${gw.port}/v1/complete`, {
+    method: "POST",
+    headers: { "x-api-key": gw.apiKey, "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  expect(resMissingPrompt.status).toBe(400);
+  gw.stop();
+});
+
+test("returns 503 from /v1/complete when no provider is available", async () => {
+  const unavailable = { ...stubProvider("x"), available: async () => false };
+  const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([unavailable]) });
+  const res = await fetch(`http://127.0.0.1:${gw.port}/v1/complete`, {
+    method: "POST", headers: { "x-api-key": gw.apiKey, "content-type": "application/json" },
+    body: JSON.stringify({ prompt: "x" }),
+  });
+  expect(res.status).toBe(503);
+  gw.stop();
+});
+
 test("GET /health reports the picked provider", async () => {
   const gw = startModelGateway({ port: 0, gateway: new ProviderGateway([stubProvider("hi")]) });
   const res = await fetch(`http://127.0.0.1:${gw.port}/health`);

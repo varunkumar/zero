@@ -27,48 +27,41 @@ Full design and roadmap:
 
 ## Status
 
-M0–M5 are implemented on `main`:
+M0 through M7.5a are implemented on `main`:
 
 - **M0** skeleton (daemon-served editor with save)
 - **M1** offline copilot (Chrome Nano + Ollama-compatible fallback)
 - **M1.5** editor shell (workbench, tabs, palette, search, themes)
 - **M2** terminal (PTY) and LSP (diagnostics, hover, go-to-definition)
-- **M3** Graphify and plugin host (in-process built-ins, tree-sitter index,
-  `graph/*` RPC, `.zero/graph.json` cache, `GraphContext` for completions)
-- **M4** chat / AgentRuntime (turn loop, layered system prompt, session
-  persistence, token ledger, pruning/compaction, read-only tool calling,
-  chat panel) — completes v1 scope
-- **M5** Zero Agents (daemon-side AgentRuntime, approval-gated write tools
-  `fs_write`/`fs_edit`/`run_command`, git checkpointing to a shadow branch,
-  headless `zero -p "task"` CLI, Anthropic Messages API-compatible model
-  gateway) — Nano is not yet wired into daemon-side runs; that lands with
-  the M7 Nano bridge
-- **M6** Zero Lite (same workbench, no daemon): open a local folder in
-  Chrome or Edge, Nano completions and chat, no terminal/LSP/graph/git.
-  Static hosting: Cloudflare Pages project `zero-lite` (connect the GitHub
-  repo in the dashboard). Build command: `bun install && bun run --cwd
-  packages/web build`. Output directory: `packages/web/dist`. Live at
-  [zero.varunkumar.dev](https://zero.varunkumar.dev).
-- **M7** Zero Claude Plugin (Nano bridge): `zero claude [path]` starts the
-  daemon with its model gateway always on and prints an
-  `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` line. Open the printed URL in
-  Chrome or Edge to attach that tab as the Nano host: reverse-RPC lets the
-  daemon call into it, running `ChromeNanoProvider` in-browser and emulating
-  tool calls via Prompt API constrained JSON decoding. Point
-  `ANTHROPIC_BASE_URL` at the printed gateway and run `claude` for a fully
-  offline Claude Code. Falls back to the Ollama-compatible provider when no
-  tab is attached.
+- **M3** Graphify and plugin host - tree-sitter code graph indexer feeding
+  completion context
+- **M4** chat / AgentRuntime - turn loop, session persistence, read-only
+  tool calling, chat panel (completes v1 scope)
+- **M5** Zero Agents - approval-gated write tools (`fs_write`/`fs_edit`/
+  `run_command`), git checkpointing, headless `zero -p "task"` CLI, model
+  gateway
+- **M6** Zero Lite - same workbench with no daemon; open a local folder in
+  Chrome or Edge for Nano-only completions and chat. Live at
+  [zero.varunkumar.dev](https://zero.varunkumar.dev)
+- **M7** Zero Claude Plugin - `zero claude [path]` bridges Claude Code to
+  Gemini Nano running in an attached browser tab, falling back to Ollama
+- **M7.5a** Zero VS Code Plugin - `packages/vscode` extension providing
+  offline ghost-text completions inside VS Code against the same daemon
 
-Design and plugin docs:
+Each milestone's implementation details live in its design doc, listed
+under [Design and plugin docs](#design-and-plugin-docs). See the
+[full design spec](docs/superpowers/specs/2026-08-04-zero-design.md) for
+the complete roadmap.
 
+### Design and plugin docs
+
+- [Zero design](docs/superpowers/specs/2026-08-04-zero-design.md)
 - [M3 design](docs/superpowers/specs/2026-08-05-m3-graphify-and-plugin-host-design.md)
 - [M4 design](docs/superpowers/specs/2026-08-06-m4-chat-agentruntime-design.md)
 - [M5 design](docs/superpowers/specs/2026-08-07-m5-zero-agents-design.md)
 - [M7 design](docs/superpowers/specs/2026-08-13-m7-zero-claude-plugin-design.md)
+- [M7.5a design](docs/superpowers/specs/2026-08-14-m7.5-vscode-completions-design.md)
 - [Plugins](docs/plugins.md)
-
-See the design spec for the full roadmap (Nano bridge, Claude plugin, Zero IDE,
-and beyond).
 
 ## Architecture
 
@@ -81,6 +74,7 @@ zero/
     protocol/    # @zero/protocol - shared JSON-RPC message and event types
     daemon/      # @zero/daemon   - Node/Bun capability server
     web/         # @zero/web      - browser client
+    vscode/      # zero-vscode    - VS Code inline-completions extension
   docs/
 ```
 
@@ -112,8 +106,13 @@ Command surface:
 - `zero --resume [path]` - interactive TUI, pick a session to resume
 - `zero -p "task" [--yes] [--session <id>] [path]` - run one task
   headlessly (for scripts/CI)
-- `zero serve [path] [--gateway-port <port>]` - start the web daemon
-  (editor/terminal/chat over HTTP/WS)
+- `zero serve [path] [--port <port>] [--gateway-port <port>]` - start the
+  web daemon (editor/terminal/chat over HTTP/WS). Both ports default to a
+  dynamically assigned free port; pass `0` explicitly for the same
+  behavior, or a specific port to pin it. When `--gateway-port` is given,
+  the daemon writes `<path>/.zero/zero.json` with `{mainPort, gatewayPort,
+  gatewayApiKey}` so other tools (like the VS Code extension) can discover
+  it without guessing a port.
 - `zero claude [path] [--gateway-port <port>]` - start the daemon, bridging
   Claude Code to Gemini Nano running in an attached browser tab
 - `zero --version` - print the installed version
@@ -127,8 +126,8 @@ powers completions and chat. There is no terminal and no language server.
 
 `zero serve` is unchanged and does not offer Lite.
 
-The badge at the top tracks the `Workers Builds: zero-lite` check on `main`
-— the Cloudflare Pages build of `packages/web`. Green means the latest
+The badge at the top tracks the `Workers Builds: zero-lite` check on `main`,
+the Cloudflare Pages build of `packages/web`. Green means the latest
 `main` build passed and published `dist/`; red or pending is the current
 build, not a static "deployed" label.
 
@@ -150,6 +149,20 @@ serves as the Nano host at a time: whichever is currently in the
 foreground; closing or backgrounding it hands off to another open Zero tab
 if one exists. Nano is a small model: expect a working offline agent, not
 cloud-Claude parity on tool-choice accuracy.
+
+## Zero VS Code Plugin
+
+Install the `zero` CLI (see [CLI usage](#cli-usage)), then package and
+install the extension:
+
+```
+bun run --cwd packages/vscode package
+code --install-extension packages/vscode/zero-vscode-*.vsix
+```
+
+Open any folder in VS Code; the extension finds or starts a `zero serve`
+daemon scoped to that folder and shows the active model in the status bar.
+See [`packages/vscode/README.md`](packages/vscode/README.md) for details.
 
 ## Development
 

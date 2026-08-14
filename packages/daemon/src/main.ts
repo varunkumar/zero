@@ -291,9 +291,13 @@ export async function startZero(opts: DaemonOptions) {
     });
     gatewayInfo = { port: gw.port, apiKey: gw.apiKey };
     stopGateway = gw.stop;
+    const discovery = JSON.stringify({ mainPort: daemon.port, gatewayPort: gw.port, gatewayApiKey: gw.apiKey });
     await mkdir(join(opts.root, ".zero"), { recursive: true })
-      .then(() => writeFile(join(opts.root, ".zero", "gateway-key"), gw.apiKey, { encoding: "utf8", mode: 0o600 }))
-      .catch((e) => console.warn(`zero: failed to write .zero/gateway-key (${e instanceof Error ? e.message : String(e)})`));
+      .then(() => Promise.all([
+        writeFile(join(opts.root, ".zero", "gateway-key"), gw.apiKey, { encoding: "utf8", mode: 0o600 }),
+        writeFile(join(opts.root, ".zero", "zero.json"), discovery, { encoding: "utf8", mode: 0o600 }),
+      ]))
+      .catch((e) => console.warn(`zero: failed to write .zero/ discovery files (${e instanceof Error ? e.message : String(e)})`));
   }
 
   const stop = daemon.stop;

@@ -3,7 +3,8 @@
 Local-first coding environment: offline copilot-style completions, terminal,
 and chat over one shared engine, with online capabilities layered on later.
 Full vision and architecture: `docs/superpowers/specs/2026-08-04-zero-design.md`.
-Current implementation plan: `docs/superpowers/plans/2026-08-04-m0-m1-skeleton-and-completion.md`.
+Current status and milestone list: `README.md`; each milestone's design doc
+is linked from its "Design and plugin docs" section.
 
 ## Layout
 
@@ -15,6 +16,8 @@ Current implementation plan: `docs/superpowers/plans/2026-08-04-m0-m1-skeleton-a
   LSP, plugin host (Graphify first), session store, static serving.
 - `packages/web` (`@zero/web`) - React + CodeMirror 6 + xterm.js browser
   client.
+- `packages/vscode` (`zero-vscode`) - VS Code extension: offline inline
+  completions against a per-folder `zero serve` daemon.
 
 ## Constraints
 
