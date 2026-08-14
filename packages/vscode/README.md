@@ -9,16 +9,21 @@ Ollama-compatible model as fallback).
 
 - The `zero` CLI installed and on `PATH` (see the main repo's
   [README](https://github.com/varunkumar/zero#cli-usage)).
-- A Zero daemon reachable at `http://127.0.0.1:<zero.gatewayPort>` (default
-  `4821`) - the extension starts one for the current workspace folder if
-  none is found.
 
-## Settings
+## How it finds (or starts) a daemon
 
-- `zero.gatewayPort` (default `4821`): port the extension health-checks and,
-  if needed, spawns `zero serve --gateway-port <port>` on.
+Each workspace folder gets its own daemon on its own dynamically assigned
+ports - nothing is shared or hardcoded. On activation, the extension reads
+`<workspace>/.zero/zero.json`, written by `zero serve` on startup, to find
+the daemon already running for *this* folder. If the file is missing or its
+daemon isn't answering, the extension spawns `zero serve <workspace> --port
+0 --gateway-port 0` (`0` means "pick a free port"), then waits for the
+discovery file to appear. This means opening two different folders never
+attaches one folder's editor to another folder's daemon.
 
 ## Status bar
 
-The Zero status bar item (bottom right) shows the active model, or why
-completions are unavailable (no daemon found, no model available).
+The Zero status bar item (bottom right) reflects the daemon's model gateway
+right after activation - no need to trigger a completion first - and shows
+the active model, or why completions are unavailable (no daemon found, no
+model available).

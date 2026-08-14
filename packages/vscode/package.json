@@ -2,31 +2,40 @@
   "name": "zero-vscode",
   "displayName": "Zero",
   "description": "Offline inline completions powered by the Zero daemon's model gateway (Gemini Nano or a local Ollama-compatible model).",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "type": "module",
   "private": true,
-  "publisher": "zero-dev",
+  "publisher": "varunkumar",
+  "author": {
+    "name": "Varunkumar Nagarajan"
+  },
+  "icon": "icon.png",
   "engines": { "vscode": "^1.90.0" },
   "repository": {
     "type": "git",
     "url": "https://github.com/varunkumar/zero.git",
     "directory": "packages/vscode"
   },
-  "categories": ["Programming Languages"],
+  "bugs": {
+    "url": "https://github.com/varunkumar/zero/issues"
+  },
+  "homepage": "https://github.com/varunkumar/zero#readme",
+  "categories": ["Programming Languages", "Machine Learning"],
+  "keywords": [
+    "completions",
+    "autocomplete",
+    "offline",
+    "local-first",
+    "ollama",
+    "gemini nano",
+    "ai"
+  ],
+  "galleryBanner": {
+    "color": "#0B0B0F",
+    "theme": "dark"
+  },
   "activationEvents": ["onStartupFinished"],
   "main": "./dist/extension.js",
-  "contributes": {
-    "configuration": {
-      "title": "Zero",
-      "properties": {
-        "zero.gatewayPort": {
-          "type": "number",
-          "default": 4821,
-          "description": "Port the Zero model gateway listens on (and the port the extension will spawn `zero serve --gateway-port <port>` on if nothing answers)."
-        }
-      }
-    }
-  },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=esm --external:vscode --outfile=dist/extension.js",
     "package": "bun run build && vsce package --no-dependencies"

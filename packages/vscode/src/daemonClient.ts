@@ -1,8 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
-export const DEFAULT_GATEWAY_PORT = 4821;
-
 export interface DaemonClientDeps {
   fetchImpl?: typeof fetch;
   spawnImpl?: (command: string, args: string[], opts: { cwd: string; detached: boolean; stdio: "ignore" }) => { unref(): void };
@@ -13,6 +11,8 @@ export interface DaemonClientDeps {
 }
 
 export interface DaemonInfo { port: number; apiKey: string }
+
+interface DiscoveryFile { mainPort: number; gatewayPort: number; gatewayApiKey: string }
 
 export class DaemonClient {
   #root: string;
@@ -31,13 +31,18 @@ export class DaemonClient {
     this.#maxAttempts = deps.maxAttempts ?? 20;
   }
 
-  async ensureRunning(gatewayPort = DEFAULT_GATEWAY_PORT): Promise<DaemonInfo | null> {
-    if (await this.#healthy(gatewayPort)) {
-      return this.#readInfo(gatewayPort);
-    }
+  /**
+   * Discovers or starts the daemon for this workspace folder. Identity comes
+   * from `<root>/.zero/zero.json`, not a shared default port - two folders
+   * each get their own daemon on their own (dynamically assigned) ports, so
+   * this never mistakes another folder's daemon for this one.
+   */
+  async ensureRunning(): Promise<DaemonInfo | null> {
+    const existing = await this.#discover();
+    if (existing) return existing;
 
     try {
-      this.#spawnImpl("zero", ["serve", this.#root, "--gateway-port", String(gatewayPort)], {
+      this.#spawnImpl("zero", ["serve", this.#root, "--port", "0", "--gateway-port", "0"], {
         cwd: this.#root, detached: true, stdio: "ignore",
       }).unref();
     } catch {
@@ -46,11 +51,30 @@ export class DaemonClient {
 
     for (let attempt = 0; attempt < this.#maxAttempts; attempt++) {
       await this.#sleep(500);
-      if (await this.#healthy(gatewayPort)) {
-        return this.#readInfo(gatewayPort);
-      }
+      const info = await this.#discover();
+      if (info) return info;
     }
     return null;
+  }
+
+  async #discover(): Promise<DaemonInfo | null> {
+    const discovery = await this.#readDiscoveryFile();
+    if (!discovery) return null;
+    if (!(await this.#healthy(discovery.gatewayPort))) return null;
+    return { port: discovery.gatewayPort, apiKey: discovery.gatewayApiKey };
+  }
+
+  async #readDiscoveryFile(): Promise<DiscoveryFile | null> {
+    try {
+      const raw = await this.#readFile(`${this.#root}/.zero/zero.json`);
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.gatewayPort === "number" && typeof parsed.gatewayApiKey === "string") {
+        return parsed as DiscoveryFile;
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   async #healthy(gatewayPort: number): Promise<boolean> {
@@ -65,21 +89,6 @@ export class DaemonClient {
     } catch {
       return false;
     }
-  }
-
-  async #readInfo(gatewayPort: number): Promise<DaemonInfo | null> {
-    // The gateway-key file is written just after the gateway's HTTP server
-    // starts listening (packages/daemon/src/main.ts), so it can lag a
-    // healthy /health response by a few ms - retry briefly before giving up.
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        const apiKey = (await this.#readFile(`${this.#root}/.zero/gateway-key`)).trim();
-        return { port: gatewayPort, apiKey };
-      } catch {
-        await this.#sleep(100);
-      }
-    }
-    return null;
   }
 }
 
