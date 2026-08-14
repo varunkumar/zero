@@ -8,7 +8,7 @@ Ollama-compatible model as fallback).
 ## Requirements
 
 - The `zero` CLI installed and on `PATH` (see the main repo's
-  [README](../../README.md#cli-usage)).
+  [README](https://github.com/varunkumar/zero#cli-usage)).
 - A Zero daemon reachable at `http://127.0.0.1:<zero.gatewayPort>` (default
   `4821`) - the extension starts one for the current workspace folder if
   none is found.

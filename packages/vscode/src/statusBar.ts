@@ -14,7 +14,7 @@ export function renderStatus(status: ZeroStatus): { text: string; tooltip: strin
     case "daemon-not-found":
       return {
         text: "$(circle-slash) Zero",
-        tooltip: "Zero: daemon not found — install the zero CLI and ensure it's on PATH",
+        tooltip: "Zero: daemon not found (install the zero CLI and ensure it's on PATH)",
       };
     case "no-model":
       return {
@@ -24,7 +24,7 @@ export function renderStatus(status: ZeroStatus): { text: string; tooltip: strin
     case "active":
       return {
         text: `$(zap) Zero: ${status.model}`,
-        tooltip: `Zero completions active — model: ${status.model}`,
+        tooltip: `Zero completions active, model: ${status.model}`,
       };
   }
 }

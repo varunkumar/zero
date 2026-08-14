@@ -10,6 +10,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return; // No workspace open; nothing to do.
 
+  const outputChannel = vscode.window.createOutputChannel("Zero");
+  context.subscriptions.push(outputChannel);
+
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   context.subscriptions.push(statusBar);
   // `vscode.StatusBarItem.tooltip` is typed as `string | MarkdownString | undefined`,
@@ -30,6 +33,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const gatewayProvider = new GatewayCompletionProvider({
     baseUrl: `http://127.0.0.1:${daemon.port}`,
     apiKey: daemon.apiKey,
+    onError: (msg) => outputChannel.appendLine(msg),
   });
   const bufferContext = new VscodeBufferContext(() =>
     vscode.workspace.textDocuments.map((d) => ({ path: d.uri.fsPath, getText: () => d.getText() }))
@@ -41,7 +45,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const provider = createInlineCompletionProvider(engine);
   context.subscriptions.push(
-    vscode.languages.registerInlineCompletionItemProvider({ pattern: "**" }, provider)
+    vscode.languages.registerInlineCompletionItemProvider({ scheme: "file", pattern: "**" }, provider)
   );
 }
 

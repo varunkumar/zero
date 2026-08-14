@@ -55,7 +55,12 @@ export class DaemonClient {
 
   async #healthy(gatewayPort: number): Promise<boolean> {
     try {
-      const res = await this.#fetchImpl(`http://127.0.0.1:${gatewayPort}/health`, { signal: AbortSignal.timeout(1000) });
+      // 3s, not 1s: /health probes every configured ChatCapableProvider
+      // serially, including Ollama's /models check which itself has a 1s
+      // timeout (packages/core/src/providers/openaiCompat.ts) - a slow or
+      // absent Ollama can otherwise make a genuinely-running daemon look
+      // dead and cause us to spawn a duplicate `zero serve`.
+      const res = await this.#fetchImpl(`http://127.0.0.1:${gatewayPort}/health`, { signal: AbortSignal.timeout(3000) });
       return res.ok;
     } catch {
       return false;

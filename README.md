@@ -59,7 +59,7 @@ M0–M5 are implemented on `main`:
   offline Claude Code. Falls back to the Ollama-compatible provider when no
   tab is attached.
 - **M7.5a** Zero VS Code Plugin (inline completions): a new `packages/vscode`
-  extension (`@zero/vscode`) provides offline ghost-text completions inside
+  extension (`zero-vscode`) provides offline ghost-text completions inside
   VS Code, reusing `@zero/core`'s `CompletionEngine` against a new
   `POST /v1/complete` endpoint on the model gateway. Requires the `zero` CLI
   on `PATH`; the extension finds or starts a daemon for the open workspace

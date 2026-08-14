@@ -4,6 +4,8 @@ export interface GatewayCompletionProviderOpts {
   baseUrl: string;
   apiKey: string;
   fetchImpl?: typeof fetch;
+  /** Called with a diagnostic message when complete() fails, before the error is re-thrown. */
+  onError?: (message: string) => void;
 }
 
 export class GatewayCompletionProvider implements ModelProvider {
@@ -11,11 +13,13 @@ export class GatewayCompletionProvider implements ModelProvider {
   #baseUrl: string;
   #apiKey: string;
   #fetchImpl: typeof fetch;
+  #onError?: (message: string) => void;
 
   constructor(opts: GatewayCompletionProviderOpts) {
     this.#baseUrl = opts.baseUrl;
     this.#apiKey = opts.apiKey;
     this.#fetchImpl = opts.fetchImpl ?? fetch;
+    this.#onError = opts.onError;
   }
 
   capabilities(): ModelCapabilities {
@@ -27,7 +31,11 @@ export class GatewayCompletionProvider implements ModelProvider {
 
   async available(): Promise<boolean> {
     try {
-      const res = await this.#fetchImpl(`${this.#baseUrl}/health`, { signal: AbortSignal.timeout(1000) });
+      // 3s, not 1s: /health probes every configured provider serially,
+      // including Ollama's /models check which itself has a 1s timeout
+      // (packages/core/src/providers/openaiCompat.ts). This isn't a hot
+      // path - CompletionEngine already caches availability for 30s.
+      const res = await this.#fetchImpl(`${this.#baseUrl}/health`, { signal: AbortSignal.timeout(3000) });
       if (!res.ok) return false;
       const body = (await res.json()) as { provider: string | null };
       return body.provider !== null;
@@ -43,8 +51,31 @@ export class GatewayCompletionProvider implements ModelProvider {
       headers: { "content-type": "application/json", "x-api-key": this.#apiKey },
       body: JSON.stringify({ prompt }),
     });
-    if (!res.ok) throw new Error(`completion failed: ${res.status}`);
+    if (!res.ok) {
+      const message = `Zero completion request failed: ${res.status} ${res.statusText}`;
+      this.#onError?.(message);
+      throw new Error(`completion failed: ${res.status}`);
+    }
     const { text } = (await res.json()) as { text: string };
-    if (text) yield text;
+    const stripped = stripCodeFence(text);
+    if (stripped) yield stripped;
   }
+}
+
+// Chat models asked to "continue this code" often wrap the reply in a
+// fenced markdown block (optionally with a language tag) and/or trailing
+// prose. Strip a leading/trailing fence so ghost text is just code; leave
+// the text unchanged if it doesn't start with a fence or has no matching
+// closing fence.
+export function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("```")) return text;
+
+  const firstNewline = trimmed.indexOf("\n");
+  if (firstNewline === -1) return text;
+
+  const closingIndex = trimmed.lastIndexOf("```");
+  if (closingIndex <= firstNewline) return text; // no matching closing fence
+
+  return trimmed.slice(firstNewline + 1, closingIndex).replace(/\n$/, "");
 }

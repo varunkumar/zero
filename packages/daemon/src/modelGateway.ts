@@ -41,7 +41,10 @@ export function startModelGateway(opts: ModelGatewayOpts): { port: number; apiKe
         req.signal.addEventListener("abort", () => controller.abort());
         let text = "";
         try {
-          const messages = [{ role: "user" as const, content: prompt, createdAt: Date.now() }];
+          const content =
+            prompt +
+            " Reply with only the code continuation, no explanation, no markdown code fences, and keep it under a few lines.";
+          const messages = [{ role: "user" as const, content, createdAt: Date.now() }];
           for await (const delta of provider.chat(messages, [], controller.signal)) {
             if (delta.text) text += delta.text;
           }
