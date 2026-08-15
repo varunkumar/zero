@@ -44,7 +44,13 @@ function parseEventBlock(raw: string): AnthropicSseEvent | null {
   }
   if (!eventName || !dataLine) return null;
 
-  const data = JSON.parse(dataLine);
+  let data: any;
+  try {
+    data = JSON.parse(dataLine);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { event: "error", message: `malformed SSE data line: ${reason}` };
+  }
   switch (eventName) {
     case "message_start":
       return { event: "message_start" };

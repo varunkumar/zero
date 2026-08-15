@@ -55,6 +55,14 @@ test("parses an error event", async () => {
   expect(events).toEqual([{ event: "error", message: "provider crashed" }]);
 });
 
+test("a malformed data: line yields a synthesized error event instead of throwing", async () => {
+  const raw = `event: content_block_delta\ndata: {not valid json\n\n`;
+  const events = await collect(sseBody(raw));
+  expect(events).toHaveLength(1);
+  expect(events[0]!.event).toBe("error");
+  expect(typeof (events[0] as { message: string }).message).toBe("string");
+});
+
 test("reassembles an event split across multiple stream chunks", async () => {
   const full = `event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}\n\n`;
   const splitAt = 30;

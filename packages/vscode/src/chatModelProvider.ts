@@ -61,15 +61,46 @@ function toolResultText(content: ReadonlyArray<TextPartLike | unknown>): string 
     .join("\n");
 }
 
+function toAnthropicPart(part: MessagePartLike) {
+  if (isToolCallPart(part)) return { type: "tool_use" as const, id: part.callId, name: part.name, input: part.input };
+  if (isToolResultPart(part)) return { type: "tool_result" as const, tool_use_id: part.callId, content: toolResultText(part.content) };
+  return { type: "text" as const, text: (part as TextPartLike).value };
+}
+
+/**
+ * Splits a message's parts into runs of consecutive tool-result parts vs. everything
+ * else (text/tool_use), preserving order. This mirrors the daemon's blockText() in
+ * packages/core/src/anthropicTranslate.ts, which drops any accumulated text once it
+ * hits a tool_result and emits a separate "tool" message for the results - if we sent
+ * one mixed Anthropic message here, the text half would be silently discarded there.
+ * A message with only tool-result parts, or only non-tool-result parts, still yields
+ * exactly one message (the common case is unchanged).
+ */
+function splitMixedContent(content: ReadonlyArray<MessagePartLike>): MessagePartLike[][] {
+  const groups: MessagePartLike[][] = [];
+  let current: MessagePartLike[] = [];
+  let currentIsToolResult: boolean | undefined;
+  for (const part of content) {
+    const isToolResult = isToolResultPart(part);
+    if (current.length > 0 && isToolResult !== currentIsToolResult) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(part);
+    currentIsToolResult = isToolResult;
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
 function toAnthropicMessages(messages: readonly ChatMessageLike[]) {
-  return messages.map((m) => ({
-    role: m.role === 1 ? ("user" as const) : ("assistant" as const),
-    content: m.content.map((part) => {
-      if (isToolCallPart(part)) return { type: "tool_use" as const, id: part.callId, name: part.name, input: part.input };
-      if (isToolResultPart(part)) return { type: "tool_result" as const, tool_use_id: part.callId, content: toolResultText(part.content) };
-      return { type: "text" as const, text: (part as TextPartLike).value };
-    }),
-  }));
+  const role = (m: ChatMessageLike) => (m.role === 1 ? ("user" as const) : ("assistant" as const));
+  return messages.flatMap((m) =>
+    splitMixedContent(m.content).map((group) => ({
+      role: role(m),
+      content: group.map(toAnthropicPart),
+    }))
+  );
 }
 
 function toAnthropicTools(tools: readonly LanguageModelChatToolLike[]) {
@@ -131,7 +162,17 @@ export function createChatModelProvider(opts: ChatModelProviderOpts): ChatModelP
         } else if (event.event === "content_block_stop") {
           const call = pendingToolCalls.get(event.index);
           if (call) {
-            progress.report(opts.makeToolCallPart(call.id, call.name, call.json ? JSON.parse(call.json) : {}));
+            let input: object = {};
+            if (call.json) {
+              try {
+                input = JSON.parse(call.json);
+              } catch {
+                // Malformed partial_json accumulated for this tool call - report the call
+                // with an empty input rather than failing the whole turn over it.
+                input = {};
+              }
+            }
+            progress.report(opts.makeToolCallPart(call.id, call.name, input));
             pendingToolCalls.delete(event.index);
           }
         } else if (event.event === "error") {

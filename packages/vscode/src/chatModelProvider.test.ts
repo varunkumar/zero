@@ -136,6 +136,58 @@ test("provideLanguageModelChatResponse translates tool-call and tool-result mess
   });
 });
 
+test("provideLanguageModelChatResponse splits a message mixing text and tool_result parts into separate Anthropic messages", async () => {
+  let capturedBody: unknown;
+  const provider = createChatModelProvider(opts(async (_url, init) => {
+    capturedBody = JSON.parse(init!.body as string);
+    return new Response(`event: message_stop\ndata: {"type":"message_stop"}\n\n`, { status: 200 });
+  }));
+
+  await provider.provideLanguageModelChatResponse(
+    { id: "zero" },
+    [
+      {
+        role: 1,
+        content: [
+          { value: "here's the result:" },
+          { callId: "call_1", content: [{ value: "42" }] },
+        ],
+      },
+    ],
+    { tools: [] },
+    { report: () => {} },
+    fakeToken()
+  );
+
+  expect(capturedBody).toEqual({
+    messages: [
+      { role: "user", content: [{ type: "text", text: "here's the result:" }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "call_1", content: "42" }] },
+    ],
+  });
+});
+
+test("provideLanguageModelChatResponse falls back to an empty input when a tool call's partial_json is malformed", async () => {
+  const sse = [
+    `event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_1","name":"read_file","input":{}}}\n\n`,
+    `event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{not valid json"}}\n\n`,
+    `event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n`,
+    `event: message_stop\ndata: {"type":"message_stop"}\n\n`,
+  ].join("");
+  const provider = createChatModelProvider(opts(async () => new Response(sse, { status: 200 })));
+
+  const reported: unknown[] = [];
+  await provider.provideLanguageModelChatResponse(
+    { id: "zero" },
+    [{ role: 1, content: [{ value: "read a.ts" }] }],
+    { tools: [{ name: "read_file", description: "reads a file", inputSchema: { type: "object" } }] },
+    { report: (p) => reported.push(p) },
+    fakeToken()
+  );
+
+  expect(reported).toEqual([{ kind: "toolCall", callId: "call_1", name: "read_file", input: {} }]);
+});
+
 test("provideLanguageModelChatResponse throws on an error event", async () => {
   const sse = `event: error\ndata: {"message":"provider crashed"}\n\n`;
   const provider = createChatModelProvider(opts(async () => new Response(sse, { status: 200 })));
