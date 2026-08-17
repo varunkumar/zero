@@ -27,7 +27,7 @@ Full design and roadmap:
 
 ## Status
 
-M0 through M7.5a are implemented on `main`:
+M0 through M7.6 are implemented on `main`:
 
 - **M0** skeleton (daemon-served editor with save)
 - **M1** offline copilot (Chrome Nano + Ollama-compatible fallback)
@@ -47,6 +47,11 @@ M0 through M7.5a are implemented on `main`:
   Gemini Nano running in an attached browser tab, falling back to Ollama
 - **M7.5a** Zero VS Code Plugin - `packages/vscode` extension providing
   offline ghost-text completions inside VS Code against the same daemon
+- **M7.6** Zero VS Code Plugin, Language Model API - registers Zero as a
+  `vscode.lm` chat model provider so VS Code's own Chat view can target it
+
+Only **M8** (Zero IDE - Tauri wrap, bundled daemon, auto-update, native
+menus) remains on the roadmap.
 
 Each milestone's implementation details live in its design doc, listed
 under [Design and plugin docs](#design-and-plugin-docs). See the
@@ -61,6 +66,7 @@ the complete roadmap.
 - [M5 design](docs/superpowers/specs/2026-08-07-m5-zero-agents-design.md)
 - [M7 design](docs/superpowers/specs/2026-08-13-m7-zero-claude-plugin-design.md)
 - [M7.5a design](docs/superpowers/specs/2026-08-14-m7.5-vscode-completions-design.md)
+- [M7.6 design](docs/superpowers/specs/2026-08-14-m7.6-vscode-lm-provider-design.md)
 - [Plugins](docs/plugins.md)
 
 ## Architecture
