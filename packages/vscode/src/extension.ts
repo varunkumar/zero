@@ -5,6 +5,7 @@ import { GatewayCompletionProvider } from "./gatewayCompletionProvider";
 import { VscodeBufferContext } from "./vscodeBufferContext";
 import { createInlineCompletionProvider } from "./inlineCompletion";
 import { updateStatusBar, type StatusBarItemLike, type ZeroStatus } from "./statusBar";
+import { createChatModelProvider } from "./chatModelProvider";
 
 /**
  * Proactively probes the gateway's unauthenticated /health endpoint right
@@ -73,6 +74,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.languages.registerInlineCompletionItemProvider({ scheme: "file", pattern: "**" }, provider)
   );
+
+  const chatModelProvider = createChatModelProvider({
+    baseUrl: `http://127.0.0.1:${daemon.port}`,
+    apiKey: daemon.apiKey,
+    makeTextPart: (value) => new vscode.LanguageModelTextPart(value),
+    makeToolCallPart: (callId, name, input) => new vscode.LanguageModelToolCallPart(callId, name, input),
+  });
+  context.subscriptions.push(
+    vscode.lm.registerLanguageModelChatProvider("zero", chatModelProvider as unknown as vscode.LanguageModelChatProvider)
+  );
+  outputChannel.appendLine("Zero: chat model provider registered (enable it via Chat: Manage Models)");
 }
 
 export function deactivate(): void {}

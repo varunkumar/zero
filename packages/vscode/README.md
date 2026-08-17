@@ -27,3 +27,19 @@ The Zero status bar item (bottom right) reflects the daemon's model gateway
 right after activation - no need to trigger a completion first - and shows
 the active model, or why completions are unavailable (no daemon found, no
 model available).
+
+## Chat model (Copilot Chat / VS Code chat)
+
+Zero also registers as a selectable model in VS Code's chat (including
+GitHub Copilot Chat), backed by the same daemon and model gateway as
+completions. VS Code requires a one-time manual step to enable any
+third-party model provider:
+
+1. Open the chat view, click the model picker, choose **Manage Models...**
+2. Select **Zero** and enable the models you want.
+
+Tool calling is offered only when the daemon's currently-active model
+actually supports it (shown via the same status the completions status bar
+reports) - a browser-only Gemini Nano session, for example, doesn't support
+tool calling, while the daemon-side Nano bridge and Ollama-compatible
+fallback do.

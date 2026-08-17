@@ -18,7 +18,11 @@ export function startModelGateway(opts: ModelGatewayOpts): { port: number; apiKe
       // id string and an attach flag, never model input or output.
       if (url.pathname === "/health" && req.method === "GET") {
         const provider = await opts.gateway.pick();
-        return Response.json({ nanoHostConnected: provider?.id === "nano-bridge", provider: provider?.id ?? null });
+        return Response.json({
+          nanoHostConnected: provider?.id === "nano-bridge",
+          provider: provider?.id ?? null,
+          supportsTools: provider?.supportsTools() ?? false,
+        });
       }
       if (url.pathname === "/v1/complete" && req.method === "POST") {
         if (req.headers.get("x-api-key") !== apiKey) {
