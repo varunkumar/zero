@@ -194,11 +194,14 @@ this is a desktop-shell concern, not an engine concern.
 7. On window close, the shell sends the sidecar process SIGTERM, waits
    briefly, SIGKILLs if it hasn't exited.
 
-Subsequent launches skip steps 1-3 (remembered path used directly) but
-show a "change workspace" affordance (e.g. a tray/menu item wired to a
-minimal stub in this slice - can just re-run the Open Folder flow and
-restart the sidecar against the new path) so users aren't locked to
-their first folder forever.
+Subsequent launches skip steps 1-3 and use the remembered path
+directly. There is no in-app way to switch workspaces in this slice -
+that needs either a native menu item or an in-webview affordance, and
+both are deferred (menus per section 1's "native menus" exclusion; an
+in-webview affordance would be new UI surface this spec doesn't scope).
+Until a follow-on spec adds one, switching workspaces means deleting
+the remembered-workspace store file by hand (documented in
+`packages/desktop/README.md`) and relaunching.
 
 ## 7. Error handling
 
@@ -244,7 +247,8 @@ their first folder forever.
 ## 9. Out-of-scope follow-ups (not this milestone)
 
 - Auto-update (Tauri updater plugin + release signing + channel).
-- Native menus, dock/menu-bar integration, global shortcuts.
+- Native menus, dock/menu-bar integration, global shortcuts - including
+  an in-app "change workspace" affordance, which needs one of these.
 - Cross-platform (Windows/Linux) sidecar builds and packaging.
 - Multi-window / multi-workspace-per-instance support.
 - Plugin worker isolation, cloud provider auth, sync (explicitly called
