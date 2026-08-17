@@ -84,7 +84,11 @@ mod tests {
     }
 
     fn tempfile_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("zero-desktop-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "zero-desktop-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
