@@ -1,0 +1,214 @@
+# M8: Zero IDE (Core Wrap)
+
+Status: Approved
+
+## 1. Scope
+
+M8's roadmap line (`docs/superpowers/specs/2026-08-04-zero-design.md`,
+section 13) bundles three things: "Tauri wrap with bundled daemon (Bun
+compile), auto-update, native menus." This spec covers the first slice
+only: a Tauri desktop shell that bundles the daemon as a standalone
+sidecar binary, opens a native window pointed at it, and lets the user
+pick a workspace folder. Auto-update and native menus are explicitly
+deferred to follow-on specs once this core wrap is proven.
+
+### In scope
+
+- New `packages/desktop` (`zero-desktop`), a Tauri v2 project.
+- `bun build --compile` sidecar build for `@zero/daemon`, including
+  resolving `node-pty`'s native `.node` addon outside normal
+  `node_modules` lookup so the terminal works in the compiled binary.
+- Native "Open Folder" dialog on first launch; last-opened folder
+  remembered for subsequent launches.
+- Sidecar lifecycle: spawn on launch (or on folder selection), wait for
+  ready, point the webview at it, kill on window close.
+- Manual smoke-test checklist and unit tests for the new path-resolution
+  and sidecar-lifecycle logic.
+
+### Out of scope (explicit)
+
+- Auto-update (Tauri updater plugin, release channel, signing).
+- Native menus / OS-integration polish (dock icon, menu bar items,
+  global shortcuts).
+- Multi-window / multi-workspace support - one workspace per app
+  instance, matching `zero serve`'s current single-root model.
+- Plugin worker isolation and any online/cloud capabilities - both
+  explicitly called out in the roadmap as landing later in the M8 era,
+  not this slice.
+- Windows/Linux packaging polish - build for the current dev platform
+  (macOS) first; cross-platform sidecar builds are a follow-up once the
+  approach is validated.
+
+## 2. Decisions (from design session)
+
+| Decision | Choice |
+|---|---|
+| Daemon distribution | `bun build --compile` sidecar binary, bundled into the Tauri app - no assumed Bun/Node on the user's machine |
+| UI loading | Webview navigates to the daemon's own `http://127.0.0.1:<port>/?token=<token>` - identical to what `zero serve` prints today, zero new serving logic |
+| PTY support | Fixed now: native addon resolved relative to the sidecar's own path, not deferred |
+| Workspace selection | Native "Open Folder" dialog on first launch; remembered for next launch |
+| Auto-update / native menus | Deferred to follow-on specs |
+
+## 3. Architecture
+
+```
+zero-desktop (Tauri v2 app)
+ ├─ Rust shell (src-tauri/)
+ │   ├─ on launch: read remembered workspace path (or show Open Folder dialog)
+ │   ├─ spawn sidecar: zero-daemon-sidecar serve <path> --port 0 --gateway-port 0
+ │   ├─ parse sidecar's ready line (JSON on stdout) for {port, token}
+ │   ├─ open/update window, navigate webview to http://127.0.0.1:<port>/?token=<token>
+ │   └─ on window close: kill sidecar child process
+ └─ bundled resources/
+     ├─ zero-daemon-sidecar        (bun build --compile output)
+     ├─ pty.node                    (node-pty's native addon, copied alongside)
+     └─ web/dist/                   (packages/web production build, served by the daemon itself)
+```
+
+No new JSON-RPC surface, no new HTTP surface. The Tauri shell's only
+daemon-facing job is: spawn it with the right arguments, read one line of
+structured startup output, and navigate the webview. Everything after
+that - editor, terminal, chat, completions - runs exactly as it does
+under `zero serve`, because it's the same daemon and the same web
+client talking the same protocol.
+
+## 4. Daemon changes (`@zero/daemon`)
+
+### 4.1 Machine-readable ready signal
+
+`zero serve` currently prints a human-oriented line
+(`zero ready: http://127.0.0.1:${port}/?token=${token}`) to stdout. The
+Tauri shell needs to parse this reliably, so `bin/zero.ts`'s `serve`
+branch gains a `--json` flag: when present, it prints *only* the single
+JSON line (`{"port":...,"token":...,"gatewayInfo":...}`) instead of the
+human-readable line - no other stdout output before or after it, so the
+Rust side can read exactly one line and parse it unambiguously. Without
+`--json`, behavior is byte-for-byte identical to today. This is the
+only CLI-surface change; `startZero`/`createDaemon` are untouched.
+
+### 4.2 Native addon resolution for the compiled sidecar
+
+`node-pty` loads its native addon via its own `require()`-based lookup
+under `node_modules/node-pty/build/Release/pty.node`, which does not
+exist inside a `bun build --compile` single-file executable. Two
+sub-changes:
+
+- **Build step**: the sidecar build script copies
+  `node_modules/node-pty/build/Release/pty.node` next to the compiled
+  binary (and into the Tauri bundle's resources directory).
+- **Runtime resolution**: `packages/daemon/src/pty.ts` (wherever it
+  currently imports `node-pty`) checks for a `ZERO_PTY_NATIVE_DIR`
+  env var; when set, it loads the addon from
+  `${ZERO_PTY_NATIVE_DIR}/pty.node` via `process.dlopen`-compatible
+  `require` path override instead of the package's default lookup.
+  When unset (the normal `bun run`/dev path), behavior is identical to
+  today. The Tauri shell sets `ZERO_PTY_NATIVE_DIR` to its bundled
+  resources directory when spawning the sidecar.
+
+This keeps the change small and fully backward-compatible: nothing
+about `zero serve`, `zero claude`, or the VS Code extension's daemon
+spawn changes, since none of them set `ZERO_PTY_NATIVE_DIR`.
+
+### 4.3 Build script
+
+`packages/daemon/scripts/build-sidecar.sh` (new):
+
+```
+bun build --compile --outfile dist/zero-daemon-sidecar packages/daemon/bin/zero.ts
+cp node_modules/node-pty/build/Release/pty.node dist/pty.node
+```
+
+Invoked from `packages/desktop`'s Tauri build hook (`beforeBuildCommand`
+in `tauri.conf.json`), so `bun run --cwd packages/desktop tauri build`
+produces a fully self-contained app bundle in one command.
+
+## 5. `packages/desktop` layout
+
+```
+packages/desktop/
+  package.json           # "zero-desktop", tauri dev/build scripts
+  src-tauri/
+    Cargo.toml
+    tauri.conf.json       # window config, bundled resources, beforeBuildCommand
+    src/
+      main.rs              # app entry
+      sidecar.rs           # spawn/monitor/kill the daemon sidecar, parse ready JSON
+      workspace.rs          # remembered-workspace read/write, Open Folder dialog
+  README.md
+```
+
+Remembered workspace path is stored via Tauri's `tauri-plugin-store` (or
+a plain JSON file under the OS app-data dir - implementation detail for
+the plan) - not `@zero/daemon`'s own `~/.zero` settings store, since
+this is a desktop-shell concern, not an engine concern.
+
+## 6. Data flow (first launch)
+
+1. App starts, `src-tauri/src/main.rs` reads remembered workspace -
+   none found.
+2. Native Open Folder dialog shown; user picks a directory.
+3. Path saved to the remembered-workspace store.
+4. `sidecar.rs` spawns
+   `zero-daemon-sidecar serve <path> --port 0 --gateway-port 0 --json`
+   with `ZERO_PTY_NATIVE_DIR` set to the bundled resources dir.
+5. Shell reads stdout until it gets a parseable JSON line; on success,
+   opens the main window and navigates to
+   `http://127.0.0.1:<port>/?token=<token>`.
+6. User works normally (editor/terminal/chat/completions) - identical
+   experience to `zero serve` in a browser tab, now in a native window.
+7. On window close, the shell sends the sidecar process SIGTERM, waits
+   briefly, SIGKILLs if it hasn't exited.
+
+Subsequent launches skip steps 1-3 (remembered path used directly) but
+show a "change workspace" affordance (e.g. a tray/menu item wired to a
+minimal stub in this slice - can just re-run the Open Folder flow and
+restart the sidecar against the new path) so users aren't locked to
+their first folder forever.
+
+## 7. Error handling
+
+- **Sidecar fails to start / exits before printing ready JSON**: window
+  shows a native error dialog with the process's captured stderr tail
+  and a "Retry" button; app does not silently show a blank window.
+- **Port already in use**: not expected in practice since the sidecar is
+  asked for port `0` (OS-assigned), but if the sidecar itself reports a
+  bind failure, it surfaces through the same stderr-capture path above.
+- **Chosen workspace no longer exists** (deleted since last launch):
+  detected before spawning the sidecar (`std::path::Path::exists`
+  check in Rust); falls back to the Open Folder dialog instead of
+  spawning a daemon rooted at a missing path.
+- **node-pty addon missing/mismatched** (e.g. bundle built on a
+  different OS/arch than it's run on): the daemon's existing PTY error
+  path already surfaces spawn failures to the terminal UI per-session;
+  no new user-facing surface needed, this degrades the same way a
+  missing PTY dependency does under `zero serve` today.
+
+## 8. Testing
+
+- **`packages/daemon`**: unit tests for the new
+  `ZERO_PTY_NATIVE_DIR`-based resolution path (fake env var pointing at
+  a temp dir with a stub addon file; assert the override path is used
+  instead of default `node_modules` lookup) and for the `--json` ready
+  line's shape.
+- **`packages/desktop`**: Rust unit tests for the ready-JSON parser
+  (`sidecar.rs`) and the remembered-workspace read/write round-trip
+  (`workspace.rs`), using `tempfile` for the store location. Sidecar
+  spawn/kill lifecycle is integration-tested manually (see below) since
+  it depends on a real OS process and window - not worth mocking for a
+  first cut.
+- **Manual smoke test** (recorded as a checklist in
+  `packages/desktop/README.md`, run before considering the milestone
+  done): fresh launch shows Open Folder dialog -> pick a folder ->
+  window opens showing the editor -> open a file, edit, save -> open
+  terminal, run a command -> ask chat a question -> quit app -> relaunch
+  -> same folder opens automatically with no dialog.
+
+## 9. Out-of-scope follow-ups (not this milestone)
+
+- Auto-update (Tauri updater plugin + release signing + channel).
+- Native menus, dock/menu-bar integration, global shortcuts.
+- Cross-platform (Windows/Linux) sidecar builds and packaging.
+- Multi-window / multi-workspace-per-instance support.
+- Plugin worker isolation, cloud provider auth, sync (explicitly called
+  out in the top-level roadmap as landing "in this era" but not required
+  for the core wrap).
