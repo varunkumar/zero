@@ -16,8 +16,10 @@ deferred to follow-on specs once this core wrap is proven.
 
 - New `packages/desktop` (`zero-desktop`), a Tauri v2 project.
 - `bun build --compile` sidecar build for `@zero/daemon`, including
-  resolving `node-pty`'s native `.node` addon outside normal
-  `node_modules` lookup so the terminal works in the compiled binary.
+  bundling a portable `node` binary plus the `node-pty` package
+  directory as sidecar resources so the terminal's real-`node`-hosted
+  PTY worker (see section 4.2) runs without relying on anything
+  installed on the user's machine.
 - Native "Open Folder" dialog on first launch; last-opened folder
   remembered for subsequent launches.
 - Sidecar lifecycle: spawn on launch (or on folder selection), wait for
@@ -45,7 +47,7 @@ deferred to follow-on specs once this core wrap is proven.
 |---|---|
 | Daemon distribution | `bun build --compile` sidecar binary, bundled into the Tauri app - no assumed Bun/Node on the user's machine |
 | UI loading | Webview navigates to the daemon's own `http://127.0.0.1:<port>/?token=<token>` - identical to what `zero serve` prints today, zero new serving logic |
-| PTY support | Fixed now: native addon resolved relative to the sidecar's own path, not deferred |
+| PTY support | Fixed now: a portable `node` binary + `node-pty` package dir ship as sidecar resources, not deferred |
 | Workspace selection | Native "Open Folder" dialog on first launch; remembered for next launch |
 | Auto-update / native menus | Deferred to follow-on specs |
 
@@ -61,7 +63,10 @@ zero-desktop (Tauri v2 app)
  │   └─ on window close: kill sidecar child process
  └─ bundled resources/
      ├─ zero-daemon-sidecar        (bun build --compile output)
-     ├─ pty.node                    (node-pty's native addon, copied alongside)
+     ├─ node-runtime/
+     │   ├─ node                    (portable node binary, copied from the build machine)
+     │   ├─ pty-worker.js           (plain-file copy, see 4.2)
+     │   └─ node_modules/node-pty/  (full package dir incl. native addon)
      └─ web/dist/                   (packages/web production build, served by the daemon itself)
 ```
 
@@ -86,36 +91,64 @@ Rust side can read exactly one line and parse it unambiguously. Without
 `--json`, behavior is byte-for-byte identical to today. This is the
 only CLI-surface change; `startZero`/`createDaemon` are untouched.
 
-### 4.2 Native addon resolution for the compiled sidecar
+### 4.2 PTY under the compiled sidecar: bundling a real `node`
 
-`node-pty` loads its native addon via its own `require()`-based lookup
-under `node_modules/node-pty/build/Release/pty.node`, which does not
-exist inside a `bun build --compile` single-file executable. Two
-sub-changes:
+`packages/daemon/src/pty.ts` does not use `node-pty`'s native addon
+in-process. It spawns a **separate real `node` process**
+(`spawn("node", [workerPath])`) running `pty-worker.js`, because
+node-pty's native binding does not deliver events correctly under
+Bun's runtime at all (see the comment block at the top of `pty.ts`).
+`pty-worker.js` then does `require.resolve("node-pty/package.json")`
+against a real `node_modules` tree to locate the native addon.
 
-- **Build step**: the sidecar build script copies
-  `node_modules/node-pty/build/Release/pty.node` next to the compiled
-  binary (and into the Tauri bundle's resources directory).
-- **Runtime resolution**: `packages/daemon/src/pty.ts` (wherever it
-  currently imports `node-pty`) checks for a `ZERO_PTY_NATIVE_DIR`
-  env var; when set, it loads the addon from
-  `${ZERO_PTY_NATIVE_DIR}/pty.node` via `process.dlopen`-compatible
-  `require` path override instead of the package's default lookup.
-  When unset (the normal `bun run`/dev path), behavior is identical to
-  today. The Tauri shell sets `ZERO_PTY_NATIVE_DIR` to its bundled
-  resources directory when spawning the sidecar.
+None of that exists inside (or next to) a `bun build --compile` single
+file executable by default, so three things ship as sidecar resources
+alongside the compiled daemon binary, and two small hooks let `pty.ts`
+find them:
 
-This keeps the change small and fully backward-compatible: nothing
-about `zero serve`, `zero claude`, or the VS Code extension's daemon
-spawn changes, since none of them set `ZERO_PTY_NATIVE_DIR`.
+- **Portable `node` binary**: the build script copies the build
+  machine's own `node` executable (`$(command -v node)`) into the
+  bundle's resources directory as `node-runtime/node`. Scope note:
+  this only works because M8's build target is the current dev
+  platform (macOS) per section 1's "out of scope" list - a portable,
+  correctly-licensed, cross-platform Node distribution is follow-up
+  work when Windows/Linux packaging is tackled.
+- **`node-pty` package directory**: the build script copies
+  `node_modules/node-pty` (whole directory, including its compiled
+  native addon under `build/Release/`) into
+  `node-runtime/node_modules/node-pty`, so `require.resolve` inside
+  `pty-worker.js` finds a real `package.json` to walk from.
+- **`pty-worker.js` itself**: copied as a plain file to
+  `node-runtime/pty-worker.js` (today it's loaded via
+  `fileURLToPath(new URL("./pty-worker.js", import.meta.url))`, which
+  does not resolve to a real on-disk path inside a compiled binary).
+
+Runtime hook in `pty.ts`: two new env vars, `ZERO_PTY_NODE_BIN` and
+`ZERO_PTY_WORKER_DIR`. When both are set, `PtyService` spawns
+`ZERO_PTY_NODE_BIN` with `${ZERO_PTY_WORKER_DIR}/pty-worker.js` and
+`cwd: ZERO_PTY_WORKER_DIR` (so `require.resolve` walks up from a
+directory that actually has `node_modules/node-pty` in it), instead of
+`spawn("node", [fileURLToPath(...)])`. When either is unset - the
+normal `zero serve`/`zero claude`/VS Code-daemon dev path - behavior is
+byte-for-byte identical to today. The Tauri shell sets both env vars to
+its bundled resources subpaths when spawning the sidecar.
+
+This keeps every other daemon consumer (`zero serve`, `zero claude`,
+the VS Code extension's daemon spawn) completely unaffected, since none
+of them set `ZERO_PTY_NODE_BIN`/`ZERO_PTY_WORKER_DIR`.
 
 ### 4.3 Build script
 
 `packages/daemon/scripts/build-sidecar.sh` (new):
 
-```
+```bash
+set -euo pipefail
 bun build --compile --outfile dist/zero-daemon-sidecar packages/daemon/bin/zero.ts
-cp node_modules/node-pty/build/Release/pty.node dist/pty.node
+
+mkdir -p dist/node-runtime/node_modules
+cp "$(command -v node)" dist/node-runtime/node
+cp -R node_modules/node-pty dist/node-runtime/node_modules/node-pty
+cp src/pty-worker.js dist/node-runtime/pty-worker.js
 ```
 
 Invoked from `packages/desktop`'s Tauri build hook (`beforeBuildCommand`
@@ -150,7 +183,9 @@ this is a desktop-shell concern, not an engine concern.
 3. Path saved to the remembered-workspace store.
 4. `sidecar.rs` spawns
    `zero-daemon-sidecar serve <path> --port 0 --gateway-port 0 --json`
-   with `ZERO_PTY_NATIVE_DIR` set to the bundled resources dir.
+   with `ZERO_PTY_NODE_BIN` and `ZERO_PTY_WORKER_DIR` set to the
+   bundled `node-runtime/node` binary and `node-runtime/` directory
+   respectively.
 5. Shell reads stdout until it gets a parseable JSON line; on success,
    opens the main window and navigates to
    `http://127.0.0.1:<port>/?token=<token>`.
@@ -177,18 +212,21 @@ their first folder forever.
   detected before spawning the sidecar (`std::path::Path::exists`
   check in Rust); falls back to the Open Folder dialog instead of
   spawning a daemon rooted at a missing path.
-- **node-pty addon missing/mismatched** (e.g. bundle built on a
-  different OS/arch than it's run on): the daemon's existing PTY error
-  path already surfaces spawn failures to the terminal UI per-session;
-  no new user-facing surface needed, this degrades the same way a
-  missing PTY dependency does under `zero serve` today.
+- **Bundled `node-runtime/` missing/broken** (e.g. bundle built on a
+  different OS/arch than it's run on, or the copy step failed): the
+  daemon's existing PTY error path already surfaces spawn failures to
+  the terminal UI per-session; no new user-facing surface needed, this
+  degrades the same way a missing PTY dependency does under
+  `zero serve` today - editor/chat/completions stay fully usable, only
+  the terminal panel fails.
 
 ## 8. Testing
 
 - **`packages/daemon`**: unit tests for the new
-  `ZERO_PTY_NATIVE_DIR`-based resolution path (fake env var pointing at
-  a temp dir with a stub addon file; assert the override path is used
-  instead of default `node_modules` lookup) and for the `--json` ready
+  `ZERO_PTY_NODE_BIN`/`ZERO_PTY_WORKER_DIR`-based spawn override (fake
+  env vars pointing at a temp dir with a stub `node` shim and worker
+  file; assert `PtyService` spawns that path with that cwd instead of
+  the default `spawn("node", [fileURLToPath(...)])`) and for the `--json` ready
   line's shape.
 - **`packages/desktop`**: Rust unit tests for the ready-JSON parser
   (`sidecar.rs`) and the remembered-workspace read/write round-trip
