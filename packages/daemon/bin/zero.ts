@@ -55,9 +55,13 @@ if (argv[0] === "claude") {
     process.exit(1);
   }
   const d = await startZero({ root, port: parsedPort, webDist, gatewayPort: parsedGatewayPort });
-  console.log(`zero ready: http://127.0.0.1:${d.port}/?token=${d.token}`);
-  if (d.gatewayInfo) {
-    console.log(`model gateway: http://127.0.0.1:${d.gatewayInfo.port}/v1/messages (ANTHROPIC_API_KEY=${d.gatewayInfo.apiKey})`);
+  if (rest.includes("--json")) {
+    console.log(JSON.stringify({ port: d.port, token: d.token, gatewayInfo: d.gatewayInfo }));
+  } else {
+    console.log(`zero ready: http://127.0.0.1:${d.port}/?token=${d.token}`);
+    if (d.gatewayInfo) {
+      console.log(`model gateway: http://127.0.0.1:${d.gatewayInfo.port}/v1/messages (ANTHROPIC_API_KEY=${d.gatewayInfo.apiKey})`);
+    }
   }
 } else if (argv.includes("-p")) {
   const path = positionalArgs(argv)[0];
