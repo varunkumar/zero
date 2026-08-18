@@ -278,7 +278,7 @@ the remembered-workspace store file by hand (documented in
 
 ## 10. M8.5: Zero IDE polish (planned)
 
-Status: Not started
+Status: Done
 
 Zero's milestone roadmap ends at M8; no further numbered milestones are
 planned, and cross-platform packaging and auto-update are explicitly out

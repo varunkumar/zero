@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 #[derive(Deserialize)]
 struct ReadyLine {
@@ -51,32 +53,63 @@ pub fn spawn(
     Ok(SidecarHandle { child })
 }
 
+fn default_ready_timeout() -> Duration {
+    std::env::var("ZERO_SIDECAR_READY_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(30))
+}
+
 impl SidecarHandle {
-    /// Blocks reading stdout lines until one parses as the ready JSON,
-    /// or the process exits first. On failure, returns the captured
-    /// stderr tail so the caller can show it in an error dialog.
+    /// Blocks reading stdout lines until one parses as the ready JSON, the
+    /// process exits first, or the timeout elapses - whichever comes
+    /// first. On timeout, kills the child before returning. On failure,
+    /// returns the captured stderr tail so the caller can show it in an
+    /// error dialog.
     pub fn wait_for_ready(&mut self) -> Result<ReadyInfo, String> {
+        self.wait_for_ready_with_timeout(default_ready_timeout())
+    }
+
+    fn wait_for_ready_with_timeout(&mut self, timeout: Duration) -> Result<ReadyInfo, String> {
         let stdout = self.child.stdout.take().expect("stdout was piped");
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => break,
-            };
-            if let Some(info) = parse_ready_line(&line) {
-                return Ok(info);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                let line = match line {
+                    Ok(l) => l,
+                    Err(_) => break,
+                };
+                if let Some(info) = parse_ready_line(&line) {
+                    let _ = tx.send(Some(info));
+                    return;
+                }
+            }
+            let _ = tx.send(None);
+        });
+
+        match rx.recv_timeout(timeout) {
+            Ok(Some(info)) => Ok(info),
+            Ok(None) => Err(self.stderr_tail_or("sidecar exited before printing a ready line")),
+            Err(mpsc::RecvTimeoutError::Timeout) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                self.kill();
+                Err(self.stderr_tail_or("sidecar did not become ready within the timeout"))
             }
         }
+    }
+
+    fn stderr_tail_or(&mut self, fallback: &str) -> String {
         let mut stderr_tail = String::new();
         if let Some(mut stderr) = self.child.stderr.take() {
             use std::io::Read;
             let _ = stderr.read_to_string(&mut stderr_tail);
         }
-        Err(if stderr_tail.is_empty() {
-            "sidecar exited before printing a ready line".to_string()
+        if stderr_tail.is_empty() {
+            fallback.to_string()
         } else {
             stderr_tail
-        })
+        }
     }
 
     pub fn kill(&mut self) {
@@ -106,5 +139,24 @@ mod tests {
     #[test]
     fn rejects_json_missing_required_fields() {
         assert!(parse_ready_line(r#"{"port":1234}"#).is_none());
+    }
+
+    #[test]
+    fn wait_for_ready_times_out_when_sidecar_never_prints() {
+        use std::process::{Command, Stdio};
+        let child = Command::new("sleep")
+            .arg("5")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn sleep");
+        let mut handle = SidecarHandle { child };
+
+        let result = handle.wait_for_ready_with_timeout(std::time::Duration::from_millis(200));
+
+        match result {
+            Ok(_) => panic!("expected a timeout error"),
+            Err(e) => assert!(e.contains("did not become ready")),
+        }
     }
 }

@@ -20,14 +20,10 @@ bun run --cwd packages/desktop tauri dev      # launches the app
 
 ## Switching workspaces
 
-There's no in-app "change workspace" affordance yet (needs a native
-menu/tray item - see the spec's out-of-scope follow-ups). To open a
-different folder, quit the app, delete the remembered-workspace file, and
-relaunch - the Open Folder dialog will show again:
-
-```
-rm "$HOME/Library/Application Support/zero-desktop/workspace.json"
-```
+Use **File > Open Folder...** (`Cmd+O`) to open another workspace - it
+opens a new window running its own daemon, alongside any windows already
+open. The most recently opened workspace becomes the one that reopens
+automatically on the next app launch.
 
 ## Known limitations
 
@@ -35,9 +31,6 @@ rm "$HOME/Library/Application Support/zero-desktop/workspace.json"
   (`window.LanguageModel`) doesn't exist in WKWebView (Safari's engine).
   Point `zero.ollamaUrl`/`zero.ollamaChatModel` at a running Ollama
   instance for completions inside the desktop app.
-- **No timeout on daemon startup.** If the sidecar spawns but hangs before
-  printing its ready line, the app has no window and no way to quit but
-  Force Quit - tracked as a follow-up.
 
 `window.prompt()`/`window.confirm()` don't work in Tauri's WKWebView
 either (wry doesn't wire up the `WKUIDelegate` methods they need) -
@@ -60,3 +53,16 @@ Run before considering a change to this package done:
    failure).
 6. Quit the app.
 7. Relaunch - the same folder opens automatically, no dialog shown.
+8. Rename the bundled `zero-daemon-sidecar` binary temporarily (so it
+   fails to spawn) and confirm the app shows a failure dialog instead of
+   hanging - then restore the binary's name.
+9. With the app running, use **File > Open Folder...** to open a second,
+   different folder - a new window opens showing that folder's editor,
+   independent of the first window.
+10. Confirm both windows work independently: edit and save a file in
+    each, open a terminal and run a command in each.
+11. Close one window - confirm the other keeps running normally.
+12. Quit the app (Cmd+Q) - confirm no `zero-daemon-sidecar` processes
+    remain (`ps aux | grep zero-daemon-sidecar`).
+13. Relaunch - confirm the most-recently-opened-of-the-two folders
+    reopens automatically.
