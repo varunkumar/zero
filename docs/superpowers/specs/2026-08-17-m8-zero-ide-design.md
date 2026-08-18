@@ -206,8 +206,10 @@ the remembered-workspace store file by hand (documented in
 ## 7. Error handling
 
 - **Sidecar fails to start / exits before printing ready JSON**: window
-  shows a native error dialog with the process's captured stderr tail
-  and a "Retry" button; app does not silently show a blank window.
+  shows a native error dialog with the process's captured stderr tail,
+  then the app quits (no "Retry" button in this first cut - the app
+  does not silently show a blank, unquittable window, which is the
+  property that matters; retry-without-quitting is a follow-up).
 - **Port already in use**: not expected in practice since the sidecar is
   asked for port `0` (OS-assigned), but if the sidecar itself reports a
   bind failure, it surfaces through the same stderr-capture path above.
@@ -254,15 +256,20 @@ the remembered-workspace store file by hand (documented in
 - Plugin worker isolation, cloud provider auth, sync (explicitly called
   out in the top-level roadmap as landing "in this era" but not required
   for the core wrap).
-- `packages/web`'s use of `window.prompt()`/`alert()`/`confirm()` (e.g.
-  `FileTreePanel.tsx`'s New File/New Folder/Rename flow) doesn't work
-  inside Tauri's WKWebView on macOS - wry doesn't implement the
-  `WKUIDelegate` methods these need by default, so the calls silently
-  return nothing instead of showing a dialog. Discovered during this
-  milestone's manual smoke test (section 8); the fix is an in-app modal
-  component in `packages/web` replacing the browser-native calls - a
-  `packages/web` UI change, not a `packages/desktop` wiring issue, so
-  it's follow-up work rather than part of this spec's scope.
+- ~~`packages/web`'s use of `window.prompt()`/`alert()`/`confirm()`~~ -
+  discovered during this milestone's manual smoke test (Tauri's WKWebView
+  on macOS doesn't implement the `WKUIDelegate` methods these need, so
+  the calls silently returned nothing), and fixed as a same-milestone
+  follow-up rather than deferred: `FileTreePanel.tsx`'s New File/New
+  Folder/Rename/Delete and `TerminalPanel.tsx`'s tab rename now use
+  inline editing instead of `window.prompt()`/`confirm()`. Since this
+  lives in `packages/web`, the fix applies to Zero Lite and the
+  daemon-served browser workbench too, not just desktop.
+- No timeout on `sidecar.rs::wait_for_ready()` - if the daemon spawns
+  but hangs before printing its ready line, the app has no window and
+  no way to quit but Force Quit. Cmd+Q/Dock-quit teardown (via
+  `RunEvent::ExitRequested`) is handled as of this milestone, but this
+  particular hang case is not.
 - Offline completions inside Zero IDE are limited to the Ollama-compatible
   provider - the Chrome-only Nano API (`window.LanguageModel`) that
   `zero serve`/`zero claude` rely on doesn't exist in WKWebView (Safari's

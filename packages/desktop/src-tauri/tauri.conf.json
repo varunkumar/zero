@@ -5,7 +5,7 @@
   "identifier": "dev.zero.desktop",
   "build": {
     "frontendDist": "../frontend-stub",
-    "beforeBuildCommand": "bun run --cwd ../daemon build:sidecar"
+    "beforeBuildCommand": "bun run --cwd ../web build && bun run --cwd ../daemon build:sidecar"
   },
   "app": {
     "windows": [],

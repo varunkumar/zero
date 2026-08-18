@@ -16,9 +16,7 @@ bun run --cwd packages/desktop tauri dev      # launches the app
 
 `tauri build` produces a release bundle under
 `packages/desktop/src-tauri/target/release/bundle/`; its
-`beforeBuildCommand` runs the sidecar build automatically, but
-`packages/web`'s build is not wired into that hook yet - run it manually
-first.
+`beforeBuildCommand` builds `packages/web` and the sidecar automatically.
 
 ## Switching workspaces
 
@@ -33,16 +31,19 @@ rm "$HOME/Library/Application Support/zero-desktop/workspace.json"
 
 ## Known limitations
 
-- **New File / New Folder / Rename don't work.** `packages/web`'s
-  `FileTreePanel.tsx` uses `window.prompt()`, which Tauri's WKWebView on
-  macOS doesn't implement (wry doesn't wire up the `WKUIDelegate` methods
-  it needs). The call silently returns nothing instead of showing a
-  dialog. Fixing this means replacing those calls with an in-app modal in
-  `packages/web` - tracked as a follow-up, not part of this milestone.
 - **Offline completions are Ollama-only.** The Chrome-only Nano API
   (`window.LanguageModel`) doesn't exist in WKWebView (Safari's engine).
   Point `zero.ollamaUrl`/`zero.ollamaChatModel` at a running Ollama
   instance for completions inside the desktop app.
+- **No timeout on daemon startup.** If the sidecar spawns but hangs before
+  printing its ready line, the app has no window and no way to quit but
+  Force Quit - tracked as a follow-up.
+
+`window.prompt()`/`window.confirm()` don't work in Tauri's WKWebView
+either (wry doesn't wire up the `WKUIDelegate` methods they need) -
+`packages/web`'s file tree and terminal tab rename both use inline
+editing instead, so this doesn't currently affect anything in
+`packages/web`.
 
 ## Manual smoke-test checklist
 

@@ -2,8 +2,29 @@ mod sidecar;
 mod workspace;
 
 use std::path::PathBuf;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::Mutex;
+use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
+
+/// Holds the running sidecar in app-managed state so both the window's
+/// `CloseRequested` handler and the app-level `ExitRequested` handler (which
+/// is what actually fires on macOS Cmd+Q / Dock-quit - `CloseRequested`
+/// doesn't) can reach it. `None` before the daemon starts, or once it's
+/// already been killed via either path.
+struct SidecarState(Mutex<Option<sidecar::SidecarHandle>>);
+
+/// Kills the managed sidecar, if one is currently running. Safe to call from
+/// either teardown path, and safe to call more than once - `take()` leaves
+/// `None` behind so a second call is a no-op.
+fn kill_sidecar(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<SidecarState>() {
+        if let Ok(mut guard) = state.0.lock() {
+            if let Some(mut handle) = guard.take() {
+                handle.kill();
+            }
+        }
+    }
+}
 
 fn resource_path(app: &tauri::AppHandle, relative: &str) -> PathBuf {
     // `tauri dev` never populates BaseDirectory::Resource - only `tauri build`
@@ -53,20 +74,25 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf) {
                 .expect("failed to open main window");
             let _ = workspace::save_remembered(&workspace);
 
-            // Kill the sidecar when the window closes. `on_window_event`
-            // requires a `Fn` closure (it may be invoked more than once),
-            // so the handle needs interior mutability to be killed from it.
-            let handle = std::sync::Mutex::new(handle);
+            if let Some(state) = app.try_state::<SidecarState>() {
+                *state.0.lock().unwrap() = Some(handle);
+            }
+
+            // Also kill the sidecar on a plain window close (dragging the
+            // red button) - ExitRequested alone doesn't cover that path.
             let app_handle = app.clone();
-            if let Some(window) = app_handle.get_webview_window("main") {
+            if let Some(window) = app.get_webview_window("main") {
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {
-                        handle.lock().unwrap().kill();
+                        kill_sidecar(&app_handle);
                     }
                 });
             }
         }
         Err(stderr_tail) => {
+            // The sidecar spawned but never became ready - kill it before
+            // giving up, or it outlives the app that just gave up on it.
+            handle.kill();
             app.dialog()
                 .message(format!("Zero failed to start:\n\n{stderr_tail}"))
                 .title("Zero")
@@ -78,8 +104,9 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(SidecarState(Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
             let remembered = workspace::load_remembered()
@@ -102,6 +129,15 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Zero");
+        .build(tauri::generate_context!())
+        .expect("error while building Zero");
+
+    // `RunEvent::ExitRequested` is what actually fires on macOS Cmd+Q /
+    // Dock-quit - `WindowEvent::CloseRequested` (handled above, in
+    // `start_daemon_and_open_window`) only covers closing the window itself.
+    app.run(|app_handle, event| {
+        if let RunEvent::ExitRequested { .. } = event {
+            kill_sidecar(app_handle);
+        }
+    });
 }

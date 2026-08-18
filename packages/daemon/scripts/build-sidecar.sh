@@ -30,6 +30,12 @@ cp "$NODE_BIN" "$OUT_DIR/node-runtime/node"
 # copy real files so the runtime dir is actually portable/relocatable.
 cp -RL "$DAEMON_DIR/node_modules/node-pty" "$OUT_DIR/node-runtime/node_modules/node-pty"
 cp "$DAEMON_DIR/src/pty-worker.js" "$OUT_DIR/node-runtime/pty-worker.js"
+# pty-worker.js is ESM (`import ... from "node-pty"`). In-repo that's covered
+# by packages/daemon/package.json's "type": "module", but nothing carries
+# that setting into node-runtime/ once relocated - without this, Node falls
+# back to module-syntax auto-detection, which only works on Node >= 22.7 and
+# fails silently (in the shipped app, not in any test here) on older Node.
+echo '{"type":"module"}' > "$OUT_DIR/node-runtime/package.json"
 
 echo "Bundling web UI (packages/web/dist)..."
 WEB_DIST="$REPO_ROOT/packages/web/dist"
