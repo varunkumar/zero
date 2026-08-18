@@ -41,7 +41,7 @@ export function ImageViewer(props: { path: string; client: RpcClient }) {
         <img
           src={state.dataUrl}
           alt={props.path}
-          style={zoom <= 1 ? { maxWidth: "100%", maxHeight: "100%" } : { width: `${zoom * 100}%` }}
+          style={zoom === 1 ? { maxWidth: "100%", maxHeight: "100%" } : { width: `${zoom * 100}%` }}
         />
       </div>
     </div>
