@@ -5,3 +5,6 @@
 # running every test twice.
 [test]
 pathIgnorePatterns = ["**/dist/**"]
+# StatusBar.tsx reads __ZERO_VERSION__, which vite.config.ts substitutes at
+# build time - bun test skips that step, so provide it another way.
+preload = ["./packages/web/test-setup.ts"]

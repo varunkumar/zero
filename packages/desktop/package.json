@@ -1,5 +1,6 @@
 {
   "name": "zero-desktop",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "author": "Varunkumar Nagarajan <varunkumar.n@gmail.com>",

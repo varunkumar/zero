@@ -104,6 +104,7 @@ export function StatusBar(props: {
           </span>
         )}
         <StatusPill engine={props.engine} />
+        <span style={{ opacity: 0.6, fontSize: 12 }} title="Zero version">v{__ZERO_VERSION__}</span>
         <button onClick={props.onToggleTheme} style={{ background: "transparent", border: "1px solid var(--zero-border)", color: "inherit", borderRadius: 4, fontSize: 13, padding: "2px 8px", cursor: "pointer" }}>
           {props.theme === "dark" ? "Dark" : "Light"}
         </button>

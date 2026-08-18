@@ -2,7 +2,7 @@
   "name": "zero-vscode",
   "displayName": "Zero",
   "description": "Offline inline completions powered by the Zero daemon's model gateway (Gemini Nano or a local Ollama-compatible model).",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "type": "module",
   "private": true,
   "publisher": "varunkumar",

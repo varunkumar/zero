@@ -82,3 +82,10 @@ describe("StatusBar token pill", () => {
     expect(html).toContain("1,234 / 128,000 tokens");
   });
 });
+
+describe("StatusBar version", () => {
+  test("shows the build-time __ZERO_VERSION__", () => {
+    const html = render(null);
+    expect(html).toContain(`v${__ZERO_VERSION__}`);
+  });
+});

@@ -37,22 +37,12 @@ M0 through M8 (core wrap) are implemented on `main`:
   completion context
 - **M4** chat / AgentRuntime - turn loop, session persistence, read-only
   tool calling, chat panel (completes v1 scope)
-- **M5** Zero Agents - approval-gated write tools (`fs_write`/`fs_edit`/
-  `run_command`), git checkpointing, headless `zero -p "task"` CLI, model
-  gateway
-- **M6** Zero Lite - same workbench with no daemon; open a local folder in
-  Chrome or Edge for Nano-only completions and chat. Live at
-  [zero.varunkumar.dev](https://zero.varunkumar.dev)
-- **M7** Zero Claude Plugin - `zero claude [path]` bridges Claude Code to
-  Gemini Nano running in an attached browser tab, falling back to Ollama
-- **M7.5a** Zero VS Code Plugin - `packages/vscode` extension providing
-  offline ghost-text completions inside VS Code against the same daemon
-- **M7.6** Zero VS Code Plugin, Language Model API - registers Zero as a
-  `vscode.lm` chat model provider so VS Code's own Chat view can target it
-- **M8** Zero IDE (core wrap) - `packages/desktop` Tauri app bundling
-  the daemon as a standalone sidecar (with a portable node runtime for
-  the terminal); native Open Folder workspace picker. Auto-update and
-  native menus are follow-on milestones.
+- **M5** Zero Agents - write tools, git checkpointing, headless CLI, model gateway
+- **M6** Zero Lite - no-daemon browser flavour, live at [zero.varunkumar.dev](https://zero.varunkumar.dev)
+- **M7** Zero Claude Plugin - offline Claude Code via Gemini Nano/Ollama
+- **M7.5a** Zero VS Code Plugin - offline completions in VS Code
+- **M7.6** Zero VS Code Plugin - registers Zero as a `vscode.lm` chat model provider
+- **M8** Zero IDE (core wrap) - `packages/desktop` Tauri desktop app
 
 Each milestone's implementation details live in its design doc, listed
 under [Design and plugin docs](#design-and-plugin-docs). See the

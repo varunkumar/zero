@@ -68,7 +68,7 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf) {
         Ok(info) => {
             let url = format!("http://127.0.0.1:{}/?token={}", info.port, info.token);
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse().unwrap()))
-                .title("Zero")
+                .title(format!("Zero {}", env!("CARGO_PKG_VERSION")))
                 .inner_size(1280.0, 800.0)
                 .build()
                 .expect("failed to open main window");
