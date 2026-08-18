@@ -253,6 +253,40 @@ export function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
   const groupId = props.params.groupId;
   const group = w.tabStore.getGroups().find((g) => g.id === groupId);
   const tab = group?.tabs.find((t) => t.id === group.activeTabId) ?? null;
+  const kind = tab ? classifyFile(tab.path) : null;
+
+  // Shared by the markdown-split layout and the plain-text fallback below -
+  // both render the exact same CodeMirror instance for the active tab, just
+  // alongside different sibling content (a live preview vs. nothing).
+  const editorEl = tab ? (
+    <Editor
+      path={tab.path}
+      content={tab.content}
+      theme={w.theme}
+      onSave={(text) => {
+        w.tabStore.updateContent(tab.id, text);
+        w.saveTab(tab.id);
+      }}
+      onChange={(text) => w.tabStore.updateContent(tab.id, text)}
+      onCursorChange={(pos) => {
+        if (groupId === w.activeGroupId) w.setCursor(pos);
+      }}
+      requestCompletion={w.requestCompletion}
+      onViewChange={(view) => w.registerView(groupId, view)}
+      diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
+      client={w.client}
+      lspEnabled={w.capabilities.lsp}
+      onGoToDefinition={(path, line, character) => {
+        w.openFile(path);
+        // Cursor placement after open happens once the tab's EditorView mounts;
+        // the simplest correct thing for M2 is opening the file — landing the
+        // cursor precisely requires the view to exist first, which openFile's
+        // async fs/read round-trip doesn't guarantee synchronously. Out of scope
+        // refinement: thread the target position through TabStore.openFile and
+        // have EditorPanel's mount effect dispatch a selection once ready.
+      }}
+    />
+  ) : null;
 
   return (
     <div
@@ -262,77 +296,23 @@ export function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
     >
       <TabStrip groupId={groupId} tabs={group?.tabs ?? []} activeTabId={group?.activeTabId ?? null} />
       <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-        {tab ? (
-          classifyFile(tab.path) === "markdown" ? (
-            <div style={{ height: "100%", display: "flex" }}>
-              <div style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--zero-border, #333)" }}>
-                <Editor
-                  path={tab.path}
-                  content={tab.content}
-                  theme={w.theme}
-                  onSave={(text) => {
-                    w.tabStore.updateContent(tab.id, text);
-                    w.saveTab(tab.id);
-                  }}
-                  onChange={(text) => w.tabStore.updateContent(tab.id, text)}
-                  onCursorChange={(pos) => {
-                    if (groupId === w.activeGroupId) w.setCursor(pos);
-                  }}
-                  requestCompletion={w.requestCompletion}
-                  onViewChange={(view) => w.registerView(groupId, view)}
-                  diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
-                  client={w.client}
-                  lspEnabled={w.capabilities.lsp}
-                  onGoToDefinition={(path, line, character) => {
-                    w.openFile(path);
-                    // Cursor placement after open happens once the tab's EditorView mounts;
-                    // the simplest correct thing for M2 is opening the file — landing the
-                    // cursor precisely requires the view to exist first, which openFile's
-                    // async fs/read round-trip doesn't guarantee synchronously. Out of scope
-                    // refinement: thread the target position through TabStore.openFile and
-                    // have EditorPanel's mount effect dispatch a selection once ready.
-                  }}
-                />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <MarkdownPreview content={tab.content} />
-              </div>
-            </div>
-          ) : classifyFile(tab.path) === "image" ? (
-            <ImageViewer path={tab.path} client={w.client} />
-          ) : classifyFile(tab.path) === "pdf" ? (
-            <PdfViewer path={tab.path} client={w.client} />
-          ) : (
-            <Editor
-              path={tab.path}
-              content={tab.content}
-              theme={w.theme}
-              onSave={(text) => {
-                w.tabStore.updateContent(tab.id, text);
-                w.saveTab(tab.id);
-              }}
-              onChange={(text) => w.tabStore.updateContent(tab.id, text)}
-              onCursorChange={(pos) => {
-                if (groupId === w.activeGroupId) w.setCursor(pos);
-              }}
-              requestCompletion={w.requestCompletion}
-              onViewChange={(view) => w.registerView(groupId, view)}
-              diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
-              client={w.client}
-              lspEnabled={w.capabilities.lsp}
-              onGoToDefinition={(path, line, character) => {
-                w.openFile(path);
-                // Cursor placement after open happens once the tab's EditorView mounts;
-                // the simplest correct thing for M2 is opening the file — landing the
-                // cursor precisely requires the view to exist first, which openFile's
-                // async fs/read round-trip doesn't guarantee synchronously. Out of scope
-                // refinement: thread the target position through TabStore.openFile and
-                // have EditorPanel's mount effect dispatch a selection once ready.
-              }}
-            />
-          )
-        ) : (
+        {!tab ? (
           <div style={{ padding: 16, opacity: 0.6 }}>Select a file to edit (Cmd/Ctrl+P)</div>
+        ) : kind === "markdown" ? (
+          <div style={{ height: "100%", display: "flex" }}>
+            <div style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--zero-border, #333)" }}>
+              {editorEl}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <MarkdownPreview content={tab.content} />
+            </div>
+          </div>
+        ) : kind === "image" ? (
+          <ImageViewer path={tab.path} client={w.client} />
+        ) : kind === "pdf" ? (
+          <PdfViewer path={tab.path} client={w.client} />
+        ) : (
+          editorEl
         )}
       </div>
     </div>

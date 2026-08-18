@@ -8,18 +8,15 @@ const MIME_BY_EXT: Record<string, string> = {
   pdf: "application/pdf",
 };
 
-/** Leading-dot files like ".png" have no "extension" by this rule (mirrors
- * the web side's `extOf` convention in `packages/web/src/mime.ts`) and
- * always fall back to "application/octet-stream". */
+/** Leading-dot files like ".gitignore" have no extension by this rule
+ * (mirrors `iconFor.ts`'s existing convention) and always fall back to
+ * "application/octet-stream". */
 function extOf(path: string): string {
   const name = path.split("/").at(-1) ?? path;
   const dotIndex = name.lastIndexOf(".");
   return dotIndex > 0 ? name.slice(dotIndex + 1).toLowerCase() : "";
 }
 
-/** Derives a mime type from a file's extension via a small fixed table —
- * not content-sniffed, since callers already trust the extension to pick
- * which viewer renders the file. */
 export function mimeTypeFor(path: string): string {
   return MIME_BY_EXT[extOf(path)] ?? "application/octet-stream";
 }

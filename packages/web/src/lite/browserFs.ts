@@ -1,7 +1,7 @@
 import ignore, { type Ignore } from "ignore";
 import type { FsSearchResult, TreeEntry } from "@zero/protocol";
 import { assertSafePath } from "./paths";
-import { mimeTypeFor } from "../workbench/fileKind";
+import { mimeTypeFor } from "../mime";
 
 const SKIP_NAMES = new Set([".git", "node_modules"]);
 const MAX_SEARCH_MATCHES = 200;
@@ -37,6 +37,24 @@ function isNotFound(err: unknown): boolean {
 
 function joinRel(prefix: string, name: string): string {
   return prefix ? `${prefix}/${name}` : name;
+}
+
+// Chunk size for `bytesToBinaryString`'s `String.fromCharCode(...chunk)`
+// spread: spreading a whole multi-MB Uint8Array into `String.fromCharCode`
+// at once can exceed the JS engine's max-argument-count limit (and is slow
+// besides char-by-char concatenation), so bytes are converted in slices.
+const BASE64_CHUNK_BYTES = 8192;
+
+/** Converts raw bytes to a binary string suitable for `btoa`, in chunks
+ * rather than one `String.fromCharCode` call per byte or one spread over
+ * the whole array (see BASE64_CHUNK_BYTES). */
+function bytesToBinaryString(bytes: Uint8Array): string {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK_BYTES) {
+    const chunk = bytes.subarray(offset, offset + BASE64_CHUNK_BYTES);
+    binary += String.fromCharCode(...chunk);
+  }
+  return binary;
 }
 
 function sameRelPath(a: string, b: string): boolean {
@@ -78,9 +96,7 @@ export class BrowserFSWorkspace {
     const { parent, name } = await this.#parentAndName(path, false);
     const file = await parent.getFileHandle(name);
     const buf = await (await file.getFile()).arrayBuffer();
-    let binary = "";
-    for (const byte of new Uint8Array(buf)) binary += String.fromCharCode(byte);
-    return { base64: btoa(binary), mimeType: mimeTypeFor(path) };
+    return { base64: btoa(bytesToBinaryString(new Uint8Array(buf))), mimeType: mimeTypeFor(path) };
   }
 
   async write(path: string, content: string): Promise<void> {

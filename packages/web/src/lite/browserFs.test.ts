@@ -133,7 +133,8 @@ test("readBinary round-trips bytes as base64 with the right mime type", async ()
   // MemFile only stores text (see memDir.ts), so round-trip via a string
   // that maps 1:1 through btoa/atob — this test only needs to prove
   // readBinary reaches the file and returns {base64, mimeType}, not that
-  // MemFile stores real binary (Step 3 below extends MemFile itself).
+  // MemFile itself can hold arbitrary binary content (it can't; content here
+  // is ASCII-safe for that reason, not because readBinary requires it).
   await ws.write("src/pic.png", "fake-bytes");
   const result = await ws.readBinary("src/pic.png");
   expect(result.mimeType).toBe("image/png");
