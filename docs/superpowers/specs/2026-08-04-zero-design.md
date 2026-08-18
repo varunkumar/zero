@@ -366,9 +366,15 @@ daemon path). Capability flags in WorkspaceProvider hide missing features.
   Copilot custom-model auto-configuration, Language Model API registration,
   daemon/Nano-host autostart per section 10. Depends on the model gateway
   (M5) and the Nano bridge (M7); shares their tool emulation.
-- M8, Zero IDE: Tauri wrap with bundled daemon (Bun compile), auto-update,
-  native menus. Plugin worker isolation and online capabilities (cloud
-  providers, sync) land in this era.
+- M8, Zero IDE: Tauri wrap with bundled daemon (Bun compile). Core wrap
+  only - auto-update and cross-platform packaging are explicitly out of
+  scope going forward, not deferred to a later milestone.
+- M8.5, Zero IDE polish: native menus/dock integration (including an
+  in-app change-workspace affordance), multi-window/multi-workspace
+  support, and a startup-hang timeout for the sidecar. Last planned
+  milestone - see the M8 design doc's section 10 for full scope. Plugin
+  worker isolation and online capabilities (cloud providers, sync) remain
+  open-ended, not scheduled to any milestone.
 
 Ordering rationale: M1 before terminal/LSP because offline completion is the
 product's reason to exist; M3 before chat because chat is only as good as its

@@ -275,3 +275,35 @@ the remembered-workspace store file by hand (documented in
   `zero serve`/`zero claude` rely on doesn't exist in WKWebView (Safari's
   engine), which is what Tauri uses on macOS. Not a bug, just a real
   constraint worth documenting.
+
+## 10. M8.5: Zero IDE polish (planned)
+
+Status: Not started
+
+Zero's milestone roadmap ends at M8; no further numbered milestones are
+planned, and cross-platform packaging and auto-update are explicitly out
+of scope going forward (decided after M8 shipped - see section 9's first
+and third bullets, which stay deferred indefinitely rather than rolling
+into a future milestone). M8.5 picks up the remaining M8 follow-ups that
+are still worth doing on the current macOS-only, no-auto-update scope:
+
+- **`sidecar.rs::wait_for_ready()` timeout.** If the daemon process spawns
+  but hangs before printing its ready line, Zero IDE opens no window and
+  gives the user no way to quit but Force Quit. Add a timeout that kills
+  the sidecar and shows the existing failure dialog (same path as a
+  sidecar that exits early) instead of hanging forever.
+- **Native menus, dock/menu-bar integration, global shortcuts.** Includes
+  an in-app "change workspace" affordance - today the only way to switch
+  workspace is to delete the remembered-workspace file and relaunch.
+  Scope this as: a native "File > Open Folder..." menu item (and/or a
+  keyboard shortcut) that re-runs the folder picker and restarts the
+  sidecar against the new workspace, without requiring an app restart.
+- **Multi-window / multi-workspace-per-instance support.** Open more than
+  one workspace at a time, one native window per workspace, instead of
+  today's single-workspace-per-app-instance model.
+
+Out of scope for M8.5 (unchanged from M8, now indefinite rather than
+"deferred"): auto-update, cross-platform (Windows/Linux) builds, plugin
+worker isolation, cloud provider auth, sync. The Ollama-only completions
+constraint inside WKWebView is a platform limitation, not a follow-up -
+nothing to schedule there.

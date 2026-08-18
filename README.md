@@ -43,6 +43,8 @@ M0 through M8 (core wrap) are implemented on `main`:
 - **M7.5a** Zero VS Code Plugin - offline completions in VS Code
 - **M7.6** Zero VS Code Plugin - registers Zero as a `vscode.lm` chat model provider
 - **M8** Zero IDE (core wrap) - `packages/desktop` Tauri desktop app
+- **M8.5** Zero IDE polish (planned) - native menus/dock integration,
+  multi-window support, sidecar startup-hang timeout
 
 Each milestone's implementation details live in its design doc, listed
 under [Design and plugin docs](#design-and-plugin-docs). See the
