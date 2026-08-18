@@ -31,4 +31,16 @@ cp "$NODE_BIN" "$OUT_DIR/node-runtime/node"
 cp -RL "$DAEMON_DIR/node_modules/node-pty" "$OUT_DIR/node-runtime/node_modules/node-pty"
 cp "$DAEMON_DIR/src/pty-worker.js" "$OUT_DIR/node-runtime/pty-worker.js"
 
+echo "Bundling web UI (packages/web/dist)..."
+WEB_DIST="$REPO_ROOT/packages/web/dist"
+if [ ! -d "$WEB_DIST" ]; then
+  echo "error: $WEB_DIST does not exist - run 'bun run --cwd packages/web build' first" >&2
+  exit 1
+fi
+# import.meta.url-relative resolution (bin/zero.ts's default webDist) breaks
+# inside a `bun build --compile` binary the same way it did for pty-worker.js
+# (see ZERO_WEB_DIST in bin/zero.ts) - bundle a real, relocatable copy here
+# so the Tauri shell can point the sidecar at it via that env var.
+cp -RL "$WEB_DIST" "$OUT_DIR/web-dist"
+
 echo "Sidecar build complete: $OUT_DIR"

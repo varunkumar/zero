@@ -254,3 +254,17 @@ the remembered-workspace store file by hand (documented in
 - Plugin worker isolation, cloud provider auth, sync (explicitly called
   out in the top-level roadmap as landing "in this era" but not required
   for the core wrap).
+- `packages/web`'s use of `window.prompt()`/`alert()`/`confirm()` (e.g.
+  `FileTreePanel.tsx`'s New File/New Folder/Rename flow) doesn't work
+  inside Tauri's WKWebView on macOS - wry doesn't implement the
+  `WKUIDelegate` methods these need by default, so the calls silently
+  return nothing instead of showing a dialog. Discovered during this
+  milestone's manual smoke test (section 8); the fix is an in-app modal
+  component in `packages/web` replacing the browser-native calls - a
+  `packages/web` UI change, not a `packages/desktop` wiring issue, so
+  it's follow-up work rather than part of this spec's scope.
+- Offline completions inside Zero IDE are limited to the Ollama-compatible
+  provider - the Chrome-only Nano API (`window.LanguageModel`) that
+  `zero serve`/`zero claude` rely on doesn't exist in WKWebView (Safari's
+  engine), which is what Tauri uses on macOS. Not a bug, just a real
+  constraint worth documenting.

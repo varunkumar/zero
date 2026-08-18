@@ -43,7 +43,12 @@ if (argv[0] === "claude") {
   const rest = argv.slice(1);
   const path = positionalArgs(rest)[0];
   const root = resolve(path ?? ".");
-  const webDist = new URL("../../web/dist", import.meta.url).pathname;
+  // `import.meta.url`-relative resolution breaks inside a `bun build
+  // --compile` binary (it resolves against a virtual embedded path, not a
+  // real one on disk) - ZERO_WEB_DIST lets a compiled sidecar (Zero IDE's
+  // Tauri shell) point this at its bundled web/dist copy instead. Unset in
+  // the normal `zero serve` dev path, where the relative lookup is correct.
+  const webDist = process.env.ZERO_WEB_DIST ?? new URL("../../web/dist", import.meta.url).pathname;
   const parsedGatewayPort = parseGatewayPort(rest);
   if (parsedGatewayPort === "invalid") {
     console.error("error: --gateway-port requires a numeric value");

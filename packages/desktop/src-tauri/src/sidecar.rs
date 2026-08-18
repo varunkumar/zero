@@ -30,6 +30,7 @@ fn parse_ready_line(line: &str) -> Option<ReadyInfo> {
 pub fn spawn(
     sidecar_bin: &Path,
     node_runtime_dir: &Path,
+    web_dist_dir: &Path,
     workspace: &Path,
 ) -> std::io::Result<SidecarHandle> {
     let child = Command::new(sidecar_bin)
@@ -40,6 +41,9 @@ pub fn spawn(
         .arg("--json")
         .env("ZERO_PTY_NODE_BIN", node_runtime_dir.join("node"))
         .env("ZERO_PTY_WORKER_DIR", node_runtime_dir)
+        // import.meta.url-relative resolution breaks inside a `bun build
+        // --compile` binary - see ZERO_WEB_DIST in packages/daemon/bin/zero.ts.
+        .env("ZERO_WEB_DIST", web_dist_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
