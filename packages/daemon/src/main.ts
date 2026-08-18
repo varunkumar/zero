@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createDaemon, type DaemonOptions } from "./server";
 import { startModelGateway } from "./modelGateway";
 import { Workspace } from "./workspace";
+import { mimeTypeFor } from "./mime";
 import { PtyService } from "./pty";
 import { LspService } from "./lsp/service";
 import { DEFAULT_LSP_SERVERS, type LspServerConfig } from "./lsp/registry";
@@ -83,6 +84,11 @@ export async function startZero(opts: DaemonOptions) {
 
   daemon.rpc.register("fs/read", z.object({ path: z.string() }),
     async (p) => ({ content: await ws.read(p.path) }));
+  daemon.rpc.register("fs/readBinary", z.object({ path: z.string() }),
+    async (p) => ({
+      contentBase64: (await ws.readBinary(p.path)).toString("base64"),
+      mimeType: mimeTypeFor(p.path),
+    }));
   daemon.rpc.register("fs/write", z.object({ path: z.string(), content: z.string() }),
     async (p) => { await ws.write(p.path, p.content); return {}; });
   daemon.rpc.register("fs/tree", z.object({}).optional().transform(() => ({})),

@@ -28,6 +28,8 @@ export function parseMessage(raw: string): RpcRequest | RpcResponse | RpcNotific
 export interface TreeEntry { path: string; kind: "file" | "dir" }
 export interface FsReadParams { path: string }
 export interface FsReadResult { content: string }
+export interface FsReadBinaryParams { path: string }
+export interface FsReadBinaryResult { contentBase64: string; mimeType: string }
 export interface FsWriteParams { path: string; content: string }
 export interface FsTreeResult { entries: TreeEntry[] }
 export interface FsChangedEvent { path: string }

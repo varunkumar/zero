@@ -63,6 +63,10 @@ export class Workspace {
     return fs.readFile(await this.#resolveReal(rel), "utf8");
   }
 
+  async readBinary(rel: string): Promise<Buffer> {
+    return fs.readFile(await this.#resolveReal(rel));
+  }
+
   async write(rel: string, content: string): Promise<void> {
     // Create parent dirs first so #resolveReal can realpath them (e.g. `.zero/`).
     const abs = this.#resolve(rel);

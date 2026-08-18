@@ -25,6 +25,15 @@ test("read and write round-trip", async () => {
   expect(await ws.read("b.ts")).toBe("hi");
 });
 
+test("readBinary round-trips raw bytes as base64", async () => {
+  const root = makeProject();
+  const bytes = Uint8Array.from([0, 1, 2, 253, 254, 255]);
+  writeFileSync(join(root, "img.bin"), bytes);
+  const ws = new Workspace(root);
+  const buf = await ws.readBinary("img.bin");
+  expect(Buffer.from(buf).toString("base64")).toBe(Buffer.from(bytes).toString("base64"));
+});
+
 test("blocks path traversal", async () => {
   const ws = new Workspace(makeProject());
   await expect(ws.read("../../etc/passwd")).rejects.toThrow(PathOutsideWorkspaceError);
