@@ -18,9 +18,10 @@ class MemFile implements FileHandle {
 
   constructor(readonly name: string) {}
 
-  async getFile(): Promise<{ text(): Promise<string>; size: number }> {
+  async getFile(): Promise<{ text(): Promise<string>; arrayBuffer(): Promise<ArrayBuffer>; size: number }> {
     return {
       text: async () => this.content,
+      arrayBuffer: async () => new TextEncoder().encode(this.content).buffer,
       size: this.content.length,
     };
   }

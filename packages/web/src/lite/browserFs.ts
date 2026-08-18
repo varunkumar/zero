@@ -1,6 +1,7 @@
 import ignore, { type Ignore } from "ignore";
 import type { FsSearchResult, TreeEntry } from "@zero/protocol";
 import { assertSafePath } from "./paths";
+import { mimeTypeFor } from "../workbench/fileKind";
 
 const SKIP_NAMES = new Set([".git", "node_modules"]);
 const MAX_SEARCH_MATCHES = 200;
@@ -11,7 +12,7 @@ const BINARY_SNIFF = 8192;
 export interface FileHandle {
   name: string;
   kind: "file";
-  getFile(): Promise<{ text(): Promise<string>; size: number }>;
+  getFile(): Promise<{ text(): Promise<string>; arrayBuffer(): Promise<ArrayBuffer>; size: number }>;
   createWritable(): Promise<{ write(data: string): Promise<void>; close(): Promise<void> }>;
 }
 
@@ -71,6 +72,15 @@ export class BrowserFSWorkspace {
     const { parent, name } = await this.#parentAndName(path, false);
     const file = await parent.getFileHandle(name);
     return (await file.getFile()).text();
+  }
+
+  async readBinary(path: string): Promise<{ base64: string; mimeType: string }> {
+    const { parent, name } = await this.#parentAndName(path, false);
+    const file = await parent.getFileHandle(name);
+    const buf = await (await file.getFile()).arrayBuffer();
+    let binary = "";
+    for (const byte of new Uint8Array(buf)) binary += String.fromCharCode(byte);
+    return { base64: btoa(binary), mimeType: mimeTypeFor(path) };
   }
 
   async write(path: string, content: string): Promise<void> {

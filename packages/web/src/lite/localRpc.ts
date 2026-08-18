@@ -18,6 +18,7 @@ export interface LocalRpcOpts {
     delete(path: string): Promise<void>;
     move(path: string, newPath: string): Promise<void>;
     copy(path: string, newPath: string): Promise<void>;
+    readBinary(path: string): Promise<{ base64: string; mimeType: string }>;
   };
   extra?: (method: string, params: unknown) => Promise<unknown>;
 }
@@ -85,6 +86,10 @@ export function createLocalSocket(opts: LocalRpcOpts): SocketLike & {
       }
       case "fs/read":
         return { content: await opts.fs.read(str(params, "path")) };
+      case "fs/readBinary": {
+        const { base64, mimeType } = await opts.fs.readBinary(str(params, "path"));
+        return { contentBase64: base64, mimeType };
+      }
       case "fs/write": {
         const path = str(params, "path");
         await opts.fs.write(path, str(params, "content"));
