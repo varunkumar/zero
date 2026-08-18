@@ -79,68 +79,75 @@ fn resource_path(app: &tauri::AppHandle, relative: &str) -> PathBuf {
 /// empty-app state to fall back to since other windows may already be
 /// open.
 ///
-/// The picker itself must run on the main thread (native modal), but
-/// spawning the sidecar and waiting for it to become ready can take a
-/// few seconds - doing that on the main thread would freeze every
-/// already-open window's UI (Tauri's event loop can't service them while
-/// blocked). So that work happens on a background thread; only the
+/// This handler runs on the live main thread (it's an `on_menu_event`
+/// callback), so every dialog call here uses the non-blocking,
+/// callback-based API (`pick_folder`/`show`, not
+/// `blocking_pick_folder`/`blocking_show`) - the tauri-plugin-dialog docs
+/// call out that the blocking variants deadlock when called on the main
+/// thread, because they wait on a channel for a callback that itself
+/// needs the main thread's event loop to keep running to fire. The
+/// blocking variants are only safe in contexts like `setup()`, which run
+/// before the event loop starts (see `start_daemon_and_open_window`).
+/// Spawning the sidecar and waiting for it to become ready can also take
+/// a few seconds, so that work happens on a background thread; only the
 /// final window-creation step is dispatched back to the main thread via
 /// `run_on_main_thread`, since window/webview creation isn't safe off it.
 fn open_new_workspace_window(app: &tauri::AppHandle) {
-    let picked = app
-        .dialog()
+    let app = app.clone();
+    app.dialog()
         .file()
         .set_title("Open a folder for Zero")
-        .blocking_pick_folder()
-        .map(|p| p.into_path().expect("folder path"));
-
-    let Some(root) = picked else { return };
-
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let sidecar_bin = resource_path(&app, "zero-daemon-sidecar");
-        let node_runtime_dir = resource_path(&app, "node-runtime");
-        let web_dist_dir = resource_path(&app, "web-dist");
-
-        let mut handle = match sidecar::spawn(&sidecar_bin, &node_runtime_dir, &web_dist_dir, &root) {
-            Ok(h) => h,
-            Err(e) => {
-                let app_for_main = app.clone();
-                let _ = app.run_on_main_thread(move || {
-                    app_for_main
-                        .dialog()
-                        .message(format!("Failed to start Zero: {e}"))
-                        .title("Zero")
-                        .blocking_show();
-                });
+        .pick_folder(move |picked| {
+            let Some(root) = picked.map(|p| p.into_path().expect("folder path")) else {
                 return;
-            }
-        };
+            };
 
-        match handle.wait_for_ready() {
-            Ok(info) => {
-                let app_for_main = app.clone();
-                let _ = app.run_on_main_thread(move || {
-                    let label = next_workspace_label();
-                    open_window_for_ready_workspace(&app_for_main, root, &label, handle, info);
-                });
-            }
-            Err(stderr_tail) => {
-                // The sidecar spawned but never became ready - kill it
-                // before giving up, or it outlives the app that just
-                // gave up on it.
-                handle.kill();
-                let app_for_main = app.clone();
-                let _ = app.run_on_main_thread(move || {
-                    app_for_main
-                        .dialog()
-                        .message(format!("Zero failed to start:\n\n{stderr_tail}"))
-                        .title("Zero")
-                        .blocking_show();
-                });
-            }
-        }
-    });
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let sidecar_bin = resource_path(&app, "zero-daemon-sidecar");
+                let node_runtime_dir = resource_path(&app, "node-runtime");
+                let web_dist_dir = resource_path(&app, "web-dist");
+
+                let mut handle = match sidecar::spawn(&sidecar_bin, &node_runtime_dir, &web_dist_dir, &root) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        let app_for_main = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            app_for_main
+                                .dialog()
+                                .message(format!("Failed to start Zero: {e}"))
+                                .title("Zero")
+                                .show(|_| {});
+                        });
+                        return;
+                    }
+                };
+
+                match handle.wait_for_ready() {
+                    Ok(info) => {
+                        let app_for_main = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            let label = next_workspace_label();
+                            open_window_for_ready_workspace(&app_for_main, root, &label, handle, info);
+                        });
+                    }
+                    Err(stderr_tail) => {
+                        // The sidecar spawned but never became ready -
+                        // kill it before giving up, or it outlives the
+                        // app that just gave up on it.
+                        handle.kill();
+                        let app_for_main = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            app_for_main
+                                .dialog()
+                                .message(format!("Zero failed to start:\n\n{stderr_tail}"))
+                                .title("Zero")
+                                .show(|_| {});
+                        });
+                    }
+                }
+            });
+        });
 }
 
 /// Builds the window for an already-ready sidecar and files it into
