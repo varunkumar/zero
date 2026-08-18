@@ -1,0 +1,37 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Zero",
+  "version": "0.1.0",
+  "identifier": "dev.zero.desktop",
+  "build": {
+    "frontendDist": "../frontend-stub",
+    "beforeBuildCommand": "bun run --cwd ../web build && bun run --cwd ../daemon build:sidecar"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "Varunkumar Nagarajan",
+    "copyright": "Copyright © 2026 Varunkumar Nagarajan",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../daemon/dist/zero-daemon-sidecar": "zero-daemon-sidecar",
+      "../../daemon/dist/node-runtime": "node-runtime",
+      "../../daemon/dist/web-dist": "web-dist"
+    },
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}

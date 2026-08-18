@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { PtySessionInfo } from "@zero/protocol";
 
 interface Session { sessionId: string; shell: string }
@@ -13,6 +14,11 @@ export class PtyService {
   #worker: ChildProcessWithoutNullStreams;
   #dead = false;
 
+  /** Exposed for tests: which node binary the worker was actually
+   * spawned with, so ZERO_PTY_NODE_BIN/ZERO_PTY_WORKER_DIR overrides
+   * are observable without reaching into #worker's private fields. */
+  readonly spawnedNodeBin: string;
+
   constructor(
     private cwd: string,
     private onOutput: (sessionId: string, data: string) => void,
@@ -23,8 +29,22 @@ export class PtyService {
     // silent — https://github.com/oven-sh/bun/issues/7362). Host it in a
     // plain-JS worker run under real `node` instead, bridged over
     // newline-delimited JSON on stdio.
-    const workerPath = fileURLToPath(new URL("./pty-worker.js", import.meta.url));
-    this.#worker = spawn("node", [workerPath]);
+    //
+    // ZERO_PTY_NODE_BIN/ZERO_PTY_WORKER_DIR let a compiled sidecar (Zero
+    // IDE's Tauri shell) point this at a bundled portable node + copied
+    // pty-worker.js + node_modules/node-pty, since none of those exist on
+    // disk relative to import.meta.url inside a `bun build --compile`
+    // binary, and a compiled sidecar can't assume `node` is on PATH.
+    const overrideBin = process.env.ZERO_PTY_NODE_BIN;
+    const overrideDir = process.env.ZERO_PTY_WORKER_DIR;
+    if (overrideBin && overrideDir) {
+      this.spawnedNodeBin = overrideBin;
+      this.#worker = spawn(overrideBin, [join(overrideDir, "pty-worker.js")], { cwd: overrideDir });
+    } else {
+      const workerPath = fileURLToPath(new URL("./pty-worker.js", import.meta.url));
+      this.spawnedNodeBin = "node";
+      this.#worker = spawn("node", [workerPath]);
+    }
 
     // A spawn failure (e.g. `node` missing from PATH) emits 'error' on the
     // ChildProcess EventEmitter; with no listener that throws and takes down

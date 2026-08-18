@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { existsSync, statSync, chmodSync } from "node:fs";
+import { existsSync, statSync, chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { PtyService } from "./pty";
 
 /**
@@ -209,4 +210,31 @@ test("closeAll clears the session list synchronously", () => {
   expect(service.list().map((s) => s.sessionId).sort()).toEqual([a, b].sort());
   service.closeAll();
   expect(service.list()).toEqual([]);
+});
+
+test("ZERO_PTY_NODE_BIN/ZERO_PTY_WORKER_DIR override the default node/worker spawn", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "zero-pty-override-"));
+  try {
+    // A minimal stand-in "node" that just echoes back a single pty/exit
+    // event for any open() call, so the test can assert the override was
+    // actually used without needing a real node-pty build in the temp dir.
+    const fakeNode = join(dir, "fake-node.sh");
+    writeFileSync(fakeNode, "#!/bin/sh\nexit 0\n");
+    chmodSync(fakeNode, 0o755);
+    writeFileSync(join(dir, "pty-worker.js"), "");
+
+    const prevBin = process.env.ZERO_PTY_NODE_BIN;
+    const prevDir = process.env.ZERO_PTY_WORKER_DIR;
+    process.env.ZERO_PTY_NODE_BIN = fakeNode;
+    process.env.ZERO_PTY_WORKER_DIR = dir;
+    try {
+      const service = new PtyService(process.cwd(), () => {}, () => {});
+      expect(service.spawnedNodeBin).toBe(fakeNode);
+    } finally {
+      if (prevBin === undefined) delete process.env.ZERO_PTY_NODE_BIN; else process.env.ZERO_PTY_NODE_BIN = prevBin;
+      if (prevDir === undefined) delete process.env.ZERO_PTY_WORKER_DIR; else process.env.ZERO_PTY_WORKER_DIR = prevDir;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

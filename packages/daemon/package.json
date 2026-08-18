@@ -4,6 +4,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "build:sidecar": "bash scripts/build-sidecar.sh"
+  },
   "dependencies": {
     "@zero/core": "workspace:*",
     "@zero/protocol": "workspace:*",
@@ -25,6 +28,7 @@
   "devDependencies": {
     "@types/bun": "^1.3.14",
     "@types/react": "^18.3.0",
-    "ink-testing-library": "^4.0.0"
+    "ink-testing-library": "^4.0.0",
+    "react-devtools-core": "^7.0.1"
   }
 }
