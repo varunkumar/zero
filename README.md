@@ -27,7 +27,7 @@ Full design and roadmap:
 
 ## Status
 
-M0 through M8 (core wrap) are implemented on `main`:
+M0 through M8.5 - the full roadmap - are implemented on `main`:
 
 - **M0** skeleton (daemon-served editor with save)
 - **M1** offline copilot (Chrome Nano + Ollama-compatible fallback)
