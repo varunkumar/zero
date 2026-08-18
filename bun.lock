@@ -40,6 +40,7 @@
     },
     "packages/desktop": {
       "name": "zero-desktop",
+      "version": "0.8.0",
       "devDependencies": {
         "@tauri-apps/cli": "^2.0.0",
       },
@@ -55,7 +56,7 @@
     },
     "packages/vscode": {
       "name": "zero-vscode",
-      "version": "0.7.2",
+      "version": "0.8.0",
       "dependencies": {
         "@zero/core": "workspace:*",
       },
@@ -88,6 +89,7 @@
         "command-score": "^0.1.2",
         "dockview-react": "^1.17.0",
         "ignore": "^5.3.0",
+        "marked": "^18.0.10",
         "react": "^18.3.0",
         "react-arborist": "^3.4.0",
         "react-dom": "^18.3.0",
@@ -809,6 +811,8 @@
     "lru-cache": ["lru-cache@6.0.0", "", { "dependencies": { "yallist": "^4.0.0" } }, "sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA=="],
 
     "markdown-it": ["markdown-it@14.3.0", "", { "dependencies": { "argparse": "^2.0.1", "entities": "^4.5.0", "linkify-it": "^5.0.2", "mdurl": "^2.0.0", "punycode.js": "^2.3.1", "uc.micro": "^2.1.0" }, "bin": { "markdown-it": "bin/markdown-it.mjs" } }, "sha512-RCEsPjR+sr0x+AuYp601tKTkgFG4YEPLCzHST3cQ/fhlJkqAkz1L2/Qbp1j9qw5SBwQHFBoW8+hoN5xssOF0Tw=="],
+
+    "marked": ["marked@18.0.10", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-FJeH4bRpYoXiggcgriCGItKCSv3xkngJc4QCZ/rkQCogU3VYaLxYJoZl8Nw/b4+x7iij/pd+09mZ6A1dXzpL0A=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 
