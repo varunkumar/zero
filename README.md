@@ -77,6 +77,7 @@ zero/
     daemon/      # @zero/daemon   - Node/Bun capability server
     web/         # @zero/web      - browser client
     vscode/      # zero-vscode    - VS Code inline-completions extension
+    desktop/     # zero-desktop   - Tauri desktop app (Zero IDE)
   docs/
 ```
 
