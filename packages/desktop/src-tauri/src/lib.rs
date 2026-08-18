@@ -1,3 +1,4 @@
+mod sidecar;
 mod workspace;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
