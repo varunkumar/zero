@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { RpcClient } from "@zero/protocol";
-import { confirmAndDelete, containingDir, createEntry, deleteEntry, joinPath, pasteEntry, renameEntry } from "./FileTreePanel";
+import {
+  confirmAndDelete,
+  containingDir,
+  createEntry,
+  deleteEntry,
+  insertDraft,
+  joinPath,
+  pasteEntry,
+  renameEntry,
+} from "./FileTreePanel";
 
 /** Records every `client.request` call so tests can assert exactly which
  * `fs/*` RPC an action issues, without a DOM (this package has no DOM test
@@ -104,6 +113,43 @@ describe("confirmAndDelete", () => {
       return false;
     });
     expect(seenMessage).toContain("src/dead.ts");
+  });
+});
+
+describe("insertDraft", () => {
+  test("inserts at the front of the root list when parentId is null", () => {
+    const roots = [{ id: "b.ts", name: "b.ts", kind: "file" as const }];
+    const draft = { id: "__draft__", name: "", kind: "file" as const };
+    expect(insertDraft(roots, null, draft)).toEqual([draft, { id: "b.ts", name: "b.ts", kind: "file" as const }]);
+  });
+
+  test("inserts as the first child of the matching directory", () => {
+    const roots = [
+      { id: "src", name: "src", kind: "dir" as const, children: [{ id: "src/a.ts", name: "a.ts", kind: "file" as const }] },
+    ];
+    const draft = { id: "__draft__", name: "", kind: "file" as const };
+    const result = insertDraft(roots, "src", draft);
+    expect(result[0]!.children).toEqual([draft, { id: "src/a.ts", name: "a.ts", kind: "file" as const }]);
+  });
+
+  test("finds the target directory nested inside another directory", () => {
+    const roots = [
+      {
+        id: "src",
+        name: "src",
+        kind: "dir" as const,
+        children: [{ id: "src/utils", name: "utils", kind: "dir" as const, children: [] }],
+      },
+    ];
+    const draft = { id: "__draft__", name: "", kind: "dir" as const };
+    const result = insertDraft(roots, "src/utils", draft);
+    expect(result[0]!.children![0]!.children).toEqual([draft]);
+  });
+
+  test("leaves the tree unchanged when the target directory isn't found", () => {
+    const roots = [{ id: "a.ts", name: "a.ts", kind: "file" as const }];
+    const draft = { id: "__draft__", name: "", kind: "file" as const };
+    expect(insertDraft(roots, "missing", draft)).toEqual(roots);
   });
 });
 

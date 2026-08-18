@@ -1,5 +1,5 @@
 import { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
+import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
 import type { RpcClient, TreeEntry, FsTreeResult } from "@zero/protocol";
 import { iconFor } from "../icons/iconFor";
 
@@ -8,6 +8,23 @@ interface Node {
   name: string;
   kind: "file" | "dir";
   children?: Node[];
+}
+
+/** Synthetic id for the not-yet-created row shown while a New File/New
+ * Folder name is being typed - never sent in an `fs/*` RPC. */
+const DRAFT_ID = "__zero-draft__";
+
+/** Returns a new tree with `draft` inserted as the first child of the node
+ * `parentId` (or, when `parentId` is `null`, as the first root) - pure so
+ * the create-in-collapsed-folder / create-at-root cases are unit-testable
+ * without mounting react-arborist. */
+export function insertDraft(roots: Node[], parentId: string | null, draft: Node): Node[] {
+  if (parentId === null) return [draft, ...roots];
+  return roots.map((n) => {
+    if (n.id === parentId) return { ...n, children: [draft, ...(n.children ?? [])] };
+    if (n.children) return { ...n, children: insertDraft(n.children, parentId, draft) };
+    return n;
+  });
 }
 
 /** Imperative actions exposed to `Workbench.tsx` so its keybindings
@@ -132,16 +149,72 @@ function MenuItem(props: { onClick: () => void; disabled?: boolean; children: Re
 }
 
 /** Lets the externally-defined `Row` renderer (react-arborist calls it, so
- * it can't take arbitrary extra props) reach the context-menu handler that
- * lives in `FileTreePanel`'s state, without recreating `Row` itself every
- * render. */
+ * it can't take arbitrary extra props) reach state that lives in
+ * `FileTreePanel` - the context-menu handler, which path (if any) is armed
+ * for delete confirmation, and cancelling an in-progress New File/Folder
+ * draft - without recreating `Row` itself every render. */
 const RowActionsContext = createContext<{
   onContextMenu: (e: React.MouseEvent, node: NodeApi<Node>) => void;
+  confirmingDeletePath: string | null;
+  cancelDraft: () => void;
 } | null>(null);
+
+/** Inline text input used for both renaming an existing entry and naming a
+ * New File/Folder draft - replaces `window.prompt()`, which Tauri's
+ * WKWebView on macOS doesn't implement. Enter or losing focus commits;
+ * Escape cancels. */
+function InlineNameInput(props: { initialValue: string; onSubmit: (value: string) => void; onCancel: () => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Enter/Escape already resolve the edit; guards the blur handler that
+  // follows them (Enter/Escape both move focus away) from submitting twice.
+  const settledRef = useRef(false);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  return (
+    <input
+      ref={inputRef}
+      defaultValue={props.initialValue}
+      spellCheck={false}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        // Keep this from also reaching Workbench's global New File/Rename/
+        // Delete keybindings while the user is typing a name.
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          settledRef.current = true;
+          props.onSubmit(e.currentTarget.value);
+        } else if (e.key === "Escape") {
+          settledRef.current = true;
+          props.onCancel();
+        }
+      }}
+      onBlur={(e) => {
+        if (settledRef.current) return;
+        settledRef.current = true;
+        props.onSubmit(e.currentTarget.value);
+      }}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        font: "inherit",
+        color: "var(--zero-editor-fg)",
+        background: "var(--zero-editor-bg)",
+        border: "1px solid var(--zero-accent)",
+        borderRadius: 2,
+        padding: "1px 4px",
+      }}
+    />
+  );
+}
 
 function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
   const actions = useContext(RowActionsContext);
   const indent = typeof style.paddingLeft === "number" ? style.paddingLeft : 0;
+  const isDeleteArmed = actions?.confirmingDeletePath === node.data.id;
   return (
     <div
       ref={dragHandle}
@@ -151,10 +224,11 @@ function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
         paddingRight: 12,
         cursor: node.data.kind === "file" ? "pointer" : "default",
         display: "flex", gap: 6, alignItems: "center",
-        background: node.isSelected ? "var(--zero-selection-bg)" : "transparent",
-        color: node.isSelected ? "var(--zero-selection-fg)" : "inherit",
+        background: isDeleteArmed ? "var(--zero-error-bg)" : node.isSelected ? "var(--zero-selection-bg)" : "transparent",
+        color: isDeleteArmed ? "var(--zero-error-fg)" : node.isSelected ? "var(--zero-selection-fg)" : "inherit",
       }}
       onClick={() => {
+        if (node.isEditing) return;
         if (node.data.kind === "dir") node.toggle();
       }}
       onContextMenu={(e) => {
@@ -167,7 +241,22 @@ function Row({ node, style, dragHandle }: NodeRendererProps<Node>) {
       }}
     >
       <img src={iconFor(node.data.name, node.data.kind === "dir")} alt="" width={16} height={16} style={{ flexShrink: 0 }} />
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.data.name}</span>
+      {node.isEditing ? (
+        <InlineNameInput
+          initialValue={node.data.name}
+          onSubmit={(value) => node.submit(value)}
+          onCancel={() => {
+            if (node.data.id === DRAFT_ID) actions?.cancelDraft();
+            node.reset();
+          }}
+        />
+      ) : isDeleteArmed ? (
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          Delete {node.data.name}? Click Delete again to confirm.
+        </span>
+      ) : (
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.data.name}</span>
+      )}
     </div>
   );
 }
@@ -205,6 +294,15 @@ export const FileTreePanel = forwardRef<
   // `activePath` (which only tracks the *open* file) - keyboard-driven
   // create/rename/delete need this to know what they're acting on.
   const [selected, setSelected] = useState<{ path: string; kind: "file" | "dir" } | null>(null);
+  const treeRef = useRef<TreeApi<Node> | null>(null);
+  // Not-yet-created New File/New Folder row, rendered via insertDraft below
+  // and put into edit mode by the effect that follows. `parentDir` uses the
+  // same "" == workspace root convention as containingDir/joinPath.
+  const [draft, setDraft] = useState<{ parentDir: string; kind: "file" | "dir" } | null>(null);
+  // The path armed for delete - window.confirm() doesn't work in Tauri's
+  // WKWebView either, so Delete requires a second, distinct trigger instead
+  // of a modal: click/press Delete once to arm, again to actually delete.
+  const [confirmingDeletePath, setConfirmingDeletePath] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -242,33 +340,67 @@ export const FileTreePanel = forwardRef<
     return () => observer.disconnect();
   }, []);
 
-  const data = useMemo(() => buildTree(entries), [entries]);
+  const data = useMemo(() => {
+    const roots = buildTree(entries);
+    if (!draft) return roots;
+    const draftNode: Node = { id: DRAFT_ID, name: "", kind: draft.kind, children: draft.kind === "dir" ? [] : undefined };
+    return insertDraft(roots, draft.parentDir === "" ? null : draft.parentDir, draftNode);
+  }, [entries, draft]);
 
-  async function handleCreate(kind: "file" | "dir", parentDir: string): Promise<void> {
-    const name = window.prompt(kind === "file" ? "New file name" : "New folder name");
-    if (!name) return;
+  // Once the draft row above exists in `data`, open its parent (if
+  // collapsed) and put it into edit mode - deferred to an effect since
+  // react-arborist's TreeApi only picks up the new row after this render
+  // commits.
+  useEffect(() => {
+    if (!draft) return;
+    const tree = treeRef.current;
+    if (!tree) return;
+    if (draft.parentDir !== "") tree.open(draft.parentDir);
+    void tree.edit(DRAFT_ID);
+  }, [draft]);
+
+  function handleCreate(kind: "file" | "dir", parentDir: string): void {
+    setDraft({ parentDir, kind });
+  }
+
+  /** `<Tree onRename>` - fires both when a New File/Folder draft's name is
+   * submitted (`id === DRAFT_ID`) and when an existing entry is renamed via
+   * inline edit, since both go through `node.submit(value)`. */
+  async function handleRenameSubmit({ id, name }: { id: string; name: string }): Promise<void> {
+    const trimmed = name.trim();
+    if (id === DRAFT_ID) {
+      const parentDir = draft?.parentDir ?? "";
+      const kind = draft?.kind ?? "file";
+      setDraft(null);
+      if (!trimmed) return;
+      try {
+        await createEntry(props.client, parentDir, kind, trimmed);
+        props.onTreeChanged();
+      } catch (e) {
+        props.onError(`Could not create ${joinPath(parentDir, trimmed)}: ${errorText(e)}`);
+      }
+      return;
+    }
+    if (!trimmed || trimmed === id.split("/").at(-1)) return;
     try {
-      await createEntry(props.client, parentDir, kind, name);
+      await renameEntry(props.client, id, trimmed);
       props.onTreeChanged();
     } catch (e) {
-      props.onError(`Could not create ${joinPath(parentDir, name)}: ${errorText(e)}`);
+      props.onError(`Could not rename ${id}: ${errorText(e)}`);
     }
   }
 
-  async function handleRename(path: string): Promise<void> {
-    const name = window.prompt("Rename to", path.split("/").at(-1));
-    if (!name) return;
-    try {
-      await renameEntry(props.client, path, name);
-      props.onTreeChanged();
-    } catch (e) {
-      props.onError(`Could not rename ${path}: ${errorText(e)}`);
-    }
-  }
-
+  /** First call arms delete confirmation on `path` (shown inline on its
+   * row); a second call with the same `path` actually deletes. Replaces
+   * `window.confirm()`, which Tauri's WKWebView doesn't implement either. */
   async function handleDelete(path: string): Promise<void> {
+    if (confirmingDeletePath !== path) {
+      setConfirmingDeletePath(path);
+      return;
+    }
+    setConfirmingDeletePath(null);
     try {
-      const didDelete = await confirmAndDelete(props.client, path, window.confirm.bind(window));
+      const didDelete = await confirmAndDelete(props.client, path, () => true);
       if (didDelete) props.onTreeChanged();
     } catch (e) {
       props.onError(`Could not delete ${path}: ${errorText(e)}`);
@@ -288,13 +420,13 @@ export const FileTreePanel = forwardRef<
 
   useImperativeHandle(ref, () => ({
     newFileInSelectedDir: () => {
-      void handleCreate("file", containingDir(selected?.path ?? null, selected?.kind));
+      handleCreate("file", containingDir(selected?.path ?? null, selected?.kind));
     },
     newFolderInSelectedDir: () => {
-      void handleCreate("dir", containingDir(selected?.path ?? null, selected?.kind));
+      handleCreate("dir", containingDir(selected?.path ?? null, selected?.kind));
     },
     renameSelected: () => {
-      if (selected) void handleRename(selected.path);
+      if (selected) void treeRef.current?.edit(selected.path);
     },
     deleteSelected: () => {
       if (selected) void handleDelete(selected.path);
@@ -304,6 +436,21 @@ export const FileTreePanel = forwardRef<
     // they must be rebuilt whenever any of those change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [selected, props.client, clipboard]);
+
+  // Escape (or selecting something else) disarms a pending delete
+  // confirmation without requiring a click back on the same row.
+  useEffect(() => {
+    if (!confirmingDeletePath) return;
+    if (selected?.path !== confirmingDeletePath) {
+      setConfirmingDeletePath(null);
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setConfirmingDeletePath(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmingDeletePath, selected]);
 
   return (
     <div
@@ -328,19 +475,23 @@ export const FileTreePanel = forwardRef<
             setSelected({ path: node.data.id, kind: node.data.kind });
             setMenu({ x: e.clientX, y: e.clientY, node });
           },
+          confirmingDeletePath,
+          cancelDraft: () => setDraft(null),
         }}
       >
         <Tree
+          ref={treeRef}
           data={data}
           openByDefault={false}
           width={size.width}
           height={size.height}
           selection={props.activePath ?? undefined}
+          onRename={handleRenameSubmit}
           onSelect={(nodes) => {
             const node = nodes[0];
             if (!node) return;
             setSelected({ path: node.data.id, kind: node.data.kind });
-            if (node.data.kind === "file") props.onOpen(node.data.id);
+            if (node.data.kind === "file" && node.data.id !== DRAFT_ID) props.onOpen(node.data.id);
           }}
         >
           {Row}
@@ -358,8 +509,8 @@ export const FileTreePanel = forwardRef<
         >
           {menu.node === null ? (
             <>
-              <MenuItem onClick={() => { void handleCreate("file", ""); setMenu(null); }}>New File</MenuItem>
-              <MenuItem onClick={() => { void handleCreate("dir", ""); setMenu(null); }}>New Folder</MenuItem>
+              <MenuItem onClick={() => { handleCreate("file", ""); setMenu(null); }}>New File</MenuItem>
+              <MenuItem onClick={() => { handleCreate("dir", ""); setMenu(null); }}>New Folder</MenuItem>
               <MenuItem
                 disabled={!clipboard}
                 onClick={() => {
@@ -374,13 +525,15 @@ export const FileTreePanel = forwardRef<
           ) : (
             <>
               {menu.node.data.kind === "dir" && (
-                <MenuItem onClick={() => { void handleCreate("file", menu.node!.data.id); setMenu(null); }}>New File</MenuItem>
+                <MenuItem onClick={() => { handleCreate("file", menu.node!.data.id); setMenu(null); }}>New File</MenuItem>
               )}
               {menu.node.data.kind === "dir" && (
-                <MenuItem onClick={() => { void handleCreate("dir", menu.node!.data.id); setMenu(null); }}>New Folder</MenuItem>
+                <MenuItem onClick={() => { handleCreate("dir", menu.node!.data.id); setMenu(null); }}>New Folder</MenuItem>
               )}
-              <MenuItem onClick={() => { void handleRename(menu.node!.data.id); setMenu(null); }}>Rename</MenuItem>
-              <MenuItem onClick={() => { void handleDelete(menu.node!.data.id); setMenu(null); }}>Delete</MenuItem>
+              <MenuItem onClick={() => { void treeRef.current?.edit(menu.node!.data.id); setMenu(null); }}>Rename</MenuItem>
+              <MenuItem onClick={() => { void handleDelete(menu.node!.data.id); setMenu(null); }}>
+                {confirmingDeletePath === menu.node.data.id ? "Confirm Delete" : "Delete"}
+              </MenuItem>
               <MenuItem onClick={() => { setClipboard({ path: menu.node!.data.id, mode: "cut" }); setMenu(null); }}>Cut</MenuItem>
               <MenuItem onClick={() => { setClipboard({ path: menu.node!.data.id, mode: "copy" }); setMenu(null); }}>Copy</MenuItem>
               <MenuItem
