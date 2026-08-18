@@ -1,3 +1,4 @@
+mod menu;
 mod sidecar;
 mod workspace;
 
@@ -72,7 +73,25 @@ fn resource_path(app: &tauri::AppHandle, relative: &str) -> PathBuf {
         .expect("bundled resource missing")
 }
 
-fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf, label: &str) {
+/// Shows the native folder picker and, if the user picks a folder, spawns
+/// a sidecar and opens a new window for it under a fresh `workspace-{n}`
+/// label. A cancelled dialog is a no-op - unlike first launch, there's no
+/// empty-app state to fall back to since other windows may already be
+/// open.
+fn open_new_workspace_window(app: &tauri::AppHandle) {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Open a folder for Zero")
+        .blocking_pick_folder()
+        .map(|p| p.into_path().expect("folder path"));
+
+    if let Some(root) = picked {
+        start_daemon_and_open_window(app, root, &next_workspace_label(), false);
+    }
+}
+
+fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf, label: &str, fatal_on_error: bool) {
     let sidecar_bin = resource_path(app, "zero-daemon-sidecar");
     let node_runtime_dir = resource_path(app, "node-runtime");
     let web_dist_dir = resource_path(app, "web-dist");
@@ -84,7 +103,10 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf, labe
                 .message(format!("Failed to start Zero: {e}"))
                 .title("Zero")
                 .blocking_show();
-            std::process::exit(1);
+            if fatal_on_error {
+                std::process::exit(1);
+            }
+            return;
         }
     };
 
@@ -123,7 +145,9 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf, labe
                 .message(format!("Zero failed to start:\n\n{stderr_tail}"))
                 .title("Zero")
                 .blocking_show();
-            std::process::exit(1);
+            if fatal_on_error {
+                std::process::exit(1);
+            }
         }
     }
 }
@@ -133,6 +157,12 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SidecarState(Mutex::new(HashMap::new())))
+        .menu(|app| menu::build(app))
+        .on_menu_event(|app, event| {
+            if event.id().0 == menu::OPEN_FOLDER_ID {
+                open_new_workspace_window(app);
+            }
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             let remembered = workspace::load_remembered()
@@ -149,7 +179,7 @@ pub fn run() {
             };
 
             match workspace {
-                Some(root) => start_daemon_and_open_window(&handle, root, "main"),
+                Some(root) => start_daemon_and_open_window(&handle, root, "main", true),
                 None => std::process::exit(0), // user cancelled the dialog
             }
 
