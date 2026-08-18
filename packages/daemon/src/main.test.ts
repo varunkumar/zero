@@ -58,6 +58,26 @@ test("fs/create, fs/rename, fs/delete over the wire", async () => {
   ws.close(); d.stop();
 });
 
+test("fs/readBinary over the wire: base64 encoding and MIME type", async () => {
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const pngBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 253, 254, 255]);
+  writeFileSync(join(root, "img.png"), pngBytes);
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+
+  const result = await client.request<{ contentBase64: string; mimeType: string }>(
+    "fs/readBinary", { path: "img.png" });
+  expect(result.mimeType).toBe("image/png");
+  const decodedBytes = Buffer.from(result.contentBase64, "base64");
+  expect(decodedBytes).toEqual(Buffer.from(pngBytes));
+
+  ws.close(); d.stop();
+});
+
 test("fs/search and settings RPCs over the wire", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   writeFileSync(join(root, "a.ts"), "const target = 1;\n");

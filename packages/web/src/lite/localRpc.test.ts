@@ -43,6 +43,15 @@ test("settings/get has no value so localStorage wins", async () => {
   expect(await client.request<Record<string, never>>("settings/get", { key: "workbench" })).toEqual({});
 });
 
+test("fs/readBinary dispatches to opts.fs.readBinary and returns its result", async () => {
+  const { client } = await clientFor();
+  const result = await client.request<{ contentBase64: string; mimeType: string }>("fs/readBinary", {
+    path: "src/a.ts",
+  });
+  expect(result.mimeType).toBe("application/octet-stream");
+  expect(atob(result.contentBase64)).toBe("hi");
+});
+
 test("extra hook routes chat/* methods through RpcClient", async () => {
   const root = createMemRoot("proj");
   const fs = new BrowserFSWorkspace(root);

@@ -1,10 +1,12 @@
+import "../../testUtils/domTestSetup";
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { RpcClient, WorkspaceCapabilities } from "@zero/protocol";
-import { BottomPanel, TabStrip, WorkbenchContext, getBottomPanelAction, liteCommandsEnabled } from "./Workbench";
+import { BottomPanel, EditorPanel, TabStrip, WorkbenchContext, getBottomPanelAction, isBinaryFileKind, liteCommandsEnabled } from "./Workbench";
 import { PtyStore } from "../terminal/store";
 import { ChatStore } from "../chat/store";
 import { TurnStore } from "../chat/turnStore";
+import { TabStore } from "../tabs/store";
 import { iconFor } from "../icons/iconFor";
 
 // Task 4: Terminal and Chat now share a single dockview panel (`bottom`)
@@ -175,5 +177,66 @@ describe("TabStrip", () => {
     const expectedIconSrc = iconFor(filename, false);
     // Check that an img element with the correct src is rendered
     expect(html).toContain(`<img src="${expectedIconSrc}"`);
+  });
+});
+
+// Task 9: EditorPanel now switches which viewer it renders based on
+// classifyFile(tab.path) - CodeMirror for text, a 50/50 CodeMirror+
+// MarkdownPreview split for markdown, and dedicated binary viewers for
+// image/pdf. fakeClient.request always rejects (see above), so ImageViewer
+// and PdfViewer never leave their initial "loading" state during a
+// synchronous renderToStaticMarkup pass - enough to prove routing without
+// waiting out their fetch effects.
+function renderEditorPanel(path: string) {
+  const tabStore = new TabStore();
+  tabStore.openFile("group-1", path, "# hello");
+  const contextValue = {
+    client: fakeClient,
+    tabStore,
+    theme: "dark" as const,
+    diagnosticsByPath: new Map(),
+    setActiveGroupId: () => {},
+    setCursor: () => {},
+    registerView: () => {},
+    requestCompletion: () => {},
+    capabilities: ALL_CAPABILITIES,
+    openFile: () => {},
+  };
+  return renderToStaticMarkup(
+    <WorkbenchContext.Provider value={contextValue as any}>
+      <EditorPanel params={{ groupId: "group-1" }} api={{} as any} containerApi={{} as any} />
+    </WorkbenchContext.Provider>,
+  );
+}
+
+describe("EditorPanel viewer routing", () => {
+  test("renders the CodeMirror host for a .ts file", () => {
+    const html = renderEditorPanel("a.ts");
+    expect(html).not.toContain("zero-markdown-preview");
+  });
+
+  test("renders a markdown split with a live preview for a .md file", () => {
+    const html = renderEditorPanel("a.md");
+    expect(html).toContain("zero-markdown-preview");
+    expect(html).toContain("<h1>hello</h1>");
+  });
+
+  test("renders ImageViewer (loading state) for a .png file, skipping CodeMirror", () => {
+    const html = renderEditorPanel("a.png");
+    expect(html).toContain("Loading image");
+  });
+
+  test("renders PdfViewer (loading state) for a .pdf file, skipping CodeMirror", () => {
+    const html = renderEditorPanel("a.pdf");
+    expect(html).toContain("Loading PDF");
+  });
+});
+
+describe("isBinaryFileKind", () => {
+  test("is true only for image/pdf paths", () => {
+    expect(isBinaryFileKind("a.png")).toBe(true);
+    expect(isBinaryFileKind("a.pdf")).toBe(true);
+    expect(isBinaryFileKind("a.md")).toBe(false);
+    expect(isBinaryFileKind("a.ts")).toBe(false);
   });
 });

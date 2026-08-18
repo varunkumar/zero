@@ -127,3 +127,16 @@ test("search sets truncated when the match cap is hit", async () => {
   expect(res.matches.length).toBe(200);
   expect(res.truncated).toBe(true);
 });
+
+test("readBinary round-trips bytes as base64 with the right mime type", async () => {
+  const ws = await seeded();
+  // MemFile only stores text (see memDir.ts), so round-trip via a string
+  // that maps 1:1 through btoa/atob — this test only needs to prove
+  // readBinary reaches the file and returns {base64, mimeType}, not that
+  // MemFile itself can hold arbitrary binary content (it can't; content here
+  // is ASCII-safe for that reason, not because readBinary requires it).
+  await ws.write("src/pic.png", "fake-bytes");
+  const result = await ws.readBinary("src/pic.png");
+  expect(result.mimeType).toBe("image/png");
+  expect(atob(result.base64)).toBe("fake-bytes");
+});
