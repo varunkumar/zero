@@ -2,6 +2,7 @@
   "name": "zero-desktop",
   "private": true,
   "type": "module",
+  "author": "Varunkumar Nagarajan <varunkumar.n@gmail.com>",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "dev.zero.desktop",
   "build": {
-    "frontendDist": "..",
+    "frontendDist": "../frontend-stub",
     "beforeBuildCommand": "bun run --cwd ../daemon build:sidecar"
   },
   "app": {
@@ -16,6 +16,8 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Varunkumar Nagarajan",
+    "copyright": "Copyright © 2026 Varunkumar Nagarajan",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
