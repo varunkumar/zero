@@ -60,6 +60,7 @@ the complete roadmap.
 - [M7.6 design](docs/superpowers/specs/2026-08-14-m7.6-vscode-lm-provider-design.md)
 - [M8 design](docs/superpowers/specs/2026-08-17-m8-zero-ide-design.md)
 - [Plugins](docs/plugins.md)
+- [Releasing](docs/releasing.md)
 
 ## Architecture
 
