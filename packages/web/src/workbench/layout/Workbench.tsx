@@ -4,6 +4,10 @@ import type { EditorView } from "@codemirror/view";
 import type { RpcClient, FsReadResult, FsChangedEvent, FsTreeResult, PtyOutputEvent, PtyExitEvent, PtyListResult, LspDiagnostic, LspDiagnosticsEvent, ChatTurnEventPayload, ChatStatusResult, WorkspaceCapabilities } from "@zero/protocol";
 import { Editor } from "../../Editor";
 import { createCompletion } from "../../completionSetup";
+import { classifyFile } from "../fileKind";
+import { MarkdownPreview } from "../viewers/MarkdownPreview";
+import { ImageViewer } from "../viewers/ImageViewer";
+import { PdfViewer } from "../viewers/PdfViewer";
 import { CommandRegistry } from "../commands/registry";
 import { attachKeybindings } from "../keybindings/dispatcher";
 import { TabStore, type Tab } from "../tabs/store";
@@ -61,6 +65,14 @@ export function getBottomPanelAction(
  * of that capability is the signal, rather than a separate "isLite" flag. */
 export function liteCommandsEnabled(caps: WorkspaceCapabilities): boolean {
   return !caps.pty;
+}
+
+/** Whether `path` should skip `fs/read`/CodeMirror in favor of a dedicated
+ * binary viewer that fetches its own content. Exported for testing in
+ * isolation, same pattern as `getBottomPanelAction`. */
+export function isBinaryFileKind(path: string): boolean {
+  const kind = classifyFile(path);
+  return kind === "image" || kind === "pdf";
 }
 
 /** Value shared with the dockview-hosted panels.
@@ -236,7 +248,7 @@ export function TabStrip(props: { groupId: string; tabs: Tab[]; activeTabId: str
   );
 }
 
-function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
+export function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
   const w = useWorkbench();
   const groupId = props.params.groupId;
   const group = w.tabStore.getGroups().find((g) => g.id === groupId);
@@ -251,33 +263,74 @@ function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
       <TabStrip groupId={groupId} tabs={group?.tabs ?? []} activeTabId={group?.activeTabId ?? null} />
       <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
         {tab ? (
-          <Editor
-            path={tab.path}
-            content={tab.content}
-            theme={w.theme}
-            onSave={(text) => {
-              w.tabStore.updateContent(tab.id, text);
-              w.saveTab(tab.id);
-            }}
-            onChange={(text) => w.tabStore.updateContent(tab.id, text)}
-            onCursorChange={(pos) => {
-              if (groupId === w.activeGroupId) w.setCursor(pos);
-            }}
-            requestCompletion={w.requestCompletion}
-            onViewChange={(view) => w.registerView(groupId, view)}
-            diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
-            client={w.client}
-            lspEnabled={w.capabilities.lsp}
-            onGoToDefinition={(path, line, character) => {
-              w.openFile(path);
-              // Cursor placement after open happens once the tab's EditorView mounts;
-              // the simplest correct thing for M2 is opening the file — landing the
-              // cursor precisely requires the view to exist first, which openFile's
-              // async fs/read round-trip doesn't guarantee synchronously. Out of scope
-              // refinement: thread the target position through TabStore.openFile and
-              // have EditorPanel's mount effect dispatch a selection once ready.
-            }}
-          />
+          classifyFile(tab.path) === "markdown" ? (
+            <div style={{ height: "100%", display: "flex" }}>
+              <div style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--zero-border, #333)" }}>
+                <Editor
+                  path={tab.path}
+                  content={tab.content}
+                  theme={w.theme}
+                  onSave={(text) => {
+                    w.tabStore.updateContent(tab.id, text);
+                    w.saveTab(tab.id);
+                  }}
+                  onChange={(text) => w.tabStore.updateContent(tab.id, text)}
+                  onCursorChange={(pos) => {
+                    if (groupId === w.activeGroupId) w.setCursor(pos);
+                  }}
+                  requestCompletion={w.requestCompletion}
+                  onViewChange={(view) => w.registerView(groupId, view)}
+                  diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
+                  client={w.client}
+                  lspEnabled={w.capabilities.lsp}
+                  onGoToDefinition={(path, line, character) => {
+                    w.openFile(path);
+                    // Cursor placement after open happens once the tab's EditorView mounts;
+                    // the simplest correct thing for M2 is opening the file — landing the
+                    // cursor precisely requires the view to exist first, which openFile's
+                    // async fs/read round-trip doesn't guarantee synchronously. Out of scope
+                    // refinement: thread the target position through TabStore.openFile and
+                    // have EditorPanel's mount effect dispatch a selection once ready.
+                  }}
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <MarkdownPreview content={tab.content} />
+              </div>
+            </div>
+          ) : classifyFile(tab.path) === "image" ? (
+            <ImageViewer path={tab.path} client={w.client} />
+          ) : classifyFile(tab.path) === "pdf" ? (
+            <PdfViewer path={tab.path} client={w.client} />
+          ) : (
+            <Editor
+              path={tab.path}
+              content={tab.content}
+              theme={w.theme}
+              onSave={(text) => {
+                w.tabStore.updateContent(tab.id, text);
+                w.saveTab(tab.id);
+              }}
+              onChange={(text) => w.tabStore.updateContent(tab.id, text)}
+              onCursorChange={(pos) => {
+                if (groupId === w.activeGroupId) w.setCursor(pos);
+              }}
+              requestCompletion={w.requestCompletion}
+              onViewChange={(view) => w.registerView(groupId, view)}
+              diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
+              client={w.client}
+              lspEnabled={w.capabilities.lsp}
+              onGoToDefinition={(path, line, character) => {
+                w.openFile(path);
+                // Cursor placement after open happens once the tab's EditorView mounts;
+                // the simplest correct thing for M2 is opening the file — landing the
+                // cursor precisely requires the view to exist first, which openFile's
+                // async fs/read round-trip doesn't guarantee synchronously. Out of scope
+                // refinement: thread the target position through TabStore.openFile and
+                // have EditorPanel's mount effect dispatch a selection once ready.
+              }}
+            />
+          )
         ) : (
           <div style={{ padding: 16, opacity: 0.6 }}>Select a file to edit (Cmd/Ctrl+P)</div>
         )}
@@ -701,6 +754,10 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
   useEffect(() => {
     if (!capabilities.lsp) return;
     if (!activeTab) return;
+    // Image/PDF tabs have no LSP-relevant content (openFile leaves them with
+    // an empty buffer) and no language server would be spawned for them
+    // anyway — syncing would just spam lsp/sync with an empty string.
+    if (isBinaryFileKind(activeTab.path)) return;
     clearTimeout(lspSyncDebounceRef.current);
     lspSyncDebounceRef.current = setTimeout(() => {
       const path = activeTab.path;
@@ -730,12 +787,20 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
   }, [client, capabilities.lsp, activeTab?.path, activeTab?.content]);
 
   function openFile(path: string): void {
+    const groupId = tabStore.getGroups().some((g) => g.id === activeGroupIdRef.current)
+      ? activeGroupIdRef.current
+      : tabStore.getGroups()[0]!.id;
+    // Image/PDF tabs fetch their own binary content via the daemon's binary
+    // RPC (Tasks 1/3/4) inside the dedicated viewer components — fs/read
+    // would try to decode them as UTF-8 text and mangle/reject them.
+    if (isBinaryFileKind(path)) {
+      tabStore.openFile(groupId, path, "");
+      setActiveGroupId(groupId);
+      return;
+    }
     void client
       .request<FsReadResult>("fs/read", { path })
       .then((res) => {
-        const groupId = tabStore.getGroups().some((g) => g.id === activeGroupIdRef.current)
-          ? activeGroupIdRef.current
-          : tabStore.getGroups()[0]!.id;
         tabStore.openFile(groupId, path, res.content);
         setActiveGroupId(groupId);
       })
