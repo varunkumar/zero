@@ -78,6 +78,14 @@ fn resource_path(app: &tauri::AppHandle, relative: &str) -> PathBuf {
 /// label. A cancelled dialog is a no-op - unlike first launch, there's no
 /// empty-app state to fall back to since other windows may already be
 /// open.
+///
+/// The picker itself must run on the main thread (native modal), but
+/// spawning the sidecar and waiting for it to become ready can take a
+/// few seconds - doing that on the main thread would freeze every
+/// already-open window's UI (Tauri's event loop can't service them while
+/// blocked). So that work happens on a background thread; only the
+/// final window-creation step is dispatched back to the main thread via
+/// `run_on_main_thread`, since window/webview creation isn't safe off it.
 fn open_new_workspace_window(app: &tauri::AppHandle) {
     let picked = app
         .dialog()
@@ -86,12 +94,94 @@ fn open_new_workspace_window(app: &tauri::AppHandle) {
         .blocking_pick_folder()
         .map(|p| p.into_path().expect("folder path"));
 
-    if let Some(root) = picked {
-        start_daemon_and_open_window(app, root, &next_workspace_label(), false);
+    let Some(root) = picked else { return };
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let sidecar_bin = resource_path(&app, "zero-daemon-sidecar");
+        let node_runtime_dir = resource_path(&app, "node-runtime");
+        let web_dist_dir = resource_path(&app, "web-dist");
+
+        let mut handle = match sidecar::spawn(&sidecar_bin, &node_runtime_dir, &web_dist_dir, &root) {
+            Ok(h) => h,
+            Err(e) => {
+                let app_for_main = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    app_for_main
+                        .dialog()
+                        .message(format!("Failed to start Zero: {e}"))
+                        .title("Zero")
+                        .blocking_show();
+                });
+                return;
+            }
+        };
+
+        match handle.wait_for_ready() {
+            Ok(info) => {
+                let app_for_main = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    let label = next_workspace_label();
+                    open_window_for_ready_workspace(&app_for_main, root, &label, handle, info);
+                });
+            }
+            Err(stderr_tail) => {
+                // The sidecar spawned but never became ready - kill it
+                // before giving up, or it outlives the app that just
+                // gave up on it.
+                handle.kill();
+                let app_for_main = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    app_for_main
+                        .dialog()
+                        .message(format!("Zero failed to start:\n\n{stderr_tail}"))
+                        .title("Zero")
+                        .blocking_show();
+                });
+            }
+        }
+    });
+}
+
+/// Builds the window for an already-ready sidecar and files it into
+/// `SidecarState`. Must run on the main thread - window/webview creation
+/// is not safe off it.
+fn open_window_for_ready_workspace(
+    app: &tauri::AppHandle,
+    workspace: PathBuf,
+    label: &str,
+    handle: sidecar::SidecarHandle,
+    info: sidecar::ReadyInfo,
+) {
+    let url = format!("http://127.0.0.1:{}/?token={}", info.port, info.token);
+    WebviewWindowBuilder::new(app, label, WebviewUrl::External(url.parse().unwrap()))
+        .title(format!("Zero {}", env!("CARGO_PKG_VERSION")))
+        .inner_size(1280.0, 800.0)
+        .build()
+        .expect("failed to open window");
+    let _ = workspace::save_remembered(&workspace);
+
+    if let Some(state) = app.try_state::<SidecarState>() {
+        state.0.lock().unwrap().insert(label.to_string(), handle);
+    }
+
+    // Also kill this window's sidecar on a plain window close (dragging
+    // the red button) - ExitRequested alone doesn't cover that path.
+    let app_handle = app.clone();
+    let label_owned = label.to_string();
+    if let Some(window) = app.get_webview_window(label) {
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                kill_sidecar(&app_handle, &label_owned);
+            }
+        });
     }
 }
 
-fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf, label: &str, fatal_on_error: bool) {
+/// Synchronous spawn-and-open used only for the very first window at app
+/// launch, before the event loop is running and no other window exists
+/// to freeze - so blocking here is harmless, unlike `open_new_workspace_window`.
+fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf, label: &str) {
     let sidecar_bin = resource_path(app, "zero-daemon-sidecar");
     let node_runtime_dir = resource_path(app, "node-runtime");
     let web_dist_dir = resource_path(app, "web-dist");
@@ -103,40 +193,12 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf, labe
                 .message(format!("Failed to start Zero: {e}"))
                 .title("Zero")
                 .blocking_show();
-            if fatal_on_error {
-                std::process::exit(1);
-            }
-            return;
+            std::process::exit(1);
         }
     };
 
     match handle.wait_for_ready() {
-        Ok(info) => {
-            let url = format!("http://127.0.0.1:{}/?token={}", info.port, info.token);
-            WebviewWindowBuilder::new(app, label, WebviewUrl::External(url.parse().unwrap()))
-                .title(format!("Zero {}", env!("CARGO_PKG_VERSION")))
-                .inner_size(1280.0, 800.0)
-                .build()
-                .expect("failed to open window");
-            let _ = workspace::save_remembered(&workspace);
-
-            if let Some(state) = app.try_state::<SidecarState>() {
-                state.0.lock().unwrap().insert(label.to_string(), handle);
-            }
-
-            // Also kill this window's sidecar on a plain window close
-            // (dragging the red button) - ExitRequested alone doesn't
-            // cover that path.
-            let app_handle = app.clone();
-            let label_owned = label.to_string();
-            if let Some(window) = app.get_webview_window(label) {
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { .. } = event {
-                        kill_sidecar(&app_handle, &label_owned);
-                    }
-                });
-            }
-        }
+        Ok(info) => open_window_for_ready_workspace(app, workspace, label, handle, info),
         Err(stderr_tail) => {
             // The sidecar spawned but never became ready - kill it before
             // giving up, or it outlives the app that just gave up on it.
@@ -145,9 +207,7 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf, labe
                 .message(format!("Zero failed to start:\n\n{stderr_tail}"))
                 .title("Zero")
                 .blocking_show();
-            if fatal_on_error {
-                std::process::exit(1);
-            }
+            std::process::exit(1);
         }
     }
 }
@@ -179,7 +239,7 @@ pub fn run() {
             };
 
             match workspace {
-                Some(root) => start_daemon_and_open_window(&handle, root, "main", true),
+                Some(root) => start_daemon_and_open_window(&handle, root, "main"),
                 None => std::process::exit(0), // user cancelled the dialog
             }
 
