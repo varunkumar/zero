@@ -9,8 +9,8 @@ for the full design.
 ## Development
 
 ```
-bun run --cwd packages/daemon build:sidecar   # compiles the daemon sidecar + bundles node-runtime/web-dist
 bun run --cwd packages/web build              # builds the web UI the sidecar serves
+bun run --cwd packages/daemon build:sidecar   # compiles the daemon sidecar + bundles node-runtime/web-dist
 bun run --cwd packages/desktop tauri dev      # launches the app
 ```
 

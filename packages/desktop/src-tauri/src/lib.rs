@@ -39,7 +39,7 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf) {
                 .message(format!("Failed to start Zero: {e}"))
                 .title("Zero")
                 .blocking_show();
-            return;
+            std::process::exit(1);
         }
     };
 
@@ -71,6 +71,7 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf) {
                 .message(format!("Zero failed to start:\n\n{stderr_tail}"))
                 .title("Zero")
                 .blocking_show();
+            std::process::exit(1);
         }
     }
 }
