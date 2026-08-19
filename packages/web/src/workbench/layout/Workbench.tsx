@@ -9,6 +9,11 @@ import { MarkdownPreview } from "../viewers/MarkdownPreview";
 import { ImageViewer } from "../viewers/ImageViewer";
 import { PdfViewer } from "../viewers/PdfViewer";
 import { CommandRegistry } from "../commands/registry";
+import { StatusBarRegistry, SidebarPanelRegistry } from "../plugins/registries";
+import { NotificationHub } from "../plugins/notifications";
+import { loadPluginUis } from "../plugins/loader";
+import { PluginSlot } from "../plugins/PluginSlot";
+import type { PluginListResult } from "@zero/protocol";
 import { attachKeybindings } from "../keybindings/dispatcher";
 import { TabStore, type Tab } from "../tabs/store";
 import { SettingsStore } from "../settings/store";
@@ -105,8 +110,9 @@ interface WorkbenchContextValue {
   setCursor: (cursor: { line: number; column: number }) => void;
   registerView: (groupId: string, view: EditorView | undefined) => void;
   requestCompletion: (s: { prefix: string; suffix: string }) => void;
-  sidebarView: "files" | "search";
-  setSidebarView: (view: "files" | "search") => void;
+  sidebarView: string;
+  setSidebarView: (view: string) => void;
+  sidebarPanelRegistry: SidebarPanelRegistry;
   bottomView: "terminal" | "chat";
   setBottomView: (view: "terminal" | "chat") => void;
   /** Removes the Terminal/Chat dockview panel entirely (both panels stay
@@ -153,11 +159,15 @@ function useWorkbench(): WorkbenchContextValue {
 
 function SidebarPanel() {
   const w = useWorkbench();
+  const pluginPanels = w.sidebarPanelRegistry.list();
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-sidebar-bg)", color: "var(--zero-sidebar-fg)" }}>
       <div className="zero-sidebar-toggle">
         <button aria-pressed={w.sidebarView === "files"} onClick={() => w.setSidebarView("files")}><FilesTabIcon />Files</button>
         <button aria-pressed={w.sidebarView === "search"} onClick={() => w.setSidebarView("search")}><SearchTabIcon />Search</button>
+        {pluginPanels.map((p) => (
+          <button key={p.id} aria-pressed={w.sidebarView === p.id} onClick={() => w.setSidebarView(p.id)}>{p.title}</button>
+        ))}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {w.sidebarView === "files" ? (
@@ -170,8 +180,13 @@ function SidebarPanel() {
             onTreeChanged={w.onTreeChanged}
             onError={w.report}
           />
-        ) : (
+        ) : w.sidebarView === "search" ? (
           <SearchPanel client={w.client} onJumpTo={(path) => w.openFile(path)} />
+        ) : (
+          (() => {
+            const panel = w.sidebarPanelRegistry.get(w.sidebarView);
+            return panel ? <PluginSlot mount={panel.mount} /> : null;
+          })()
         )}
       </div>
     </div>
@@ -376,6 +391,9 @@ function useConst<T>(factory: () => T): T {
 export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCapabilities; onChangeFolder?: () => void }) {
   const { client, capabilities, onChangeFolder } = props;
   const registry = useConst(() => new CommandRegistry());
+  const statusBarRegistry = useConst(() => new StatusBarRegistry());
+  const sidebarPanelRegistry = useConst(() => new SidebarPanelRegistry());
+  const notificationHub = useConst(() => new NotificationHub());
   const tabStore = useConst(() => new TabStore());
   const settingsStore = useConst(() => new SettingsStore(client, window.localStorage));
   const ptyStore = useConst(() => new PtyStore());
@@ -383,7 +401,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
   const turnStore = useConst(() => new TurnStore());
 
   const [settings, setSettings] = useState(() => settingsStore.getSnapshot());
-  const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
+  const [sidebarView, setSidebarView] = useState<string>("files");
   const [bottomView, setBottomView] = useState<"terminal" | "chat">(capabilities.pty ? "terminal" : "chat");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [openerOpen, setOpenerOpen] = useState(false);
@@ -601,11 +619,50 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
     return unsubscribe;
   }, [settingsStore]);
 
+  // Discover daemon plugins with a UI contribution and load their bundles.
+  // A plugin without a `ui` contribution, or one that's disabled (health
+  // reports "disabled" - see the git/todos plugins), is skipped by
+  // loadPluginUis itself; a failure loading one plugin's bundle never
+  // blocks another's or the rest of the workbench.
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    let cancelled = false;
+    void client
+      .request<PluginListResult>("plugin/list")
+      .then((res) => {
+        if (cancelled) return;
+        return loadPluginUis({
+          client,
+          plugins: res.plugins,
+          statusBarRegistry,
+          sidebarPanelRegistry,
+          hub: notificationHub,
+        });
+      })
+      .then((c) => {
+        if (cancelled) c?.();
+        else cleanup = c;
+      })
+      .catch((e: unknown) => console.error("failed to load plugin UIs:", e));
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [client, statusBarRegistry, sidebarPanelRegistry, notificationHub]);
+
+  // Fans every daemon notification out through notificationHub, so plugin
+  // UIs (via ZeroUiPluginApi.onNotification) and this handler share the one
+  // slot RpcClient.onNotification allows.
+  useEffect(() => {
+    client.onNotification((method, params) => notificationHub.dispatch(method, params));
+  }, [client, notificationHub]);
+
   // THE single client.onNotification handler for the whole app. RpcClient
   // stores one handler and a second call silently replaces it, so every
-  // consumer of daemon notifications fans out from right here.
+  // consumer of daemon notifications fans out from right here — now via
+  // notificationHub rather than a direct client.onNotification registration.
   useEffect(() => {
-    client.onNotification((method, params) => {
+    const handler = (method: string, params: unknown) => {
       if (method === "pty/output") {
         const { sessionId, data } = params as PtyOutputEvent;
         ptyStore.handleOutput(sessionId, data);
@@ -656,8 +713,11 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
           tabStore.markSaved(tab.id);
         })
         .catch((e: unknown) => reportRef.current(`Could not reload ${path}: ${errorText(e)}`));
-    });
-  }, [client, tabStore, ptyStore, turnStore]);
+    };
+    const methods = ["pty/output", "pty/exit", "chat/turnEvent", "lsp/diagnostics", "fs/changed"];
+    const unsubs = methods.map((m) => notificationHub.subscribe(m, (params) => handler(m, params)));
+    return () => unsubs.forEach((u) => u());
+  }, [client, tabStore, ptyStore, turnStore, notificationHub]);
 
   // Path list backing the fuzzy file opener, refreshed whenever the tree does.
   useEffect(() => {
@@ -1079,6 +1139,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
     requestCompletion: completion.request,
     sidebarView,
     setSidebarView,
+    sidebarPanelRegistry,
     bottomView,
     setBottomView,
     closeBottomPanel: () => actionsRef.current.closeBottomPanel(),
