@@ -12,6 +12,7 @@ export interface PluginManifest {
     contextProviders?: string[];
     tools?: string[];
     commands?: string[];
+    ui?: { entry: string };
   };
 }
 

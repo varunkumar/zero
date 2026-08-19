@@ -117,6 +117,7 @@ export interface PluginListEntry {
     contextProviders?: string[];
     tools?: string[];
     commands?: string[];
+    ui?: { entry: string };
   };
 }
 export interface PluginListResult { plugins: PluginListEntry[] }
