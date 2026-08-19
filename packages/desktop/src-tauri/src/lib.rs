@@ -107,8 +107,9 @@ fn open_new_workspace_window(app: &tauri::AppHandle) {
                 let sidecar_bin = resource_path(&app, "zero-daemon-sidecar");
                 let node_runtime_dir = resource_path(&app, "node-runtime");
                 let web_dist_dir = resource_path(&app, "web-dist");
+                let plugins_ui_dir = resource_path(&app, "plugins-ui");
 
-                let mut handle = match sidecar::spawn(&sidecar_bin, &node_runtime_dir, &web_dist_dir, &root) {
+                let mut handle = match sidecar::spawn(&sidecar_bin, &node_runtime_dir, &web_dist_dir, &plugins_ui_dir, &root) {
                     Ok(h) => h,
                     Err(e) => {
                         let app_for_main = app.clone();
@@ -192,8 +193,9 @@ fn start_daemon_and_open_window(app: &tauri::AppHandle, workspace: PathBuf, labe
     let sidecar_bin = resource_path(app, "zero-daemon-sidecar");
     let node_runtime_dir = resource_path(app, "node-runtime");
     let web_dist_dir = resource_path(app, "web-dist");
+    let plugins_ui_dir = resource_path(app, "plugins-ui");
 
-    let mut handle = match sidecar::spawn(&sidecar_bin, &node_runtime_dir, &web_dist_dir, &workspace) {
+    let mut handle = match sidecar::spawn(&sidecar_bin, &node_runtime_dir, &web_dist_dir, &plugins_ui_dir, &workspace) {
         Ok(h) => h,
         Err(e) => {
             app.dialog()

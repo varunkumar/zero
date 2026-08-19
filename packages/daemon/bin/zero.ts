@@ -49,6 +49,10 @@ if (argv[0] === "claude") {
   // Tauri shell) point this at its bundled web/dist copy instead. Unset in
   // the normal `zero serve` dev path, where the relative lookup is correct.
   const webDist = process.env.ZERO_WEB_DIST ?? new URL("../../web/dist", import.meta.url).pathname;
+  // Same import.meta.url-relative-resolution problem as ZERO_WEB_DIST above,
+  // for the daemon's own plugins/ directory (which holds each plugin's
+  // optional ui/dist/index.js bundle, served at GET /plugins/:id/ui.js).
+  const pluginsDir = process.env.ZERO_PLUGINS_DIR ?? undefined;
   const parsedGatewayPort = parseGatewayPort(rest);
   if (parsedGatewayPort === "invalid") {
     console.error("error: --gateway-port requires a numeric value");
@@ -59,7 +63,7 @@ if (argv[0] === "claude") {
     console.error("error: --port requires a numeric value");
     process.exit(1);
   }
-  const d = await startZero({ root, port: parsedPort, webDist, gatewayPort: parsedGatewayPort });
+  const d = await startZero({ root, port: parsedPort, webDist, pluginsDir, gatewayPort: parsedGatewayPort });
   if (rest.includes("--json")) {
     console.log(JSON.stringify({ port: d.port, token: d.token, gatewayInfo: d.gatewayInfo }));
   } else {
