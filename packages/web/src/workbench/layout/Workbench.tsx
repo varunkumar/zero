@@ -426,13 +426,6 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
     lastError?: string;
     nodeCount?: number;
   } | null>(null);
-  const [gitStatus, setGitStatus] = useState<{
-    branch: string;
-    dirtyCount: number;
-    ahead: number;
-    behind: number;
-    remoteUrl: string | null;
-  } | null>(null);
   const [tokenStatus, setTokenStatus] = useState<{
     usedTokens: number | null;
     contextWindowTokens: number | null;
@@ -519,37 +512,6 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
       clearInterval(id);
     };
   }, [client, capabilities.graph]);
-
-  // Poll git branch/dirty/remote status for the status bar. Failures
-  // surface as no pill at all (null) rather than taking the editor down -
-  // git/status itself already degrades to null server-side when `root`
-  // isn't a git work tree, so an unreachable daemon gets the same result.
-  useEffect(() => {
-    if (!capabilities.git) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const { status } = await client.request<{
-          status: {
-            branch: string;
-            dirtyCount: number;
-            ahead: number;
-            behind: number;
-            remoteUrl: string | null;
-          } | null;
-        }>("git/status");
-        if (!cancelled) setGitStatus(status);
-      } catch {
-        if (!cancelled) setGitStatus(null);
-      }
-    };
-    void tick();
-    const id = setInterval(tick, 2000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [client, capabilities.git]);
 
   // Poll chat context-window token usage for the status bar, for whichever
   // session is currently active. Mirrors the graph/status and git/status
@@ -1178,7 +1140,6 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
               ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length, failed: lspFailedByPath.get(activePath) ?? false }
               : null}
             graphStatus={graphStatus}
-            gitStatus={gitStatus}
             tokenStatus={tokenStatus}
             // statusBarRegistry doesn't trigger re-renders on register/unregister;
             // plugin UIs register synchronously inside their one-time mount() call
