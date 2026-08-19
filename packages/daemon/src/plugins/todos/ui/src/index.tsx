@@ -1,16 +1,24 @@
 import { createRoot, type Root } from "react-dom/client";
 import { useEffect, useState } from "react";
 
+/** Minimal local shape of ZeroUiPluginApi (packages/web/src/workbench/plugins/loader.ts) -
+ * this bundle is standalone browser JS with no dependency on @zero/web, so
+ * the contract is restated here rather than imported. */
 interface ZeroUiPluginApi {
   client: { request<R>(method: string, params?: unknown): Promise<R> };
   registerStatusBarItem(item: { id: string; mount(el: HTMLElement): () => void }): void;
   registerSidebarPanel(panel: { id: string; title: string; icon?: string; mount(el: HTMLElement): () => void }): void;
   onNotification(method: string, handler: (params: unknown) => void): () => void;
+  openFile(path: string): void;
 }
 
 interface TodoEntry { path: string; line: number; kind: "TODO" | "FIXME" | "HACK"; text: string }
 
-function TodosPanel(props: { client: ZeroUiPluginApi["client"]; onNotification: ZeroUiPluginApi["onNotification"] }) {
+function TodosPanel(props: {
+  client: ZeroUiPluginApi["client"];
+  onNotification: ZeroUiPluginApi["onNotification"];
+  openFile: ZeroUiPluginApi["openFile"];
+}) {
   const [entries, setEntries] = useState<TodoEntry[]>([]);
 
   useEffect(() => {
@@ -38,7 +46,14 @@ function TodosPanel(props: { client: ZeroUiPluginApi["client"]; onNotification: 
   return (
     <div style={{ overflowY: "auto", height: "100%", fontSize: 13 }}>
       {entries.map((e) => (
-        <div key={`${e.path}:${e.line}`} style={{ padding: "6px 12px", borderBottom: "1px solid var(--zero-border, #333)" }}>
+        <div
+          key={`${e.path}:${e.line}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => props.openFile(e.path)}
+          onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") props.openFile(e.path); }}
+          style={{ padding: "6px 12px", borderBottom: "1px solid var(--zero-border, #333)", cursor: "pointer" }}
+        >
           <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
             <span style={{ fontWeight: 600, opacity: 0.8 }}>{e.kind}</span>
             <span style={{ opacity: 0.6 }}>{e.path}:{e.line}</span>
@@ -56,7 +71,7 @@ export function mount(_container: HTMLElement, api: ZeroUiPluginApi): () => void
     title: "TODOs",
     mount(el: HTMLElement) {
       const root: Root = createRoot(el);
-      root.render(<TodosPanel client={api.client} onNotification={api.onNotification} />);
+      root.render(<TodosPanel client={api.client} onNotification={api.onNotification} openFile={api.openFile} />);
       return () => root.unmount();
     },
   });

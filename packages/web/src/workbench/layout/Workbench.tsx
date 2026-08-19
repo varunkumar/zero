@@ -613,6 +613,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
           statusBarRegistry,
           sidebarPanelRegistry,
           hub: notificationHub,
+          openFile,
         });
       })
       .then((c) => {

@@ -27,6 +27,7 @@ test("loads every plugin with a ui contribution and calls its mount", async () =
     client: fakeClient(),
     plugins: [makeEntry("git", true), makeEntry("no-ui-plugin", false)],
     statusBarRegistry, sidebarPanelRegistry, hub,
+    openFile: () => {},
     importModule: async (url) => {
       mounted.push(url);
       return { mount: () => () => {} };
@@ -47,6 +48,7 @@ test("a plugin whose import() rejects does not prevent others from loading", asy
     client: fakeClient(),
     plugins: [makeEntry("broken", true), makeEntry("ok", true)],
     statusBarRegistry, sidebarPanelRegistry, hub,
+    openFile: () => {},
     importModule: async (url) => {
       if (url.includes("broken")) throw new Error("404");
       mountedIds.push(url);
@@ -67,6 +69,7 @@ test("a plugin whose mount() throws does not prevent others from loading", async
     client: fakeClient(),
     plugins: [makeEntry("broken", true), makeEntry("ok", true)],
     statusBarRegistry, sidebarPanelRegistry, hub,
+    openFile: () => {},
     importModule: async (url) => ({
       mount: () => {
         if (url.includes("broken")) throw new Error("boom");
@@ -89,6 +92,7 @@ test("the returned cleanup calls every successfully-mounted plugin's cleanup", a
     client: fakeClient(),
     plugins: [makeEntry("a", true), makeEntry("b", true)],
     statusBarRegistry, sidebarPanelRegistry, hub,
+    openFile: () => {},
     importModule: async (url) => ({ mount: () => () => cleanupCalls.push(url) }),
   });
   cleanup();
@@ -106,6 +110,7 @@ test("skips plugins with no ui contribution entirely", async () => {
     client: fakeClient(),
     plugins: [makeEntry("no-ui", false)],
     statusBarRegistry, sidebarPanelRegistry, hub,
+    openFile: () => {},
     importModule: async () => { calls++; return { mount: () => () => {} }; },
   });
 

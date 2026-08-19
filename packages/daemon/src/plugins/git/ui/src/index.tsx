@@ -9,6 +9,9 @@ interface ZeroUiPluginApi {
   registerStatusBarItem(item: { id: string; mount(el: HTMLElement): () => void }): void;
   registerSidebarPanel(panel: { id: string; title: string; icon?: string; mount(el: HTMLElement): () => void }): void;
   onNotification(method: string, handler: (params: unknown) => void): () => void;
+  /** Unused by this plugin, kept so the restatement matches the canonical
+   * interface field-for-field. */
+  openFile(path: string): void;
 }
 
 interface GitStatusFile { path: string; status: string }

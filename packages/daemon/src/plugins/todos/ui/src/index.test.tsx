@@ -9,6 +9,7 @@ function fakeApi(overrides: Partial<{
 }> = {}) {
   const registered: { id: string; title: string; mount: (el: HTMLElement) => () => void }[] = [];
   const notifHandlers = new Map<string, (params: unknown) => void>();
+  const opened: string[] = [];
   const requestFn = overrides.request ?? (async () => ({}));
   return {
     api: {
@@ -22,9 +23,11 @@ function fakeApi(overrides: Partial<{
         notifHandlers.set(method, handler);
         return () => notifHandlers.delete(method);
       },
+      openFile: (path: string) => opened.push(path),
     },
     registered,
     notifHandlers,
+    opened,
   };
 }
 
@@ -57,6 +60,40 @@ describe("todos plugin UI", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(el.textContent).toContain("a.ts");
     expect(el.textContent).toContain("fix this");
+    cleanup();
+  });
+
+  test("clicking an entry opens that entry's file", async () => {
+    const { api, registered, opened } = fakeApi({
+      request: async (method) => {
+        if (method === "todos/list") {
+          return { entries: [{ path: "src/a.ts", line: 7, kind: "TODO", text: "fix this" }] };
+        }
+        return {};
+      },
+    });
+    mount(document.createElement("div"), api);
+    const el = document.createElement("div");
+    let cleanup: () => void = () => {};
+    act(() => {
+      cleanup = registered[0]!.mount(el);
+      flushSync(() => {});
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const row = el.querySelector('[role="button"]');
+    expect(row).not.toBeNull();
+    // MouseEvent is taken off the element's own document rather than a
+    // global: which jsdom setup installed the DOM (this package's or
+    // packages/web's, when both suites share a process) decides which
+    // globals exist, but ownerDocument.defaultView is always the right one.
+    const win = row!.ownerDocument.defaultView as unknown as { MouseEvent: typeof MouseEvent };
+    act(() => {
+      row!.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+      flushSync(() => {});
+    });
+
+    expect(opened).toEqual(["src/a.ts"]);
     cleanup();
   });
 

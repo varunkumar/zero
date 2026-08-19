@@ -16,6 +16,7 @@ function fakeApi(overrides?: {
       },
       registerSidebarPanel: () => {},
       onNotification: () => () => {},
+      openFile: () => {},
     },
     registered,
   };

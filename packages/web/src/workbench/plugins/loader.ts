@@ -7,6 +7,10 @@ export interface ZeroUiPluginApi {
   registerStatusBarItem(item: StatusBarItem): void;
   registerSidebarPanel(panel: SidebarPanelSpec): void;
   onNotification(method: string, handler: (params: unknown) => void): () => void;
+  /** Opens a workspace-relative path in the editor. No line/cursor jump -
+   * the workbench has no jump-to-line seam yet (SearchPanel's onJumpTo only
+   * opens the file too). */
+  openFile(path: string): void;
 }
 
 export interface PluginUiModule {
@@ -24,6 +28,7 @@ export async function loadPluginUis(opts: {
   statusBarRegistry: StatusBarRegistry;
   sidebarPanelRegistry: SidebarPanelRegistry;
   hub: NotificationHub;
+  openFile: (path: string) => void;
   importModule?: (url: string) => Promise<PluginUiModule>;
 }): Promise<() => void> {
   const importModule = opts.importModule ?? ((url: string) => import(/* @vite-ignore */ url));
@@ -41,6 +46,7 @@ export async function loadPluginUis(opts: {
             registerStatusBarItem: (item) => opts.statusBarRegistry.register(item),
             registerSidebarPanel: (panel) => opts.sidebarPanelRegistry.register(panel),
             onNotification: (method, handler) => opts.hub.subscribe(method, handler),
+            openFile: opts.openFile,
           };
           const container = document.createElement("div");
           const cleanup = mod.mount(container, api);
