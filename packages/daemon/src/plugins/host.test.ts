@@ -90,13 +90,12 @@ test("activateBuiltins passes through a ui contribution untouched", async () => 
   const factory = (): ZeroPlugin => ({
     manifest: {
       id: "demo-ui", name: "Demo UI", version: "1.0.0",
-      contributions: { ui: { entry: "ui/dist/index.js" } },
+      contributions: { ui: true },
     },
     activate() {},
   });
   await host.activateBuiltins([factory]);
   const list = host.list();
-  expect(list.plugins.find((p) => p.id === "demo-ui")?.contributions.ui)
-    .toEqual({ entry: "ui/dist/index.js" });
+  expect(list.plugins.find((p) => p.id === "demo-ui")?.contributions.ui).toBe(true);
   void rpc; // unused in this test, keep destructure consistent with makeHost()'s return shape
 });

@@ -117,7 +117,8 @@ export interface PluginListEntry {
     contextProviders?: string[];
     tools?: string[];
     commands?: string[];
-    ui?: { entry: string };
+    /** Set true if this plugin ships a browser UI bundle at ui/dist/index.js, served at GET /plugins/:id/ui.js. */
+    ui?: true;
   };
 }
 export interface PluginListResult { plugins: PluginListEntry[] }

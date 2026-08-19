@@ -13,7 +13,7 @@ function makeEntry(id: string, hasUi: boolean): PluginListEntry {
   return {
     id, name: id, version: "0.0.0",
     health: { ok: true },
-    contributions: hasUi ? { ui: { entry: "ui/dist/index.js" } } : {},
+    contributions: hasUi ? { ui: true as const } : {},
   };
 }
 
