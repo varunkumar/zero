@@ -16,7 +16,7 @@ export function createGit(): {
         id: "git",
         name: "Git",
         version: "0.1.0",
-        contributions: { rpcMethods: ["git/status", "git/blame"] },
+        contributions: { rpcMethods: ["git/status", "git/blame"], ui: { entry: "ui/dist/index.js" } },
       },
       async activate(c) {
         const setting = await c.workspace.readSetting("git.enabled");
