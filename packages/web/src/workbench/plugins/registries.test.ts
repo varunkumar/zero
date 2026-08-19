@@ -1,3 +1,4 @@
+import "../../testUtils/domTestSetup";
 import { expect, test } from "bun:test";
 import { StatusBarRegistry, SidebarPanelRegistry } from "./registries";
 

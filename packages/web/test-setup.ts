@@ -2,14 +2,3 @@
 // StatusBar.tsx references __ZERO_VERSION__ expecting that substitution, so
 // tests need the same global provided another way.
 (globalThis as unknown as { __ZERO_VERSION__: string }).__ZERO_VERSION__ = "test";
-
-// Set up minimal DOM for tests that need it (e.g., plugin registries).
-if (typeof document === "undefined") {
-  const mockElement = {
-    appendChild: () => {},
-    removeChild: () => {},
-  };
-  (globalThis as unknown as { document: unknown }).document = {
-    createElement: () => mockElement,
-  };
-}
