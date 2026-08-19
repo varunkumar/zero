@@ -18,6 +18,10 @@ async function main() {
       naming: "index.js",
       target: "browser",
       format: "esm",
+      // Ship production React: without these each bundle is ~972 KB of
+      // unminified development build (~138 KB with them).
+      minify: true,
+      define: { "process.env.NODE_ENV": '"production"' },
     });
     if (!result.success) {
       for (const log of result.logs) console.error(log);
