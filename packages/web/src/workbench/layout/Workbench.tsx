@@ -1180,6 +1180,10 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
             graphStatus={graphStatus}
             gitStatus={gitStatus}
             tokenStatus={tokenStatus}
+            // statusBarRegistry doesn't trigger re-renders on register/unregister;
+            // plugin UIs register synchronously inside their one-time mount() call
+            // (see loadPluginUis in Task 7's effect), so this static read is safe.
+            statusBarItems={statusBarRegistry.list()}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
