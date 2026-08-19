@@ -135,3 +135,39 @@ test("delivers client notifications to a registered notification handler", async
   expect(seen).toEqual([{ n: 1 }]);
   ws.close(); d.stop();
 });
+
+test("GET /plugins/:id/ui.js serves the bundle with a JS content-type", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const pluginsDir = mkdtempSync(join(tmpdir(), "zero-plugins-"));
+  mkdirSync(join(pluginsDir, "demo", "ui", "dist"), { recursive: true });
+  writeFileSync(join(pluginsDir, "demo", "ui", "dist", "index.js"), "export function mount(){}");
+
+  const d = createDaemon({ root: "/tmp", pluginsDir });
+  const res = await fetch(`http://127.0.0.1:${d.port}/plugins/demo/ui.js`);
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toContain("javascript");
+  expect(await res.text()).toContain("export function mount");
+  d.stop();
+});
+
+test("GET /plugins/:id/ui.js 404s for an unknown plugin id", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const pluginsDir = mkdtempSync(join(tmpdir(), "zero-plugins-"));
+  const d = createDaemon({ root: "/tmp", pluginsDir });
+  const res = await fetch(`http://127.0.0.1:${d.port}/plugins/nope/ui.js`);
+  expect(res.status).toBe(404);
+  d.stop();
+});
+
+test("GET /plugins/:id/ui.js 404s when pluginsDir isn't configured", async () => {
+  const d = createDaemon({ root: "/tmp" });
+  const res = await fetch(`http://127.0.0.1:${d.port}/plugins/demo/ui.js`);
+  expect(res.status).toBe(404);
+  d.stop();
+});

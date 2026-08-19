@@ -19,6 +19,12 @@ test("fs methods over the wire, watcher broadcasts", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   writeFileSync(join(root, "a.ts"), "1");
   const d = await startZero({ root });
+  // Plugin activation kicks off background fs activity (e.g. graphify
+  // persisting its cache under `.zero/`); node's recursive fs.watch can
+  // coalesce that with a closely-timed unrelated write and drop the
+  // filename it reports. Let it settle before watching for our own write.
+  await d.pluginsReady;
+  await new Promise((r) => setTimeout(r, 300));
   const ws = await new Promise<WebSocket>((res, rej) => {
     const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
     w.onopen = () => res(w); w.onerror = rej;
@@ -504,6 +510,7 @@ test("session/hello reports full daemon capabilities and the workspace basename"
 test("git/status returns null outside a git repo, and real data inside one", async () => {
   const root = mkdtempSync(join(tmpdir(), "zero-"));
   const d = await startZero({ root });
+  await d.pluginsReady; // git/status is registered by the git plugin, not synchronously
   const ws = await new Promise<WebSocket>((res, rej) => {
     const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
     w.onopen = () => res(w); w.onerror = rej;
@@ -519,7 +526,7 @@ test("git/status returns null outside a git repo, and real data inside one", asy
   // (rather than a second daemon/tmpdir) so this test isn't tripped up by
   // the daemon's own async `.zero/` bookkeeping writes racing the git
   // status check - that behavior belongs to SessionStore/Workspace, not to
-  // git/status, and is already covered unit-wise in gitInfo.test.ts.
+  // git/status, and is already covered unit-wise in plugins/git/status.test.ts.
   async function git(cwd: string, args: string[]) {
     const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
     await proc.exited;
@@ -531,6 +538,7 @@ test("git/status returns null outside a git repo, and real data inside one", asy
   await git(root, ["commit", "-m", "init"]);
 
   const d2 = await startZero({ root });
+  await d2.pluginsReady;
   const ws2 = await new Promise<WebSocket>((res, rej) => {
     const w = new WebSocket(`ws://127.0.0.1:${d2.port}/rpc?token=${d2.token}`);
     w.onopen = () => res(w); w.onerror = rej;

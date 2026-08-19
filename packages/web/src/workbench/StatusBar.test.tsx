@@ -11,7 +11,7 @@ const fakeEngine = {
   onStatusChange: () => {},
 } as unknown as CompletionEngine;
 
-function render(gitStatus: { branch: string; dirtyCount: number; remoteUrl: string | null } | null) {
+function render() {
   return renderToStaticMarkup(
     <StatusBar
       engine={fakeEngine}
@@ -20,34 +20,9 @@ function render(gitStatus: { branch: string; dirtyCount: number; remoteUrl: stri
       theme="dark"
       onToggleTheme={() => {}}
       lspStatus={null}
-      gitStatus={gitStatus}
     />,
   );
 }
-
-describe("StatusBar git pill", () => {
-  test("renders nothing for the git pill when gitStatus is null", () => {
-    const html = render(null);
-    expect(html).not.toContain("GitHub");
-  });
-
-  test("renders the branch name and a GitHub link when gitStatus is provided", () => {
-    const html = render({
-      branch: "main",
-      dirtyCount: 0,
-      remoteUrl: "git@github.com:acme/widget.git",
-    });
-    expect(html).toContain("main");
-    expect(html).toContain("GitHub");
-    expect(html).toContain("https://github.com/acme/widget");
-  });
-
-  test("omits the GitHub link when there's no remote", () => {
-    const html = render({ branch: "main", dirtyCount: 0, remoteUrl: null });
-    expect(html).toContain("main");
-    expect(html).not.toContain("GitHub");
-  });
-});
 
 describe("StatusBar token pill", () => {
   function renderWithTokenStatus(
@@ -61,7 +36,6 @@ describe("StatusBar token pill", () => {
         theme="dark"
         onToggleTheme={() => {}}
         lspStatus={null}
-        gitStatus={null}
         tokenStatus={tokenStatus}
       />,
     );
@@ -85,7 +59,7 @@ describe("StatusBar token pill", () => {
 
 describe("StatusBar version", () => {
   test("shows the build-time __ZERO_VERSION__", () => {
-    const html = render(null);
+    const html = render();
     expect(html).toContain(`v${__ZERO_VERSION__}`);
   });
 });

@@ -1,5 +1,7 @@
 import type { CompletionEngine } from "@zero/core";
+import type { StatusBarItem } from "./plugins/registries";
 import { StatusPill } from "../StatusPill";
+import { PluginSlot } from "./plugins/PluginSlot";
 import { Logomark } from "./theme/Logomark";
 
 export type GraphStatus = {
@@ -8,14 +10,6 @@ export type GraphStatus = {
   lastError?: string;
   nodeCount?: number;
 } | null;
-
-/** Normalizes `git@github.com:x/y.git` / `https://github.com/x/y.git` remote
- * strings into an https browsable URL. */
-function toHttpsUrl(remote: string): string {
-  const sshMatch = remote.match(/^git@([^:]+):(.+?)(\.git)?$/);
-  if (sshMatch) return `https://${sshMatch[1]}/${sshMatch[2]}`;
-  return remote.replace(/\.git$/, "");
-}
 
 export function StatusBar(props: {
   engine: CompletionEngine;
@@ -29,13 +23,13 @@ export function StatusBar(props: {
   lspStatus: { path: string; count: number; failed: boolean } | null;
   /** Graphify indexer status from `graph/status`, polled by Workbench. */
   graphStatus?: GraphStatus;
-  /** Git branch/dirty/remote status from `git/status`, polled by Workbench.
-   * Null when `root` isn't inside a git work tree. */
-  gitStatus?: { branch: string; dirtyCount: number; remoteUrl: string | null } | null;
   /** Chat context-window token usage from `chat/status`, polled by Workbench
    * for the active chat session. Null/absent fields mean no turn has run yet
    * for that session (or no session is active). */
   tokenStatus?: { usedTokens: number | null; contextWindowTokens: number | null } | null;
+  /** Status bar items contributed by daemon plugins with a `ui` contribution
+   * (e.g. the git plugin). Rendered after the built-in items. */
+  statusBarItems?: StatusBarItem[];
 }) {
   return (
     <div
@@ -85,24 +79,14 @@ export function StatusBar(props: {
                 : "Graph off"}
           </span>
         )}
-        {props.gitStatus && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <span>{props.gitStatus.branch}</span>
-            {props.gitStatus.dirtyCount > 0 && (
-              <span title={`${props.gitStatus.dirtyCount} uncommitted change(s)`}
-                style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--zero-accent)" }} />
-            )}
-            {props.gitStatus.remoteUrl && (
-              <a href={toHttpsUrl(props.gitStatus.remoteUrl)} target="_blank" rel="noreferrer"
-                style={{ color: "inherit" }} title="Open repository on GitHub">GitHub</a>
-            )}
-          </span>
-        )}
         {props.tokenStatus?.usedTokens != null && props.tokenStatus.contextWindowTokens != null && (
           <span title="Chat context window usage">
             {props.tokenStatus.usedTokens.toLocaleString()} / {props.tokenStatus.contextWindowTokens.toLocaleString()} tokens
           </span>
         )}
+        {props.statusBarItems?.map((item) => (
+          <PluginSlot key={item.id} mount={item.mount} />
+        ))}
         <StatusPill engine={props.engine} />
         <span style={{ opacity: 0.6, fontSize: 12 }} title="Zero version">v{__ZERO_VERSION__}</span>
         <button onClick={props.onToggleTheme} style={{ background: "transparent", border: "1px solid var(--zero-border)", color: "inherit", borderRadius: 4, fontSize: 13, padding: "2px 8px", cursor: "pointer" }}>

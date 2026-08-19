@@ -1,10 +1,4 @@
-export interface GitStatus {
-  branch: string;
-  dirtyCount: number;
-  ahead: number;
-  behind: number;
-  remoteUrl: string | null;
-}
+import type { GitStatusResult } from "@zero/protocol";
 
 async function git(root: string, args: string[]): Promise<{ exitCode: number; output: string }> {
   const proc = Bun.spawn(["git", ...args], { cwd: root, stdout: "pipe", stderr: "pipe" });
@@ -16,8 +10,29 @@ async function git(root: string, args: string[]): Promise<{ exitCode: number; ou
   return { exitCode, output: (stdout + stderr).trim() };
 }
 
+function describeStatus(code: string): string {
+  const [x, y] = code;
+  if (x === "?" && y === "?") return "untracked";
+  if (x === "A" || y === "A") return "added";
+  if (x === "D" || y === "D") return "deleted";
+  if (x === "R" || y === "R") return "renamed";
+  if (x === "M" || y === "M") return "modified";
+  return "changed";
+}
+
+function parseFiles(porcelainLines: string[]): Array<{ path: string; status: string }> {
+  return porcelainLines
+    .filter((line) => !line.startsWith("##"))
+    .map((line) => {
+      const code = line.slice(0, 2);
+      const rest = line.slice(3);
+      const path = rest.includes(" -> ") ? rest.split(" -> ")[1] : rest;
+      return { path, status: describeStatus(code) };
+    });
+}
+
 /** Returns null if `root` isn't inside a git work tree, or git isn't installed. */
-export async function getGitStatus(root: string): Promise<GitStatus | null> {
+export async function getGitStatus(root: string): Promise<GitStatusResult | null> {
   const inTree = await git(root, ["rev-parse", "--is-inside-work-tree"]);
   if (inTree.exitCode !== 0 || inTree.output !== "true") return null;
 
@@ -27,7 +42,7 @@ export async function getGitStatus(root: string): Promise<GitStatus | null> {
   const porcelain = await git(root, ["status", "--porcelain=v1", "--branch"]);
   const lines = porcelain.output.split("\n").filter(Boolean);
   const branchLine = lines[0] ?? "";
-  const dirtyCount = lines.length > 0 && branchLine.startsWith("##") ? lines.length - 1 : lines.length;
+  const fileLines = branchLine.startsWith("##") ? lines.slice(1) : lines;
   const aheadMatch = branchLine.match(/ahead (\d+)/);
   const behindMatch = branchLine.match(/behind (\d+)/);
 
@@ -36,9 +51,10 @@ export async function getGitStatus(root: string): Promise<GitStatus | null> {
 
   return {
     branch,
-    dirtyCount,
+    dirtyCount: fileLines.length,
     ahead: aheadMatch ? Number(aheadMatch[1]) : 0,
     behind: behindMatch ? Number(behindMatch[1]) : 0,
     remoteUrl,
+    files: parseFiles(fileLines),
   };
 }

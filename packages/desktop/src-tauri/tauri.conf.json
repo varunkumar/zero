@@ -28,7 +28,8 @@
     "resources": {
       "../../daemon/dist/zero-daemon-sidecar": "zero-daemon-sidecar",
       "../../daemon/dist/node-runtime": "node-runtime",
-      "../../daemon/dist/web-dist": "web-dist"
+      "../../daemon/dist/web-dist": "web-dist",
+      "../../daemon/dist/plugins-ui": "plugins-ui"
     },
     "android": {
       "debugApplicationIdSuffix": ".debug"

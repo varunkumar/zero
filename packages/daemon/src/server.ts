@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { parseMessage } from "@zero/protocol";
 import { RpcServer } from "./rpc";
 
-export interface DaemonOptions { root: string; port?: number; token?: string; webDist?: string; gatewayPort?: number }
+export interface DaemonOptions { root: string; port?: number; token?: string; webDist?: string; gatewayPort?: number; pluginsDir?: string }
 
 export function createDaemon(opts: DaemonOptions) {
   const token = opts.token ?? randomBytes(16).toString("hex");
@@ -31,6 +31,18 @@ export function createDaemon(opts: DaemonOptions) {
         if (url.searchParams.get("token") !== token)
           return new Response("unauthorized", { status: 401 });
         return srv.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
+      }
+      const pluginUiMatch = url.pathname.match(/^\/plugins\/([^/]+)\/ui\.js$/);
+      if (pluginUiMatch) {
+        if (!opts.pluginsDir) return new Response("not found", { status: 404 });
+        const id = pluginUiMatch[1];
+        const file = Bun.file(`${opts.pluginsDir}/${id}/ui/dist/index.js`);
+        return file.exists().then(
+          (ok) => ok
+            ? new Response(file, { headers: { "Content-Type": "text/javascript" } })
+            : new Response("not found", { status: 404 }),
+          () => new Response("not found", { status: 404 }),
+        );
       }
       if (opts.webDist) {
         const path = url.pathname === "/" ? "/index.html" : url.pathname;
