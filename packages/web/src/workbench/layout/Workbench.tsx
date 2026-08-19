@@ -431,6 +431,11 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
     contextWindowTokens: number | null;
   } | null>(null);
   const [chatVersion, setChatVersion] = useState(0);
+  // Bump signal only (its value is never read): plugin contributions register
+  // asynchronously, and the registries' list() reads happen directly in the
+  // render body, so bumping this is what makes those reads current.
+  const [pluginRegistryVersion, setPluginRegistryVersion] = useState(0);
+  void pluginRegistryVersion;
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -549,6 +554,15 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
   useEffect(() => chatStore.subscribe(() => setChatVersion((v) => v + 1)), [chatStore]);
 
   useEffect(() => tabStore.subscribe(() => setTabsVersion((v) => v + 1)), [tabStore]);
+
+  useEffect(() => {
+    const unsubStatusBar = statusBarRegistry.subscribe(() => setPluginRegistryVersion((v) => v + 1));
+    const unsubSidebar = sidebarPanelRegistry.subscribe(() => setPluginRegistryVersion((v) => v + 1));
+    return () => {
+      unsubStatusBar();
+      unsubSidebar();
+    };
+  }, [statusBarRegistry, sidebarPanelRegistry]);
 
   const { activeTab, activePath } = useMemo(() => {
     const groups = tabStore.getGroups();
@@ -1141,9 +1155,11 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
               : null}
             graphStatus={graphStatus}
             tokenStatus={tokenStatus}
-            // statusBarRegistry doesn't trigger re-renders on register/unregister;
-            // plugin UIs register synchronously inside their one-time mount() call
-            // (see loadPluginUis in Task 7's effect), so this static read is safe.
+            // A plain read of mutable registry state: it stays current because
+            // the statusBarRegistry.subscribe effect above bumps
+            // pluginRegistryVersion, re-rendering this component whenever a
+            // plugin registers or unregisters an item (which happens late,
+            // after the async plugin/list RPC + dynamic import()).
             statusBarItems={statusBarRegistry.list()}
           />
         </div>
