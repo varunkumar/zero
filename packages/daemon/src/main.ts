@@ -25,7 +25,8 @@ import { NanoHostRegistry } from "./nanoHost";
 import { NanoBridgeProvider } from "./nanoBridgeProvider";
 
 export async function startZero(opts: DaemonOptions) {
-  const daemon = createDaemon(opts);
+  const pluginsDir = new URL("./plugins", import.meta.url).pathname;
+  const daemon = createDaemon({ ...opts, pluginsDir: opts.pluginsDir ?? pluginsDir });
   const ws = new Workspace(opts.root);
   const sessions = new SessionStore(ws.root);
   const checkpoint = new GitCheckpoint(opts.root);
