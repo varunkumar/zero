@@ -37,10 +37,12 @@ export function createDaemon(opts: DaemonOptions) {
         if (!opts.pluginsDir) return new Response("not found", { status: 404 });
         const id = pluginUiMatch[1];
         const file = Bun.file(`${opts.pluginsDir}/${id}/ui/dist/index.js`);
-        return file.exists().then((ok) =>
-          ok
+        return file.exists().then(
+          (ok) => ok
             ? new Response(file, { headers: { "Content-Type": "text/javascript" } })
-            : new Response("not found", { status: 404 }));
+            : new Response("not found", { status: 404 }),
+          () => new Response("not found", { status: 404 }),
+        );
       }
       if (opts.webDist) {
         const path = url.pathname === "/" ? "/index.html" : url.pathname;
