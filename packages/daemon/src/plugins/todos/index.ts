@@ -22,7 +22,7 @@ export function createTodoScanner(): {
         id: "todos",
         name: "TODO/FIXME Scanner",
         version: "0.1.0",
-        contributions: { rpcMethods: ["todos/list", "todos/at"] },
+        contributions: { rpcMethods: ["todos/list", "todos/at"], ui: { entry: "ui/dist/index.js" } },
       },
       async activate(c) {
         const setting = await c.workspace.readSetting("todos.enabled");
