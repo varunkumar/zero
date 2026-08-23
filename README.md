@@ -34,7 +34,7 @@ Full design and roadmap:
 
 ## Status
 
-M0 through M8.5 - the full roadmap - are implemented on `main`:
+M0 through M8.6 - the full roadmap - are implemented on `main`:
 
 - **M0** skeleton (daemon-served editor with save)
 - **M1** offline copilot (Chrome Nano + Ollama-compatible fallback)
@@ -52,6 +52,9 @@ M0 through M8.5 - the full roadmap - are implemented on `main`:
 - **M8** Zero IDE (core wrap) - `packages/desktop` Tauri desktop app
 - **M8.5** Zero IDE polish - native menus/dock integration, multi-window
   support, sidecar startup-hang timeout
+- **M8.6** UI plugin framework - daemon-side plugins (git status/blame,
+  TODO/FIXME scanner) contribute status bar items and sidebar panels the
+  web workbench loads and mounts at runtime
 
 Each milestone's implementation details live in its design doc, listed
 under [Design and plugin docs](#design-and-plugin-docs). See the
@@ -69,6 +72,7 @@ the complete roadmap.
 - [M7.6 design](docs/superpowers/specs/2026-08-14-m7.6-vscode-lm-provider-design.md)
 - [M8 design](docs/superpowers/specs/2026-08-17-m8-zero-ide-design.md)
 - [M8.5 design](docs/superpowers/specs/2026-08-18-m8.5-zero-ide-polish-design.md)
+- [M8.6 design](docs/superpowers/specs/2026-08-19-ui-plugin-framework-design.md)
 - [Plugins](docs/plugins.md)
 - [Releasing](docs/releasing.md)
 
