@@ -9,10 +9,11 @@ function fakeClient(): RpcClient {
   return { request: async () => ({}), notify: () => {}, onNotification: () => {}, onRequest: () => {} } as unknown as RpcClient;
 }
 
-function makeEntry(id: string, hasUi: boolean): PluginListEntry {
+function makeEntry(id: string, hasUi: boolean, enabled = true): PluginListEntry {
   return {
     id, name: id, version: "0.0.0",
     health: { ok: true },
+    enabled,
     contributions: hasUi ? { ui: true as const } : {},
   };
 }
@@ -98,6 +99,23 @@ test("the returned cleanup calls every successfully-mounted plugin's cleanup", a
   cleanup();
 
   expect(cleanupCalls.sort()).toEqual(["/plugins/a/ui.js", "/plugins/b/ui.js"]);
+});
+
+test("skips a disabled plugin's ui contribution even though it's healthy", async () => {
+  const statusBarRegistry = new StatusBarRegistry();
+  const sidebarPanelRegistry = new SidebarPanelRegistry();
+  const hub = new NotificationHub();
+  let calls = 0;
+
+  await loadPluginUis({
+    client: fakeClient(),
+    plugins: [makeEntry("todos", true, false)],
+    statusBarRegistry, sidebarPanelRegistry, hub,
+    openFile: () => {},
+    importModule: async () => { calls++; return { mount: () => () => {} }; },
+  });
+
+  expect(calls).toBe(0);
 });
 
 test("skips plugins with no ui contribution entirely", async () => {

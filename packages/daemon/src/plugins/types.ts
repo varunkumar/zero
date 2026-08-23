@@ -29,4 +29,10 @@ export interface ZeroPlugin {
   activate(ctx: PluginContext): void | Promise<void>;
   deactivate?(): void | Promise<void>;
   health?(): PluginHealth;
+  /** Whether the plugin's own on/off setting (e.g. `git.enabled`) is
+   * currently on. Defaults to true when omitted - a healthy plugin with no
+   * such toggle is always enabled. Distinct from `health()`: a disabled
+   * plugin still reports healthy (it's not broken, just off), so callers
+   * that gate on contributions (e.g. loading a UI bundle) must check both. */
+  enabled?(): boolean;
 }

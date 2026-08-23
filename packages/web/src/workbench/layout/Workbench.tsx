@@ -30,7 +30,13 @@ import { ChatStore } from "../chat/store";
 import { TurnStore } from "../chat/turnStore";
 import { ChatPanel } from "../chat/ChatPanel";
 import { iconFor } from "../icons/iconFor";
-import { FilesTabIcon, SearchTabIcon, TerminalTabIcon, ChatTabIcon } from "../icons/TabIcons";
+import { FilesTabIcon, SearchTabIcon, TerminalTabIcon, ChatTabIcon, TasksTabIcon } from "../icons/TabIcons";
+
+/** Built-in line-icon override per plugin id, so a plugin's sidebar tab
+ * matches the Files/Search tabs' style instead of the plain-text glyph a
+ * plugin's `icon` string renders as. Unrecognized plugin ids fall back to
+ * that string (see the render below) rather than being unstyled. */
+const PLUGIN_TAB_ICONS: Record<string, () => JSX.Element> = { todos: TasksTabIcon };
 import "dockview-react/dist/styles/dockview.css";
 import "./workbench.css";
 
@@ -99,6 +105,10 @@ interface WorkbenchContextValue {
   setActiveGroupId: (groupId: string) => void;
   activePath: string | null;
   openFile: (path: string) => void;
+  /** Opens `path` (if not already open) and scrolls/selects the given
+   * 1-based line once its EditorView mounts. */
+  openFileAt: (path: string, line: number) => void;
+  pendingJump: { path: string; line: number } | null;
   saveTab: (tabId: string) => void;
   /** Close a tab, or - when it is dirty - ask first. Lives on the context so
    * the tab strip's × and the `file.close` command drive the same
@@ -165,9 +175,15 @@ function SidebarPanel() {
       <div className="zero-sidebar-toggle">
         <button aria-pressed={w.sidebarView === "files"} onClick={() => w.setSidebarView("files")}><FilesTabIcon />Files</button>
         <button aria-pressed={w.sidebarView === "search"} onClick={() => w.setSidebarView("search")}><SearchTabIcon />Search</button>
-        {pluginPanels.map((p) => (
-          <button key={p.id} aria-pressed={w.sidebarView === p.id} onClick={() => w.setSidebarView(p.id)}>{p.title}</button>
-        ))}
+        {pluginPanels.map((p) => {
+          const Icon = PLUGIN_TAB_ICONS[p.id];
+          return (
+            <button key={p.id} aria-pressed={w.sidebarView === p.id} onClick={() => w.setSidebarView(p.id)}>
+              {Icon ? <Icon /> : p.icon && <span aria-hidden="true">{p.icon}</span>}
+              {p.title}
+            </button>
+          );
+        })}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {w.sidebarView === "files" ? (
@@ -181,7 +197,7 @@ function SidebarPanel() {
             onError={w.report}
           />
         ) : w.sidebarView === "search" ? (
-          <SearchPanel client={w.client} onJumpTo={(path) => w.openFile(path)} />
+          <SearchPanel client={w.client} onJumpTo={(path, line) => w.openFileAt(path, line)} />
         ) : (
           (() => {
             const panel = w.sidebarPanelRegistry.get(w.sidebarView);
@@ -291,14 +307,10 @@ export function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
       diagnostics={w.diagnosticsByPath.get(tab.path) ?? []}
       client={w.client}
       lspEnabled={w.capabilities.lsp}
+      goToLine={w.pendingJump?.path === tab.path ? w.pendingJump.line : undefined}
       onGoToDefinition={(path, line, character) => {
-        w.openFile(path);
-        // Cursor placement after open happens once the tab's EditorView mounts;
-        // the simplest correct thing for M2 is opening the file — landing the
-        // cursor precisely requires the view to exist first, which openFile's
-        // async fs/read round-trip doesn't guarantee synchronously. Out of scope
-        // refinement: thread the target position through TabStore.openFile and
-        // have EditorPanel's mount effect dispatch a selection once ready.
+        void character;
+        w.openFileAt(path, line + 1);
       }}
     />
   ) : null;
@@ -413,6 +425,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
   const [activeGroupId, setActiveGroupId] = useState("group-1");
   const [tabsVersion, setTabsVersion] = useState(0);
   const [confirmingTabId, setConfirmingTabId] = useState<string | null>(null);
+  const [pendingJump, setPendingJump] = useState<{ path: string; line: number } | null>(null);
   const [diagnosticsByPath, setDiagnosticsByPath] = useState<Map<string, LspDiagnostic[]>>(new Map());
   // Whether the language server responsible for a given path has failed
   // (spawn error, init timeout, crash). An empty diagnostics list looks
@@ -613,7 +626,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
           statusBarRegistry,
           sidebarPanelRegistry,
           hub: notificationHub,
-          openFile,
+          openFile: (path, line) => (line != null ? openFileAt(path, line) : openFile(path)),
         });
       })
       .then((c) => {
@@ -822,6 +835,11 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
         setActiveGroupId(groupId);
       })
       .catch((e: unknown) => reportRef.current(`Could not open ${path}: ${errorText(e)}`));
+  }
+
+  function openFileAt(path: string, line: number): void {
+    setPendingJump({ path, line });
+    openFile(path);
   }
 
   function saveTab(tabId: string): void {
@@ -1105,6 +1123,8 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
     setActiveGroupId,
     activePath,
     openFile,
+    openFileAt,
+    pendingJump,
     saveTab,
     requestCloseTab,
     confirmingTabId,

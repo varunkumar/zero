@@ -7,20 +7,21 @@ export interface ZeroUiPluginApi {
   registerStatusBarItem(item: StatusBarItem): void;
   registerSidebarPanel(panel: SidebarPanelSpec): void;
   onNotification(method: string, handler: (params: unknown) => void): () => void;
-  /** Opens a workspace-relative path in the editor. No line/cursor jump -
-   * the workbench has no jump-to-line seam yet (SearchPanel's onJumpTo only
-   * opens the file too). */
-  openFile(path: string): void;
+  /** Opens a workspace-relative path in the editor. When `line` (1-based) is
+   * given, the editor scrolls to and selects that line once its view mounts. */
+  openFile(path: string, line?: number): void;
 }
 
 export interface PluginUiModule {
   mount(container: HTMLElement, api: ZeroUiPluginApi): () => void;
 }
 
-/** Discovers every plugin whose manifest declares a `ui` contribution,
- * dynamically imports its bundle, and calls its `mount`. A failure in any
- * one plugin (bad import, throwing mount) is caught and logged - it never
- * blocks another plugin's UI or the rest of the workbench, mirroring
+/** Discovers every currently-enabled plugin whose manifest declares a `ui`
+ * contribution, dynamically imports its bundle, and calls its `mount`. A
+ * disabled plugin still reports `health.ok: true` (disabled isn't broken),
+ * so `enabled` must be checked separately from `health.ok` here. A failure
+ * in any one plugin (bad import, throwing mount) is caught and logged - it
+ * never blocks another plugin's UI or the rest of the workbench, mirroring
  * PluginHost.activateBuiltins's per-plugin isolation on the daemon side. */
 export async function loadPluginUis(opts: {
   client: RpcClient;
@@ -28,7 +29,7 @@ export async function loadPluginUis(opts: {
   statusBarRegistry: StatusBarRegistry;
   sidebarPanelRegistry: SidebarPanelRegistry;
   hub: NotificationHub;
-  openFile: (path: string) => void;
+  openFile: (path: string, line?: number) => void;
   importModule?: (url: string) => Promise<PluginUiModule>;
 }): Promise<() => void> {
   const importModule = opts.importModule ?? ((url: string) => import(/* @vite-ignore */ url));
@@ -36,7 +37,7 @@ export async function loadPluginUis(opts: {
 
   await Promise.all(
     opts.plugins
-      .filter((p) => p.contributions.ui && p.health.ok)
+      .filter((p) => p.contributions.ui && p.enabled && p.health.ok)
       .map(async (p) => {
         const url = `/plugins/${p.id}/ui.js`;
         try {

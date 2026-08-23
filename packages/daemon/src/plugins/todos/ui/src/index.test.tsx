@@ -7,9 +7,9 @@ import { mount } from "./index";
 function fakeApi(overrides: Partial<{
   request: (method: string, params?: unknown) => Promise<unknown>;
 }> = {}) {
-  const registered: { id: string; title: string; mount: (el: HTMLElement) => () => void }[] = [];
+  const registered: { id: string; title: string; icon?: string; mount: (el: HTMLElement) => () => void }[] = [];
   const notifHandlers = new Map<string, (params: unknown) => void>();
-  const opened: string[] = [];
+  const opened: [string, number | undefined][] = [];
   const requestFn = overrides.request ?? (async () => ({}));
   return {
     api: {
@@ -18,12 +18,12 @@ function fakeApi(overrides: Partial<{
           requestFn(method, params) as Promise<R>,
       },
       registerStatusBarItem: () => {},
-      registerSidebarPanel: (panel: { id: string; title: string; mount: (el: HTMLElement) => () => void }) => registered.push(panel),
+      registerSidebarPanel: (panel: { id: string; title: string; icon?: string; mount: (el: HTMLElement) => () => void }) => registered.push(panel),
       onNotification: (method: string, handler: (params: unknown) => void) => {
         notifHandlers.set(method, handler);
         return () => notifHandlers.delete(method);
       },
-      openFile: (path: string) => opened.push(path),
+      openFile: (path: string, line?: number) => opened.push([path, line]),
     },
     registered,
     notifHandlers,
@@ -32,12 +32,13 @@ function fakeApi(overrides: Partial<{
 }
 
 describe("todos plugin UI", () => {
-  test("mount registers a single sidebar panel titled TODOs", () => {
+  test("mount registers a single sidebar panel titled Tasks with an icon", () => {
     const { api, registered } = fakeApi();
     const cleanup = mount(document.createElement("div"), api);
     expect(registered.length).toBe(1);
     expect(registered[0]!.id).toBe("todos");
-    expect(registered[0]!.title).toBe("TODOs");
+    expect(registered[0]!.title).toBe("Tasks");
+    expect(registered[0]!.icon).toBe("☑");
     cleanup();
   });
 
@@ -63,7 +64,7 @@ describe("todos plugin UI", () => {
     cleanup();
   });
 
-  test("clicking an entry opens that entry's file", async () => {
+  test("clicking an entry opens that entry's file at its line", async () => {
     const { api, registered, opened } = fakeApi({
       request: async (method) => {
         if (method === "todos/list") {
@@ -93,7 +94,7 @@ describe("todos plugin UI", () => {
       flushSync(() => {});
     });
 
-    expect(opened).toEqual(["src/a.ts"]);
+    expect(opened).toEqual([["src/a.ts", 7]]);
     cleanup();
   });
 

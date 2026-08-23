@@ -11,7 +11,7 @@ interface ZeroUiPluginApi {
   onNotification(method: string, handler: (params: unknown) => void): () => void;
   /** Unused by this plugin, kept so the restatement matches the canonical
    * interface field-for-field. */
-  openFile(path: string): void;
+  openFile(path: string, line?: number): void;
 }
 
 interface GitStatusFile { path: string; status: string }
