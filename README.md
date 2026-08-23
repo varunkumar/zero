@@ -17,8 +17,9 @@ Zero is a platform with one core engine and multiple flavours built on it:
   terminal, LSP, Graphify context, chat, and a daemon-side plugin host
   (built-in git status/blame and TODO/FIXME scanner plugins, each able to
   contribute their own browser UI).
-- **Zero Agents** - headless task runner over the same engine: write tools,
-  git checkpointing, model gateway, scriptable via `zero -p`.
+- **Zero Agents** - the `zero` CLI, no browser required: an interactive TUI
+  (`zero`) and a headless mode (`zero -p`) for scripts/CI, both over the same
+  engine, with write tools, git checkpointing, and a model gateway.
 - **Zero Lite** - pure-browser, zero-install flavour; no daemon, browser APIs
   only.
 - **Zero Claude Plugin** - exposes Gemini Nano on Chrome as a model that
