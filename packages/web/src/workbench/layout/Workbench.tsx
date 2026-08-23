@@ -9,6 +9,11 @@ import { MarkdownPreview } from "../viewers/MarkdownPreview";
 import { ImageViewer } from "../viewers/ImageViewer";
 import { PdfViewer } from "../viewers/PdfViewer";
 import { CommandRegistry } from "../commands/registry";
+import { StatusBarRegistry, SidebarPanelRegistry } from "../plugins/registries";
+import { NotificationHub } from "../plugins/notifications";
+import { loadPluginUis } from "../plugins/loader";
+import { PluginSlot } from "../plugins/PluginSlot";
+import type { PluginListResult } from "@zero/protocol";
 import { attachKeybindings } from "../keybindings/dispatcher";
 import { TabStore, type Tab } from "../tabs/store";
 import { SettingsStore } from "../settings/store";
@@ -105,8 +110,9 @@ interface WorkbenchContextValue {
   setCursor: (cursor: { line: number; column: number }) => void;
   registerView: (groupId: string, view: EditorView | undefined) => void;
   requestCompletion: (s: { prefix: string; suffix: string }) => void;
-  sidebarView: "files" | "search";
-  setSidebarView: (view: "files" | "search") => void;
+  sidebarView: string;
+  setSidebarView: (view: string) => void;
+  sidebarPanelRegistry: SidebarPanelRegistry;
   bottomView: "terminal" | "chat";
   setBottomView: (view: "terminal" | "chat") => void;
   /** Removes the Terminal/Chat dockview panel entirely (both panels stay
@@ -153,11 +159,15 @@ function useWorkbench(): WorkbenchContextValue {
 
 function SidebarPanel() {
   const w = useWorkbench();
+  const pluginPanels = w.sidebarPanelRegistry.list();
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--zero-sidebar-bg)", color: "var(--zero-sidebar-fg)" }}>
       <div className="zero-sidebar-toggle">
         <button aria-pressed={w.sidebarView === "files"} onClick={() => w.setSidebarView("files")}><FilesTabIcon />Files</button>
         <button aria-pressed={w.sidebarView === "search"} onClick={() => w.setSidebarView("search")}><SearchTabIcon />Search</button>
+        {pluginPanels.map((p) => (
+          <button key={p.id} aria-pressed={w.sidebarView === p.id} onClick={() => w.setSidebarView(p.id)}>{p.title}</button>
+        ))}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {w.sidebarView === "files" ? (
@@ -170,8 +180,13 @@ function SidebarPanel() {
             onTreeChanged={w.onTreeChanged}
             onError={w.report}
           />
-        ) : (
+        ) : w.sidebarView === "search" ? (
           <SearchPanel client={w.client} onJumpTo={(path) => w.openFile(path)} />
+        ) : (
+          (() => {
+            const panel = w.sidebarPanelRegistry.get(w.sidebarView);
+            return panel ? <PluginSlot mount={panel.mount} /> : null;
+          })()
         )}
       </div>
     </div>
@@ -376,6 +391,9 @@ function useConst<T>(factory: () => T): T {
 export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCapabilities; onChangeFolder?: () => void }) {
   const { client, capabilities, onChangeFolder } = props;
   const registry = useConst(() => new CommandRegistry());
+  const statusBarRegistry = useConst(() => new StatusBarRegistry());
+  const sidebarPanelRegistry = useConst(() => new SidebarPanelRegistry());
+  const notificationHub = useConst(() => new NotificationHub());
   const tabStore = useConst(() => new TabStore());
   const settingsStore = useConst(() => new SettingsStore(client, window.localStorage));
   const ptyStore = useConst(() => new PtyStore());
@@ -383,7 +401,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
   const turnStore = useConst(() => new TurnStore());
 
   const [settings, setSettings] = useState(() => settingsStore.getSnapshot());
-  const [sidebarView, setSidebarView] = useState<"files" | "search">("files");
+  const [sidebarView, setSidebarView] = useState<string>("files");
   const [bottomView, setBottomView] = useState<"terminal" | "chat">(capabilities.pty ? "terminal" : "chat");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [openerOpen, setOpenerOpen] = useState(false);
@@ -408,18 +426,16 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
     lastError?: string;
     nodeCount?: number;
   } | null>(null);
-  const [gitStatus, setGitStatus] = useState<{
-    branch: string;
-    dirtyCount: number;
-    ahead: number;
-    behind: number;
-    remoteUrl: string | null;
-  } | null>(null);
   const [tokenStatus, setTokenStatus] = useState<{
     usedTokens: number | null;
     contextWindowTokens: number | null;
   } | null>(null);
   const [chatVersion, setChatVersion] = useState(0);
+  // Bump signal only (its value is never read): plugin contributions register
+  // asynchronously, and the registries' list() reads happen directly in the
+  // render body, so bumping this is what makes those reads current.
+  const [pluginRegistryVersion, setPluginRegistryVersion] = useState(0);
+  void pluginRegistryVersion;
 
   const theme = settings.theme;
   const dockApi = useRef<DockviewApi | null>(null);
@@ -502,37 +518,6 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
     };
   }, [client, capabilities.graph]);
 
-  // Poll git branch/dirty/remote status for the status bar. Failures
-  // surface as no pill at all (null) rather than taking the editor down -
-  // git/status itself already degrades to null server-side when `root`
-  // isn't a git work tree, so an unreachable daemon gets the same result.
-  useEffect(() => {
-    if (!capabilities.git) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const { status } = await client.request<{
-          status: {
-            branch: string;
-            dirtyCount: number;
-            ahead: number;
-            behind: number;
-            remoteUrl: string | null;
-          } | null;
-        }>("git/status");
-        if (!cancelled) setGitStatus(status);
-      } catch {
-        if (!cancelled) setGitStatus(null);
-      }
-    };
-    void tick();
-    const id = setInterval(tick, 2000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [client, capabilities.git]);
-
   // Poll chat context-window token usage for the status bar, for whichever
   // session is currently active. Mirrors the graph/status and git/status
   // polling above: same interval, same "degrade to null rather than take
@@ -570,6 +555,15 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
 
   useEffect(() => tabStore.subscribe(() => setTabsVersion((v) => v + 1)), [tabStore]);
 
+  useEffect(() => {
+    const unsubStatusBar = statusBarRegistry.subscribe(() => setPluginRegistryVersion((v) => v + 1));
+    const unsubSidebar = sidebarPanelRegistry.subscribe(() => setPluginRegistryVersion((v) => v + 1));
+    return () => {
+      unsubStatusBar();
+      unsubSidebar();
+    };
+  }, [statusBarRegistry, sidebarPanelRegistry]);
+
   const { activeTab, activePath } = useMemo(() => {
     const groups = tabStore.getGroups();
     const group = groups.find((g) => g.id === activeGroupId) ?? groups[0];
@@ -601,11 +595,51 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
     return unsubscribe;
   }, [settingsStore]);
 
+  // Discover daemon plugins with a UI contribution and load their bundles.
+  // A plugin without a `ui` contribution, or one that's disabled (health
+  // reports "disabled" - see the git/todos plugins), is skipped by
+  // loadPluginUis itself; a failure loading one plugin's bundle never
+  // blocks another's or the rest of the workbench.
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    let cancelled = false;
+    void client
+      .request<PluginListResult>("plugin/list")
+      .then((res) => {
+        if (cancelled) return;
+        return loadPluginUis({
+          client,
+          plugins: res.plugins,
+          statusBarRegistry,
+          sidebarPanelRegistry,
+          hub: notificationHub,
+          openFile,
+        });
+      })
+      .then((c) => {
+        if (cancelled) c?.();
+        else cleanup = c;
+      })
+      .catch((e: unknown) => console.error("failed to load plugin UIs:", e));
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [client, statusBarRegistry, sidebarPanelRegistry, notificationHub]);
+
+  // Fans every daemon notification out through notificationHub, so plugin
+  // UIs (via ZeroUiPluginApi.onNotification) and this handler share the one
+  // slot RpcClient.onNotification allows.
+  useEffect(() => {
+    client.onNotification((method, params) => notificationHub.dispatch(method, params));
+  }, [client, notificationHub]);
+
   // THE single client.onNotification handler for the whole app. RpcClient
   // stores one handler and a second call silently replaces it, so every
-  // consumer of daemon notifications fans out from right here.
+  // consumer of daemon notifications fans out from right here — now via
+  // notificationHub rather than a direct client.onNotification registration.
   useEffect(() => {
-    client.onNotification((method, params) => {
+    const handler = (method: string, params: unknown) => {
       if (method === "pty/output") {
         const { sessionId, data } = params as PtyOutputEvent;
         ptyStore.handleOutput(sessionId, data);
@@ -656,8 +690,11 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
           tabStore.markSaved(tab.id);
         })
         .catch((e: unknown) => reportRef.current(`Could not reload ${path}: ${errorText(e)}`));
-    });
-  }, [client, tabStore, ptyStore, turnStore]);
+    };
+    const methods = ["pty/output", "pty/exit", "chat/turnEvent", "lsp/diagnostics", "fs/changed"];
+    const unsubs = methods.map((m) => notificationHub.subscribe(m, (params) => handler(m, params)));
+    return () => unsubs.forEach((u) => u());
+  }, [client, tabStore, ptyStore, turnStore, notificationHub]);
 
   // Path list backing the fuzzy file opener, refreshed whenever the tree does.
   useEffect(() => {
@@ -1079,6 +1116,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
     requestCompletion: completion.request,
     sidebarView,
     setSidebarView,
+    sidebarPanelRegistry,
     bottomView,
     setBottomView,
     closeBottomPanel: () => actionsRef.current.closeBottomPanel(),
@@ -1117,8 +1155,13 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
               ? { path: activePath, count: (diagnosticsByPath.get(activePath) ?? []).length, failed: lspFailedByPath.get(activePath) ?? false }
               : null}
             graphStatus={graphStatus}
-            gitStatus={gitStatus}
             tokenStatus={tokenStatus}
+            // A plain read of mutable registry state: it stays current because
+            // the statusBarRegistry.subscribe effect above bumps
+            // pluginRegistryVersion, re-rendering this component whenever a
+            // plugin registers or unregisters an item (which happens late,
+            // after the async plugin/list RPC + dynamic import()).
+            statusBarItems={statusBarRegistry.list()}
           />
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />

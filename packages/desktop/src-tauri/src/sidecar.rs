@@ -33,6 +33,7 @@ pub fn spawn(
     sidecar_bin: &Path,
     node_runtime_dir: &Path,
     web_dist_dir: &Path,
+    plugins_ui_dir: &Path,
     workspace: &Path,
 ) -> std::io::Result<SidecarHandle> {
     let child = Command::new(sidecar_bin)
@@ -46,6 +47,9 @@ pub fn spawn(
         // import.meta.url-relative resolution breaks inside a `bun build
         // --compile` binary - see ZERO_WEB_DIST in packages/daemon/bin/zero.ts.
         .env("ZERO_WEB_DIST", web_dist_dir)
+        // Same reason: the daemon's plugins/ dir, holding each plugin's
+        // ui/dist/index.js bundle served at GET /plugins/:id/ui.js.
+        .env("ZERO_PLUGINS_DIR", plugins_ui_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;

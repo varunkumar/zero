@@ -84,3 +84,18 @@ test("failed activate is not masked by later health() reporting ok", async () =>
   expect(host.health().plugins.sneaky?.ok).toBe(false);
   expect(host.health().plugins.sneaky?.detail).toContain("activate failed");
 });
+
+test("activateBuiltins passes through a ui contribution untouched", async () => {
+  const { host, rpc } = makeHost();
+  const factory = (): ZeroPlugin => ({
+    manifest: {
+      id: "demo-ui", name: "Demo UI", version: "1.0.0",
+      contributions: { ui: true },
+    },
+    activate() {},
+  });
+  await host.activateBuiltins([factory]);
+  const list = host.list();
+  expect(list.plugins.find((p) => p.id === "demo-ui")?.contributions.ui).toBe(true);
+  void rpc; // unused in this test, keep destructure consistent with makeHost()'s return shape
+});

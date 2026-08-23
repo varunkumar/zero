@@ -49,4 +49,19 @@ fi
 # so the Tauri shell can point the sidecar at it via that env var.
 cp -RL "$WEB_DIST" "$OUT_DIR/web-dist"
 
+# Same import.meta.url-relative resolution problem for the daemon's own
+# plugins/ dir, which holds each plugin's optional ui/dist/index.js bundle
+# (served at GET /plugins/:id/ui.js). Lay the copies out as
+# <pluginsDir>/<id>/ui/dist/index.js so the Tauri shell can point
+# ZERO_PLUGINS_DIR at this directory with no server-side changes.
+echo "Building and bundling plugin UI bundles..."
+bun run --cwd "$DAEMON_DIR" build:plugin-ui
+mkdir -p "$OUT_DIR/plugins-ui"
+for plugin_ui_dist in "$DAEMON_DIR"/src/plugins/*/ui/dist; do
+  [ -d "$plugin_ui_dist" ] || continue
+  plugin_id="$(basename "$(dirname "$(dirname "$plugin_ui_dist")")")"
+  mkdir -p "$OUT_DIR/plugins-ui/$plugin_id/ui"
+  cp -RL "$plugin_ui_dist" "$OUT_DIR/plugins-ui/$plugin_id/ui/dist"
+done
+
 echo "Sidecar build complete: $OUT_DIR"

@@ -12,6 +12,8 @@ export interface PluginManifest {
     contextProviders?: string[];
     tools?: string[];
     commands?: string[];
+    /** Set true if this plugin ships a browser UI bundle at ui/dist/index.js (built by scripts/build-plugin-ui.ts), served at GET /plugins/:id/ui.js. */
+    ui?: true;
   };
 }
 

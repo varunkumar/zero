@@ -11,6 +11,8 @@ import { LspService } from "./lsp/service";
 import { DEFAULT_LSP_SERVERS, type LspServerConfig } from "./lsp/registry";
 import { PluginHost } from "./plugins/host";
 import { createGraphify } from "./plugins/graphify";
+import { createGit } from "./plugins/git";
+import { createTodoScanner } from "./plugins/todos";
 import { SessionStore } from "./sessions";
 import type { ChatMessage } from "@zero/protocol";
 import { AgentRuntime, ProviderGateway, OpenAICompatProvider, type ChatDelta } from "@zero/core";
@@ -19,12 +21,12 @@ import { createAgentRuntimeClient } from "./agentClient";
 import { createRuntimePool } from "./agentRuntimePool";
 import { GitCheckpoint } from "./gitCheckpoint";
 import { execCommand } from "./execCommand";
-import { getGitStatus } from "./gitInfo";
 import { NanoHostRegistry } from "./nanoHost";
 import { NanoBridgeProvider } from "./nanoBridgeProvider";
 
 export async function startZero(opts: DaemonOptions) {
-  const daemon = createDaemon(opts);
+  const pluginsDir = new URL("./plugins", import.meta.url).pathname;
+  const daemon = createDaemon({ ...opts, pluginsDir: opts.pluginsDir ?? pluginsDir });
   const ws = new Workspace(opts.root);
   const sessions = new SessionStore(ws.root);
   const checkpoint = new GitCheckpoint(opts.root);
@@ -109,11 +111,6 @@ export async function startZero(opts: DaemonOptions) {
     async (p) => ({ value: await ws.readSetting(p.key) }));
   daemon.rpc.register("settings/set", z.object({ key: z.string(), value: z.unknown() }),
     async (p) => { await ws.writeSetting(p.key, p.value); return {}; });
-  // Returns { status: GitStatusResult | null } - null when `opts.root` isn't
-  // inside a git work tree (or git isn't installed), matching the "degrade,
-  // never throw" convention for optional subsystems.
-  daemon.rpc.register("git/status", z.object({}).optional().transform(() => ({})),
-    async () => ({ status: await getGitStatus(opts.root) }));
   daemon.rpc.register("session/hello", z.object({}).optional().transform(() => ({})),
     async () => ({
       capabilities: {
@@ -177,6 +174,8 @@ export async function startZero(opts: DaemonOptions) {
     async (p) => { await sessions.delete(p.id); runtimeFor.evict(p.id); return {}; });
 
   const graphify = createGraphify();
+  const git = createGit();
+  const todos = createTodoScanner();
 
   const activeTurns = new Map<string, { sessionId: string; controller: AbortController }>();
 
@@ -275,8 +274,8 @@ export async function startZero(opts: DaemonOptions) {
   });
   host.registerHostRpcs();
   // Fire-and-forget activation; tests can await pluginsReady.
-  // Failures degrade Graphify only (host catches factory/activate errors).
-  const pluginsReady = host.activateBuiltins([graphify.factory]);
+  // Failures degrade the individual plugin only (host catches factory/activate errors).
+  const pluginsReady = host.activateBuiltins([graphify.factory, git.factory, todos.factory]);
 
   const unwatch = ws.watch((path) => {
     daemon.broadcast("fs/changed", { path });
@@ -284,6 +283,11 @@ export async function startZero(opts: DaemonOptions) {
       graphify.getIndexer()?.onFileChanged(path);
     } catch {
       // Graphify reindex must not break fs broadcast
+    }
+    try {
+      todos.getScanner()?.onFileChanged(path);
+    } catch {
+      // TODO scanner re-scan must not break fs broadcast
     }
   });
 

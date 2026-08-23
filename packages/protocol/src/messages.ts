@@ -117,6 +117,8 @@ export interface PluginListEntry {
     contextProviders?: string[];
     tools?: string[];
     commands?: string[];
+    /** Set true if this plugin ships a browser UI bundle at ui/dist/index.js, served at GET /plugins/:id/ui.js. */
+    ui?: true;
   };
 }
 export interface PluginListResult { plugins: PluginListEntry[] }
@@ -165,12 +167,52 @@ export interface ChatStatusResult {
   contextWindowTokens: number | null;
 }
 
+export interface GitStatusFile {
+  path: string;
+  status: string;
+}
+
 export interface GitStatusResult {
   branch: string;
   dirtyCount: number;
   ahead: number;
   behind: number;
   remoteUrl: string | null;
+  files: GitStatusFile[];
+}
+
+export interface GitBlameParams {
+  path: string;
+}
+
+export interface GitBlameLine {
+  line: number;
+  commit: string;
+  author: string;
+  date: string;
+}
+
+export interface GitBlameResult {
+  lines: GitBlameLine[];
+}
+
+export interface TodoEntry {
+  path: string;
+  line: number;
+  kind: "TODO" | "FIXME" | "HACK";
+  text: string;
+}
+
+export interface TodosListResult {
+  entries: TodoEntry[];
+}
+
+export interface TodosAtParams {
+  path: string;
+}
+
+export interface TodosAtResult {
+  entries: TodoEntry[];
 }
 
 export interface WhoamiResult {
