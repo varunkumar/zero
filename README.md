@@ -9,18 +9,24 @@
 Zero is a local-first coding environment. The primary use case is coding fully
 offline: you write code by hand with copilot-style inline completions from an
 on-device model, plus an integrated terminal and a chat panel for asking
-about the codebase. Online capabilities come later and are strictly additive.
+about the codebase.
 
 Zero is a platform with one core engine and multiple flavours built on it:
 
 - **Zero (v1)** - browser UI plus a local daemon: editor, completions,
-  terminal, LSP, Graphify context, chat.
-- **Zero Agents** - headless autonomous agent runs over the same engine.
+  terminal, LSP, Graphify context, chat, and a daemon-side plugin host
+  (built-in git status/blame and TODO/FIXME scanner plugins, each able to
+  contribute their own browser UI).
+- **Zero Agents** - headless task runner over the same engine: write tools,
+  git checkpointing, model gateway, scriptable via `zero -p`.
 - **Zero Lite** - pure-browser, zero-install flavour; no daemon, browser APIs
   only.
 - **Zero Claude Plugin** - exposes Gemini Nano on Chrome as a model that
   Claude Code can be pointed at, enabling a fully offline Claude Code.
-- **Zero IDE** - desktop app wrapping the same client and daemon.
+- **Zero VS Code Plugin** - VS Code extension for offline inline completions
+  against a `zero serve` daemon, and a `vscode.lm` chat model provider
+  backed by the same engine.
+- **Zero IDE** - desktop app (Tauri) wrapping the same client and daemon.
 
 Full design and roadmap:
 [`docs/superpowers/specs/2026-08-04-zero-design.md`](docs/superpowers/specs/2026-08-04-zero-design.md).
@@ -92,8 +98,10 @@ full command surface.
   (from `@zero/core`), chat panel, xterm.js terminal UI, settings, and the
   Chrome Nano provider.
 - **Daemon**: file system, project watching, PTY sessions, LSP server
-  management, **plugin host** (built-ins first; Graphify indexer), session
-  store, and static serving of the client. See [`docs/plugins.md`](docs/plugins.md).
+  management, **plugin host** (Graphify indexer, git status/blame, TODO/FIXME
+  scanner - each independently toggleable and able to serve its own browser
+  UI bundle), session store, and static serving of the client. See
+  [`docs/plugins.md`](docs/plugins.md).
 
 ## CLI usage
 
