@@ -112,6 +112,7 @@ export interface PluginListEntry {
   name: string;
   version: string;
   health: PluginHealthInfo;
+  enabled: boolean;
   contributions: {
     rpcMethods?: string[];
     contextProviders?: string[];

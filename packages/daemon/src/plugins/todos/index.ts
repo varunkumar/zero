@@ -41,6 +41,7 @@ export function createTodoScanner(): {
         const status = scanner?.status();
         return status?.lastError ? { ok: false, detail: status.lastError } : { ok: true };
       },
+      enabled: () => enabled,
     };
   };
 

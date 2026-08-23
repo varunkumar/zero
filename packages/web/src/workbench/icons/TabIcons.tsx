@@ -41,3 +41,15 @@ export function ChatTabIcon() {
     </svg>
   );
 }
+
+export function TasksTabIcon() {
+  return (
+    <svg {...common} aria-hidden>
+      <rect x="1.5" y="1.5" width="4" height="4" rx="0.8" />
+      <path d="M2.3 3.5 3.1 4.3 4.7 2.6" />
+      <line x1="7.2" y1="3.5" x2="12.5" y2="3.5" />
+      <rect x="1.5" y="8.5" width="4" height="4" rx="0.8" />
+      <line x1="7.2" y1="10.5" x2="12.5" y2="10.5" />
+    </svg>
+  );
+}

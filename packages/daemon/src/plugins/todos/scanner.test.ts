@@ -33,6 +33,56 @@ describe("TodoScanner", () => {
     expect(scanner.status()).toMatchObject({ ready: true, indexing: false });
   });
 
+  test("ignores TODO/FIXME/HACK outside of comments", async () => {
+    const root = makeRoot("zero-todos-noncomment-");
+    writeFileSync(
+      join(root, "a.ts"),
+      [
+        "export function createTodoScanner(): {}",
+        'const kind: "TODO" | "FIXME" | "HACK" = "TODO";',
+        '{ path: "a.ts", line: 1, kind: "TODO", text: "fix this" }',
+        "// TODO: this one is real",
+      ].join("\n") + "\n",
+    );
+
+    const scanner = new TodoScanner({ workspace: new Workspace(root) });
+    await scanner.runFullScan();
+
+    expect(scanner.at("a.ts")).toEqual([{ path: "a.ts", line: 4, kind: "TODO", text: "this one is real" }]);
+  });
+
+  test("scopes comment tokens per file extension", async () => {
+    const root = makeRoot("zero-todos-lang-");
+    // A bare "#" only opens a comment in languages like Python - in a .ts
+    // file it commonly appears as #privateField syntax and must not be
+    // treated as a comment starter.
+    writeFileSync(join(root, "a.ts"), 'const url = "x.com/section#TODO fix this";\n');
+    writeFileSync(join(root, "b.py"), "# TODO: real python todo\n");
+
+    const scanner = new TodoScanner({ workspace: new Workspace(root) });
+    await scanner.runFullScan();
+
+    expect(scanner.at("a.ts")).toEqual([]);
+    expect(scanner.at("b.py")).toEqual([{ path: "b.py", line: 1, kind: "TODO", text: "real python todo" }]);
+  });
+
+  test("ignores comment tokens that appear inside a string literal", async () => {
+    const root = makeRoot("zero-todos-stringlit-");
+    writeFileSync(
+      join(root, "a.ts"),
+      [
+        'writeFileSync(join(root, "a.ts"), "// TODO: fix this\\nconst x = 1;\\n");',
+        "const url = 'no marker here, just a // in a string';",
+        "// TODO: this one is real",
+      ].join("\n") + "\n",
+    );
+
+    const scanner = new TodoScanner({ workspace: new Workspace(root) });
+    await scanner.runFullScan();
+
+    expect(scanner.at("a.ts")).toEqual([{ path: "a.ts", line: 3, kind: "TODO", text: "this one is real" }]);
+  });
+
   test("respects .gitignore", async () => {
     const root = makeRoot("zero-todos-ignore-");
     writeFileSync(join(root, ".gitignore"), "ignored.ts\n");

@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import type { RpcClient, FsSearchResult, FsSearchMatch } from "@zero/protocol";
+import { iconFor } from "../icons/iconFor";
 
 /** A 1-character query matches nearly every file in a real repo, so it burns a
  * full-workspace scan to return a truncated, useless result set. */
 const MIN_QUERY_LENGTH = 2;
+
+/** Line text can run to hundreds of columns (minified JSON, long literals);
+ * cap the rendered snippet so one result can't blow out the row height. */
+const SNIPPET_MAX_LENGTH = 120;
+
+function snippet(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length > SNIPPET_MAX_LENGTH ? `${trimmed.slice(0, SNIPPET_MAX_LENGTH)}…` : trimmed;
+}
 
 export function SearchPanel(props: { client: RpcClient; onJumpTo: (path: string, line: number) => void }) {
   const [query, setQuery] = useState("");
@@ -60,14 +70,17 @@ export function SearchPanel(props: { client: RpcClient; onJumpTo: (path: string,
       <div style={{ overflow: "auto", flex: 1 }}>
         {[...grouped.entries()].map(([path, fileMatches]) => (
           <div key={path} style={{ padding: "4px 8px" }}>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>{path}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: 14 }}>
+              <img src={iconFor(path.split("/").at(-1) ?? "", false)} alt="" width={14} height={14} style={{ flexShrink: 0 }} />
+              {path}
+            </div>
             {fileMatches.map((m, i) => (
               <div
                 key={i}
                 onClick={() => props.onJumpTo(m.path, m.line)}
-                style={{ paddingLeft: 12, cursor: "pointer", fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                style={{ paddingLeft: 20, cursor: "pointer", fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
               >
-                {m.line}: {m.text.trim()}
+                {m.line}: {snippet(m.text)}
               </div>
             ))}
           </div>

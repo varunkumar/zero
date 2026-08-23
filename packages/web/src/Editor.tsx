@@ -111,6 +111,10 @@ export function Editor(props: {
   /** When false, skip hover/definition RPC. Defaults true so daemon call sites stay unchanged. */
   lspEnabled?: boolean;
   onGoToDefinition?: (path: string, line: number, character: number) => void;
+  /** 1-based line to select and scroll into view. Re-applied whenever this
+   * (or `path`) changes, so clicking a second result in an already-open file
+   * jumps again even though the view itself isn't rebuilt. */
+  goToLine?: number;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>();
@@ -255,6 +259,21 @@ export function Editor(props: {
       effects: themeCompartment.current.reconfigure(editorTheme[props.theme ?? "light"]),
     });
   }, [props.theme]);
+
+  // Runs after the mount effect above (declaration order), so on a path
+  // change it sees the freshly-created view for the new file, not a stale
+  // one from the previous file.
+  useEffect(() => {
+    if (!view.current || props.goToLine == null) return;
+    const lineNumber = Math.max(1, Math.min(props.goToLine, view.current.state.doc.lines));
+    const line = view.current.state.doc.line(lineNumber);
+    view.current.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: "center" }),
+    });
+    view.current.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.path, props.goToLine]);
 
   // The linter extension above only re-runs on doc changes by default; force
   // a re-lint when diagnostics for the open file change externally (an

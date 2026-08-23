@@ -46,6 +46,7 @@ export function createGit(): {
         if (!enabled) return { ok: true, detail: "disabled" };
         return lastError ? { ok: false, detail: lastError } : { ok: true };
       },
+      enabled: () => enabled,
     };
   };
 

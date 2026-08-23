@@ -65,6 +65,7 @@ test("graph and plugin types are plain JSON-serializable shapes", () => {
     plugins: [{
       id: "graphify", name: "Graphify", version: "0.1.0",
       health: { ok: true },
+      enabled: true,
       contributions: { rpcMethods: ["graph/query"], contextProviders: ["graph"], tools: ["graph_query"] },
     }],
   };

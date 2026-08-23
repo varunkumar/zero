@@ -10,7 +10,80 @@ export interface TodoScannerStatus {
   lastError?: string;
 }
 
-const MARKER_RE = /\b(TODO|FIXME|HACK)\b:?\s*(.*)/;
+// A bare "#" is a comment starter in Python/shell/YAML, but also shows up
+// constantly in TS/JS as `#privateField` syntax, URL fragments, etc. - so
+// the set of recognized comment-opening tokens has to be per-language, not
+// one blanket list applied to every file (a blanket list matched this very
+// file's own `#`-containing regex literal against itself).
+const COMMENT_TOKENS_BY_EXT: Record<string, string[]> = {
+  ts: ["//", "/*", "*"], tsx: ["//", "/*", "*"], js: ["//", "/*", "*"], jsx: ["//", "/*", "*"],
+  mjs: ["//", "/*", "*"], cjs: ["//", "/*", "*"], mts: ["//", "/*", "*"], cts: ["//", "/*", "*"],
+  go: ["//", "/*", "*"], rs: ["//", "/*", "*"], java: ["//", "/*", "*"],
+  c: ["//", "/*", "*"], h: ["//", "/*", "*"], cpp: ["//", "/*", "*"], hpp: ["//", "/*", "*"],
+  swift: ["//", "/*", "*"], kt: ["//", "/*", "*"],
+  py: ["#"], rb: ["#"], sh: ["#"], bash: ["#"], zsh: ["#"],
+  yml: ["#"], yaml: ["#"], toml: ["#"],
+  sql: ["--"], lua: ["--"],
+  html: ["<!--"], md: ["<!--"], mdx: ["<!--"], xml: ["<!--"], svg: ["<!--"],
+};
+// Files with no recognized extension get every token, erring toward
+// over-matching rather than silently scanning nothing.
+const DEFAULT_COMMENT_TOKENS = ["//", "#", "--", "<!--", "/*", "*"];
+
+const COMMENT_TOKENS_CACHE = new Map<string, string[]>();
+
+function commentTokensFor(path: string): string[] {
+  const dot = path.lastIndexOf(".");
+  const ext = dot >= 0 ? path.slice(dot + 1).toLowerCase() : "";
+  const cached = COMMENT_TOKENS_CACHE.get(ext);
+  if (cached) return cached;
+  const tokens = COMMENT_TOKENS_BY_EXT[ext] ?? DEFAULT_COMMENT_TOKENS;
+  COMMENT_TOKENS_CACHE.set(ext, tokens);
+  return tokens;
+}
+
+const MARKER_WORD_RE = /\b(TODO|FIXME|HACK)\b:?\s*(.*)/;
+
+/** Finds a real comment on `line` and, if it contains a marker word,
+ * returns it. A comment token found while scanning through a quoted string
+ * literal doesn't count - a test fixture that writes a marker-looking
+ * comment into a temp file as string data shouldn't turn the line of code
+ * doing the writing into a marker itself. Still line-based and quote-aware
+ * only, not a real tokenizer - a string spanning multiple lines, or a
+ * template interpolation containing a quote, can still confuse it. Real
+ * per-language comment detection would need an LSP/tree-sitter, future work. */
+function findMarker(line: string, tokens: string[]): { kind: string; text: string } | null {
+  // A block-comment continuation line (marker text after a leading "*") is
+  // anchored at the line start, so nothing can precede it in a string - no
+  // need for the quote-aware scan below.
+  if (tokens.includes("*")) {
+    const continuation = line.match(/^\s*\*(?!\/)(.*)$/);
+    if (continuation) {
+      const m = continuation[1].match(MARKER_WORD_RE);
+      if (m) return { kind: m[1]!, text: m[2]!.trim() };
+    }
+  }
+
+  const lineTokens = tokens.filter((t) => t !== "*");
+  if (lineTokens.length === 0) return null;
+
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { quote = ch; continue; }
+    const token = lineTokens.find((t) => line.startsWith(t, i));
+    if (token) {
+      const m = line.slice(i + token.length).match(MARKER_WORD_RE);
+      return m ? { kind: m[1]!, text: m[2]!.trim() } : null;
+    }
+  }
+  return null;
+}
 
 export class TodoScanner {
   #workspace: Workspace;
@@ -117,10 +190,11 @@ export class TodoScanner {
 
   async #scanFile(path: string): Promise<TodoEntry[]> {
     const content = await this.#workspace.read(path);
+    const tokens = commentTokensFor(path);
     const out: TodoEntry[] = [];
     content.split("\n").forEach((line, idx) => {
-      const m = line.match(MARKER_RE);
-      if (m) out.push({ path, line: idx + 1, kind: m[1] as TodoEntry["kind"], text: m[2].trim() });
+      const m = findMarker(line, tokens);
+      if (m) out.push({ path, line: idx + 1, kind: m.kind as TodoEntry["kind"], text: m.text });
     });
     return out;
   }

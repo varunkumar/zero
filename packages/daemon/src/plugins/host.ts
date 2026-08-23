@@ -83,6 +83,7 @@ export class PluginHost {
         name: plugin.manifest.name,
         version: plugin.manifest.version,
         health: this.#liveHealth(plugin, health),
+        enabled: plugin.enabled?.() ?? true,
         contributions: plugin.manifest.contributions,
       })),
     };
