@@ -3,7 +3,7 @@
 [![Cloudflare Pages](https://img.shields.io/github/check-runs/varunkumar/zero/main?logo=cloudflare&logoColor=white&label=Cloudflare%20Pages)](https://dash.cloudflare.com/0d39754e3ae6404682a9bd4980eb399a/workers/services/view/zero-lite/production/builds)
 
 <p align="center">
-  <img src="docs/assets/zero-logo-dark.png" alt="Zero" width="320">
+  <img src="docs/assets/zero-products.png" alt="Zero" width="560">
 </p>
 
 Zero is a local-first coding environment. The primary use case is coding fully
