@@ -83,6 +83,41 @@ describe("TodoScanner", () => {
     expect(scanner.at("a.ts")).toEqual([{ path: "a.ts", line: 3, kind: "TODO", text: "this one is real" }]);
   });
 
+  test("skips files with an unrecognized extension instead of scanning them permissively", async () => {
+    const root = makeRoot("zero-todos-unknown-ext-");
+    // A compiled binary with a marker-looking byte sequence and no
+    // recognized source/text extension: previously this fell back to
+    // scanning with every comment token and could surface a match.
+    writeFileSync(join(root, "libfoo.rlib"), Buffer.from([0x00, 0x01, 0x54, 0x4f, 0x44, 0x4f, 0x02]));
+    writeFileSync(join(root, "a.ts"), "// TODO: real one\n");
+
+    const scanner = new TodoScanner({ workspace: new Workspace(root) });
+    await scanner.runFullScan();
+
+    expect(scanner.at("libfoo.rlib")).toEqual([]);
+    expect(scanner.list().map((e) => e.path)).toEqual(["a.ts"]);
+  });
+
+  test("skips a recognized extension whose content is actually binary", async () => {
+    const root = makeRoot("zero-todos-mislabeled-binary-");
+    writeFileSync(join(root, "weird.ts"), Buffer.concat([Buffer.from([0x00]), Buffer.from("// TODO: hidden in binary\n")]));
+
+    const scanner = new TodoScanner({ workspace: new Workspace(root) });
+    await scanner.runFullScan();
+
+    expect(scanner.at("weird.ts")).toEqual([]);
+  });
+
+  test("scans plain-text files (no comment syntax of their own) with the widest token set", async () => {
+    const root = makeRoot("zero-todos-plaintext-");
+    writeFileSync(join(root, "notes.txt"), "# TODO: write the notes\n");
+
+    const scanner = new TodoScanner({ workspace: new Workspace(root) });
+    await scanner.runFullScan();
+
+    expect(scanner.at("notes.txt")).toEqual([{ path: "notes.txt", line: 1, kind: "TODO", text: "write the notes" }]);
+  });
+
   test("respects .gitignore", async () => {
     const root = makeRoot("zero-todos-ignore-");
     writeFileSync(join(root, ".gitignore"), "ignored.ts\n");

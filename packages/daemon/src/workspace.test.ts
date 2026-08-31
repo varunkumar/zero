@@ -66,6 +66,23 @@ test("blocks writes through a not-yet-existing path behind a symlinked directory
   await expect(ws.write("outdir/new.txt", "pwned")).rejects.toThrow(PathOutsideWorkspaceError);
 });
 
+test("tree honors a nested .gitignore, scoped to its own directory", async () => {
+  const root = makeProject();
+  mkdirSync(join(root, "pkg", "src-tauri"), { recursive: true });
+  writeFileSync(join(root, "pkg", "src-tauri", ".gitignore"), "/target/\n");
+  mkdirSync(join(root, "pkg", "src-tauri", "target"));
+  writeFileSync(join(root, "pkg", "src-tauri", "target", "bin"), "\x00\x01binary");
+  // A same-named "target" directory outside the nested .gitignore's scope
+  // must NOT be caught by the scoped pattern.
+  mkdirSync(join(root, "target"));
+  writeFileSync(join(root, "target", "keep.txt"), "kept");
+
+  const ws = new Workspace(root);
+  const paths = (await ws.tree()).map((e) => e.path);
+  expect(paths.some((p) => p.startsWith("pkg/src-tauri/target"))).toBe(false);
+  expect(paths).toContain("target/keep.txt");
+});
+
 test("tree skips symlinks", async () => {
   const root = makeProject();
   const outside = mkdtempSync(join(tmpdir(), "zero-outside-"));

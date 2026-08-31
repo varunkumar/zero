@@ -145,6 +145,29 @@ export class Workspace {
     return ig;
   }
 
+  /** Reads `dir`'s own `.gitignore` (if any) and returns its patterns
+   * rewritten so they only match within `relDir` - real git treats a nested
+   * .gitignore as scoped to its own directory, so a bare pattern like
+   * `target/` in `packages/desktop/src-tauri/.gitignore` must not
+   * accidentally also match a `target/` directory elsewhere in the tree. */
+  async #nestedIgnorePatterns(dir: string, relDir: string): Promise<string[]> {
+    let content: string;
+    try {
+      content = await fs.readFile(join(dir, ".gitignore"), "utf8");
+    } catch {
+      return [];
+    }
+    const out: string[] = [];
+    for (const raw of content.split("\n")) {
+      const line = raw.trimEnd();
+      if (!line || line.trimStart().startsWith("#")) continue;
+      const negate = line.startsWith("!");
+      const body = (negate ? line.slice(1) : line).replace(/^\//, "");
+      out.push(`${negate ? "!" : ""}${relDir}/${body}`);
+    }
+    return out;
+  }
+
   async #readSettingsFile(): Promise<Record<string, unknown>> {
     try {
       const raw = await fs.readFile(settingsPath(), "utf8");
@@ -167,8 +190,16 @@ export class Workspace {
 
   async tree(): Promise<TreeEntry[]> {
     const ig = await this.#ignorer();
+    // Patterns from .gitignore files nested below the root, scoped to their
+    // own directory (see #nestedIgnorePatterns) - collected as we descend so
+    // a directory's own ignore rules apply to its children.
+    const nested: Ignore[] = [];
     const out: TreeEntry[] = [];
-    const walk = async (dir: string) => {
+    const walk = async (dir: string, relDir: string) => {
+      if (relDir) {
+        const patterns = await this.#nestedIgnorePatterns(dir, relDir);
+        if (patterns.length > 0) nested.push(ignore().add(patterns));
+      }
       for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
         // Symlinks are skipped entirely: Dirent.isDirectory() reports false
         // for a symlinked directory (misclassifying it as a file), and
@@ -176,12 +207,13 @@ export class Workspace {
         // read()/write() independently guard against symlink escapes too.
         if (entry.isSymbolicLink()) continue;
         const rel = relative(this.#root, join(dir, entry.name));
-        if (ig.ignores(entry.isDirectory() ? rel + "/" : rel)) continue;
+        const probe = entry.isDirectory() ? rel + "/" : rel;
+        if (ig.ignores(probe) || nested.some((n) => n.ignores(probe))) continue;
         out.push({ path: rel, kind: entry.isDirectory() ? "dir" : "file" });
-        if (entry.isDirectory()) await walk(join(dir, entry.name));
+        if (entry.isDirectory()) await walk(join(dir, entry.name), rel);
       }
     };
-    await walk(this.#root);
+    await walk(this.#root, "");
     return out.sort((a, b) => a.path.localeCompare(b.path));
   }
 

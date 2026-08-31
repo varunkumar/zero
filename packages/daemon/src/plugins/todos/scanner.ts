@@ -26,18 +26,26 @@ const COMMENT_TOKENS_BY_EXT: Record<string, string[]> = {
   sql: ["--"], lua: ["--"],
   html: ["<!--"], md: ["<!--"], mdx: ["<!--"], xml: ["<!--"], svg: ["<!--"],
 };
-// Files with no recognized extension get every token, erring toward
-// over-matching rather than silently scanning nothing.
+// Plain-text formats with no comment syntax of their own still get scanned
+// with the widest token set, so a stray "TODO:" written directly into a
+// README or notes file is still found.
+const PLAIN_TEXT_EXTS = new Set(["txt", "text", "log"]);
 const DEFAULT_COMMENT_TOKENS = ["//", "#", "--", "<!--", "/*", "*"];
 
-const COMMENT_TOKENS_CACHE = new Map<string, string[]>();
+const COMMENT_TOKENS_CACHE = new Map<string, string[] | null>();
 
-function commentTokensFor(path: string): string[] {
+/** Files with an unrecognized extension used to fall back to scanning with
+ * every comment token, which is how build output ends up in a TODO list:
+ * `target/`'s compiled binaries have no meaningful extension-to-language
+ * mapping, and "every token" against arbitrary bytes produces garbage
+ * matches. Only recognized source/text extensions are scanned now - an
+ * unknown extension is skipped, not scanned permissively. */
+function commentTokensFor(path: string): string[] | null {
   const dot = path.lastIndexOf(".");
   const ext = dot >= 0 ? path.slice(dot + 1).toLowerCase() : "";
   const cached = COMMENT_TOKENS_CACHE.get(ext);
-  if (cached) return cached;
-  const tokens = COMMENT_TOKENS_BY_EXT[ext] ?? DEFAULT_COMMENT_TOKENS;
+  if (cached !== undefined) return cached;
+  const tokens = COMMENT_TOKENS_BY_EXT[ext] ?? (PLAIN_TEXT_EXTS.has(ext) ? DEFAULT_COMMENT_TOKENS : null);
   COMMENT_TOKENS_CACHE.set(ext, tokens);
   return tokens;
 }
@@ -189,8 +197,13 @@ export class TodoScanner {
   }
 
   async #scanFile(path: string): Promise<TodoEntry[]> {
-    const content = await this.#workspace.read(path);
     const tokens = commentTokensFor(path);
+    if (!tokens) return [];
+    const content = await this.#workspace.read(path);
+    // Defense in depth against a recognized extension containing binary
+    // content anyway (e.g. a mislabeled build artifact): a raw NUL byte
+    // survives UTF-8 decoding unchanged and never appears in real text.
+    if (content.includes("\u0000")) return [];
     const out: TodoEntry[] = [];
     content.split("\n").forEach((line, idx) => {
       const m = findMarker(line, tokens);
