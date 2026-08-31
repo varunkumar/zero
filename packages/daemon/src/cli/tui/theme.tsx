@@ -21,9 +21,8 @@ const DARK: Theme = {
   name: "dark",
   accent: "cyan",
   logoColors: [
-    "cyan", "cyan", "cyanBright", "cyanBright", "blueBright", "blueBright",
-    "blue", "blue", "blue", "magenta", "magenta", "magentaBright",
-    "magentaBright", "magenta",
+    "cyan", "cyan", "cyanBright", "blueBright", "blue", "blue",
+    "magenta", "magenta", "magentaBright", "magentaBright", "magenta",
   ],
   toolLine: "gray",
   userColor: "cyanBright",
@@ -36,9 +35,8 @@ const LIGHT: Theme = {
   // Bright cyan/blue wash out against a white background - the light
   // palette leans on darker, higher-contrast tones instead.
   logoColors: [
-    "blue", "blue", "blue", "blue", "blue", "blue",
-    "magenta", "magenta", "magenta", "magenta", "red", "red",
-    "red", "red",
+    "blue", "blue", "blue", "blue", "blue", "magenta",
+    "magenta", "magenta", "red", "red", "red",
   ],
   toolLine: "blackBright",
   userColor: "blue",
