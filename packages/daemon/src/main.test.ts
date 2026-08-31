@@ -301,6 +301,7 @@ test("chat/status doesn't construct a runtime for a never-turned session, and re
     w.onopen = () => res(w); w.onerror = rej;
   });
   const client = new RpcClient(wsAdapter(ws));
+  await client.request("settings/set", { key: "zero.ollamaUrl", value: "http://127.0.0.1:1/v1" });
   const { id } = await client.request<{ id: string }>("chat/create", {});
 
   // A session that has never had chat/turn called for it should report the
@@ -352,6 +353,7 @@ test("chat/turn streams events and persists the turn (no tools, stub provider un
     w.onopen = () => res(w); w.onerror = rej;
   });
   const client = new RpcClient(wsAdapter(ws));
+  await client.request("settings/set", { key: "zero.ollamaUrl", value: "http://127.0.0.1:1/v1" });
   const { id } = await client.request<{ id: string }>("chat/create", {});
 
   const events: unknown[] = [];
@@ -391,7 +393,10 @@ test("chat/abort still produces a terminal chat/turnEvent broadcast, not silence
     fetch(req) {
       const url = new URL(req.url);
       if (url.pathname.endsWith("/models")) {
-        return new Response(JSON.stringify({ data: [] }), { headers: { "content-type": "application/json" } });
+        return new Response(JSON.stringify({ data: [{ id: "test-model" }] }), { headers: { "content-type": "application/json" } });
+      }
+      if (url.pathname.endsWith("/api/ps")) {
+        return new Response(JSON.stringify({ models: [{ name: "test-model" }] }), { headers: { "content-type": "application/json" } });
       }
       if (url.pathname.endsWith("/chat/completions")) {
         return new Promise<Response>(() => {}); // never resolves
@@ -410,6 +415,9 @@ test("chat/abort still produces a terminal chat/turnEvent broadcast, not silence
 
   try {
     await client.request("settings/set", { key: "zero.ollamaUrl", value: `http://127.0.0.1:${fake.port}/v1` });
+    const listed = await client.request<{ models: string[]; active: string | null }>("models/list");
+    expect(listed.models).toContain("test-model");
+    expect(listed.active).toBe("test-model");
     const { id } = await client.request<{ id: string }>("chat/create", {});
 
     const events: { type: string; message?: string }[] = [];
@@ -446,6 +454,7 @@ test("a second chat/turn for a session with an already-active turn is rejected, 
     w.onopen = () => res(w); w.onerror = rej;
   });
   const client = new RpcClient(wsAdapter(ws));
+  await client.request("settings/set", { key: "zero.ollamaUrl", value: "http://127.0.0.1:1/v1" });
   const { id } = await client.request<{ id: string }>("chat/create", {});
 
   const turnEvents: { turnId: string; event: { type: string; message?: string } }[] = [];
@@ -570,6 +579,46 @@ test("nano/register attaches this socket as the nano host; nano/unregister detac
   expect(d.nanoHost.available()).toBe(false);
 
   ws.close(); d.stop();
+});
+
+test("models/list returns installed Ollama names and models/set persists the choice", async () => {
+  const fake = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(req) {
+      const url = new URL(req.url);
+      if (url.pathname.endsWith("/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "llama3.2:latest" }, { id: "mistral:latest" }] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.pathname.endsWith("/api/ps")) {
+        return new Response(JSON.stringify({ models: [] }), { headers: { "content-type": "application/json" } });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+  const root = mkdtempSync(join(tmpdir(), "zero-"));
+  const d = await startZero({ root });
+  const ws = await new Promise<WebSocket>((res, rej) => {
+    const w = new WebSocket(`ws://127.0.0.1:${d.port}/rpc?token=${d.token}`);
+    w.onopen = () => res(w); w.onerror = rej;
+  });
+  const client = new RpcClient(wsAdapter(ws));
+  try {
+    await client.request("settings/set", { key: "zero.ollamaUrl", value: `http://127.0.0.1:${fake.port}/v1` });
+    const listed = await client.request<{ models: string[]; active: string | null }>("models/list");
+    expect(listed.models).toEqual(["llama3.2:latest", "mistral:latest"]);
+    expect(listed.active).toBe("llama3.2:latest");
+
+    const set = await client.request<{ models: string[]; active: string | null }>("models/set", { model: "mistral:latest" });
+    expect(set.active).toBe("mistral:latest");
+    expect((await client.request<{ value: unknown }>("settings/get", { key: "zero.ollamaModel" })).value).toBe("mistral:latest");
+  } finally {
+    fake.stop(true);
+    ws.close();
+    d.stop();
+  }
 });
 
 test("nano host registration clears automatically when the socket disconnects", async () => {

@@ -15,6 +15,9 @@ export { CompletionEngine } from "./engine";
 export type { EngineStatus } from "./engine";
 export { CompletionScheduler } from "./scheduler";
 export { OpenAICompatProvider } from "./providers/openaiCompat";
+export {
+  listCompatModels, listRunningOllamaModels, resolveCompatModel, DEFAULT_OLLAMA_BASE_URL,
+} from "./providers/compatModels";
 export { ChromeNanoProvider, probeNano, type NanoApi, type NanoSession } from "./providers/chromeNano";
 export { buildToolResponseConstraint, parseNanoToolResponse } from "./providers/nanoTools";
 export type {

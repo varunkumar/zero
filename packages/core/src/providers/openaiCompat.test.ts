@@ -165,3 +165,18 @@ test("supportsTools() is true", () => {
   const provider = new OpenAICompatProvider({ baseUrl: "http://x/v1", model: "qwen" });
   expect(provider.supportsTools()).toBe(true);
 });
+
+test("chat() includes the HTTP body in a 404 so a missing Ollama model is diagnosable", async () => {
+  const provider = new OpenAICompatProvider({
+    baseUrl: "http://x/v1", model: "qwen2.5-coder:7b",
+    fetchImpl: async () => new Response(JSON.stringify({ error: "model 'qwen2.5-coder:7b' not found" }), { status: 404 }),
+  });
+  let err: unknown;
+  try {
+    for await (const _ of provider.chat([{ role: "user", content: "hi", createdAt: 0 }], [], new AbortController().signal)) { /* drain */ }
+  } catch (e) { err = e; }
+  expect(err).toBeInstanceOf(Error);
+  expect((err as Error).message).toContain("404");
+  expect((err as Error).message).toContain("qwen2.5-coder:7b");
+  expect((err as Error).message).toContain("not found");
+});

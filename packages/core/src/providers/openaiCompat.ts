@@ -3,6 +3,12 @@ import type { ChatCapableProvider, ChatMessage, ChatToolSpec, ChatDelta } from "
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+async function httpError(action: string, res: Response): Promise<Error> {
+  let detail = "";
+  try { detail = (await res.text()).replace(/\s+/g, " ").trim().slice(0, 400); } catch { /* body unreadable */ }
+  return new Error(`${action} failed: ${res.status}${detail ? ` ${detail}` : ""}`);
+}
+
 type FallbackToolCall = { id: string; name: string; args: Record<string, unknown> };
 
 // Scans for top-level `{...}` substrings using brace balancing, so a tool
@@ -82,7 +88,7 @@ export class OpenAICompatProvider implements ChatCapableProvider {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: this.#opts.model, prompt, stream: true, max_tokens: 256 }),
     });
-    if (!res.ok || !res.body) throw new Error(`completion failed: ${res.status}`);
+    if (!res.ok || !res.body) throw await httpError("completion", res);
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = "";
     while (true) {
@@ -129,7 +135,7 @@ export class OpenAICompatProvider implements ChatCapableProvider {
         method: "POST", signal, headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, stream: false }),
       });
-      if (!res.ok) throw new Error(`chat failed: ${res.status}`);
+      if (!res.ok) throw await httpError("chat", res);
       const data = await res.json() as {
         choices: { message: { content: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[];
       };
@@ -144,7 +150,7 @@ export class OpenAICompatProvider implements ChatCapableProvider {
       method: "POST", signal, headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...body, stream: true }),
     });
-    if (!res.ok || !res.body) throw new Error(`chat failed: ${res.status}`);
+    if (!res.ok || !res.body) throw await httpError("chat", res);
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = "";
     while (true) {

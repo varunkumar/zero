@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
-import { runAgentCli, positionalArgs, parseGatewayPort } from "./agent";
+import { runAgentCli, runListModelsCli, positionalArgs, parseGatewayPort, parseModel } from "./agent";
 import { SessionStore } from "../sessions";
 import { useTempZeroHome } from "../testSupport/zeroHome";
 import type { ChatCapableProvider } from "@zero/core";
@@ -74,4 +74,39 @@ test("fails gracefully when -p is missing", async () => {
   const dir = await mkdtemp(join(tmpdir(), "zero-agent-cli-"));
   const exitCode = await runAgentCli(["--yes"], dir, { providers: [stubProvider("hi")] });
   expect(exitCode).not.toBe(0);
+});
+
+test("parseModel reads --model and flags a missing value as invalid", () => {
+  expect(parseModel([])).toBeUndefined();
+  expect(parseModel(["--model", "llama3.2:latest"])).toBe("llama3.2:latest");
+  expect(parseModel(["--model"])).toBe("invalid");
+  expect(parseModel(["--model", "--yes"])).toBe("invalid");
+});
+
+test("positionalArgs skips --model and its value", () => {
+  expect(positionalArgs(["-p", "task", "--model", "llama3.2:latest", "/proj"])).toEqual(["/proj"]);
+});
+
+test("runListModelsCli prints installed models with the active one starred", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "zero-agent-cli-"));
+  const lines: string[] = [];
+  const orig = console.log;
+  console.log = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+  try {
+    const fetchImpl = (async (input: string) => {
+      const url = String(input);
+      if (url.endsWith("/api/ps")) return new Response(JSON.stringify({ models: [] }));
+      if (url.endsWith("/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "llama3.2:latest" }, { id: "mistral:latest" }] }));
+      }
+      return new Response("nope", { status: 404 });
+    }) as typeof fetch;
+    const code = await runListModelsCli(dir, { fetchImpl });
+    expect(code).toBe(0);
+    expect(lines.some((l) => l.includes("llama3.2:latest"))).toBe(true);
+    expect(lines.some((l) => l.includes("mistral:latest"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("* ") && l.includes("llama3.2:latest"))).toBe(true);
+  } finally {
+    console.log = orig;
+  }
 });

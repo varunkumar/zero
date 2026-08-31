@@ -10,6 +10,9 @@ export interface AgentRuntimePool {
    * if any) from the pool. Call this when a session is deleted so the pool
    * doesn't retain providers/tools for it forever. */
   evict(sessionId: string): void;
+  /** Drop every cached runtime. Call this when the active model changes so
+   * the next chat/turn rebuilds providers against the new name. */
+  evictAll(): void;
 }
 
 /** Session-scoped AgentRuntime cache. Memoizes the *construction Promise*,
@@ -41,5 +44,6 @@ export function createRuntimePool(
   } as AgentRuntimePool;
   runtimeFor.has = (sessionId: string) => cache.has(sessionId);
   runtimeFor.evict = (sessionId: string) => { cache.delete(sessionId); };
+  runtimeFor.evictAll = () => { cache.clear(); };
   return runtimeFor;
 }

@@ -16,7 +16,12 @@ export async function runTui(root: string, start: StartMode, opts: TuiOpts = {})
     console.error('zero requires an interactive terminal; use zero -p "task" --yes for scripting');
     return 1;
   }
-  const ctx = createCliContext(root, opts);
+  const ctx = await createCliContext(root, opts);
+  if (opts.model && ctx.activeModel !== opts.model && !ctx.activeModel?.startsWith(`${opts.model}:`)) {
+    const installed = ctx.models.length ? ctx.models.join(", ") : "(none — is Ollama running?)";
+    console.error(`error: model ${opts.model} is not installed. available: ${installed}`);
+    return 1;
+  }
 
   // Run the TUI in the terminal's alternate screen buffer, like vim/htop,
   // so it takes over the full window instead of scrolling inline. The
@@ -36,6 +41,9 @@ export async function runTui(root: string, start: StartMode, opts: TuiOpts = {})
           createRuntime={(sessionId) => createRuntimeForSession(ctx, sessionId)}
           cwd={root}
           version={VERSION}
+          models={ctx.models}
+          activeModel={ctx.activeModel}
+          onSelectModel={(name) => ctx.setModel(name)}
         />
       </ThemeProvider>,
     );

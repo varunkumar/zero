@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { startZero } from "../src/main";
-import { runAgentCli, positionalArgs, parseGatewayPort, parsePort } from "../src/cli/agent";
+import { runAgentCli, runListModelsCli, positionalArgs, parseGatewayPort, parsePort, parseModel } from "../src/cli/agent";
 import { runClaudeCli } from "../src/cli/claude";
 import { runTui } from "../src/cli/tui/runTui";
 import { VERSION } from "../src/version";
@@ -15,9 +15,11 @@ if (argv.includes("--help") || argv.includes("-h")) {
   console.log(`zero ${VERSION}
 
 usage:
-  zero [path]                                       launch the interactive TUI (new session)
-  zero --resume [path]                              launch the TUI, pick a session to resume
-  zero -p "task" [--yes] [--session <id>] [path]    run one task headlessly
+  zero [path] [--model <name>]                      launch the interactive TUI (new session)
+  zero --resume [path] [--model <name>]             launch the TUI, pick a session to resume
+  zero -p "task" [--yes] [--session <id>] [--model <name>] [path]
+                                                    run one task headlessly
+  zero --list-models [path]                         print installed Ollama models (* = active)
   zero serve [path] [--port <port>] [--gateway-port <port>]  start the web daemon
   zero claude [path] [--gateway-port <port>]        start the daemon and bridge Claude Code to Gemini Nano
   zero --version                                    print the version`);
@@ -72,6 +74,10 @@ if (argv[0] === "claude") {
       console.log(`model gateway: http://127.0.0.1:${d.gatewayInfo.port}/v1/messages (ANTHROPIC_API_KEY=${d.gatewayInfo.apiKey})`);
     }
   }
+} else if (argv.includes("--list-models")) {
+  const path = positionalArgs(argv)[0];
+  const root = resolve(path ?? ".");
+  process.exit(await runListModelsCli(root));
 } else if (argv.includes("-p")) {
   const path = positionalArgs(argv)[0];
   const root = resolve(path ?? ".");
@@ -80,6 +86,11 @@ if (argv[0] === "claude") {
 } else {
   const path = positionalArgs(argv)[0];
   const root = resolve(path ?? ".");
+  const parsedModel = parseModel(argv);
+  if (parsedModel === "invalid") {
+    console.error("error: --model requires a model name (see zero --list-models)");
+    process.exit(1);
+  }
   const sessionIdx = argv.indexOf("--session");
   const sessionId = sessionIdx >= 0 ? argv[sessionIdx + 1] : undefined;
   const start = sessionId
@@ -87,6 +98,6 @@ if (argv[0] === "claude") {
     : argv.includes("--resume")
       ? { kind: "resume" as const }
       : { kind: "new" as const };
-  const exitCode = await runTui(root, start);
+  const exitCode = await runTui(root, start, parsedModel ? { model: parsedModel } : {});
   process.exit(exitCode);
 }

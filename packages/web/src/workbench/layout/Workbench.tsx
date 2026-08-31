@@ -1186,7 +1186,7 @@ export function Workbench(props: { client: RpcClient; capabilities: WorkspaceCap
         </div>
         <CommandPalette registry={registry} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
         <FileOpener paths={allPaths} open={openerOpen} onClose={() => setOpenerOpen(false)} onOpen={openFile} />
-        {settingsOpen && <SettingsPanel registry={registry} theme={theme} onClose={() => setSettingsOpen(false)} />}
+        {settingsOpen && <SettingsPanel registry={registry} theme={theme} client={client} onClose={() => setSettingsOpen(false)} />}
       </WorkbenchContext.Provider>
     </ThemeProvider>
   );

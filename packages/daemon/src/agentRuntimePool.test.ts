@@ -76,6 +76,21 @@ test("has() reports cached state without triggering a build, and evict() removes
   expect(b).not.toBe(a);
 });
 
+test("evictAll() drops every cached session so later calls rebuild", async () => {
+  let buildCalls = 0;
+  const runtimeFor = createRuntimePool(async (sessionId) => {
+    buildCalls++;
+    return { sessionId } as unknown as AgentRuntime;
+  });
+  await runtimeFor("s1");
+  await runtimeFor("s2");
+  runtimeFor.evictAll();
+  expect(runtimeFor.has("s1")).toBe(false);
+  expect(runtimeFor.has("s2")).toBe(false);
+  await runtimeFor("s1");
+  expect(buildCalls).toBe(3);
+});
+
 test("concurrent callers during a failed construction all see the same rejection (no separate builds)", async () => {
   let buildCalls = 0;
   const runtimeFor = createRuntimePool(async (sessionId) => {

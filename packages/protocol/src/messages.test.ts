@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import {
-  parseMessage, ProtocolError, FsSearchParams, FsSearchResult, SettingsSetParams,
+  parseMessage, ProtocolError, FsSearchParams, FsSearchResult, SettingsSetParams, ModelsListResult,
   PtyOpenParams, PtyOpenResult, PtyOutputEvent, LspDiagnosticsEvent, LspHoverResult, LspDefinitionResult,
 } from "./messages";
 import type {
@@ -28,6 +28,14 @@ test("fs/search and settings params/results are plain JSON-serializable shapes",
 
   const setParams: SettingsSetParams = { key: "workbench", value: { theme: "dark" } };
   expect(JSON.parse(JSON.stringify(setParams))).toEqual(setParams);
+
+  const models: ModelsListResult = {
+    url: "http://127.0.0.1:11434/v1",
+    models: ["llama3.2:latest"],
+    running: [],
+    active: "llama3.2:latest",
+  };
+  expect(JSON.parse(JSON.stringify(models))).toEqual(models);
 });
 
 test("pty message shapes are plain JSON-serializable", () => {

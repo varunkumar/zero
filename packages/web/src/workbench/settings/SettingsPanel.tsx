@@ -1,7 +1,7 @@
 import type { CommandRegistry } from "../commands/registry";
 import { Settings } from "../../Settings";
 
-export function SettingsPanel(props: { registry: CommandRegistry; theme: "light" | "dark"; onClose: () => void }) {
+export function SettingsPanel(props: { registry: CommandRegistry; theme: "light" | "dark"; onClose: () => void; client?: { request<R>(method: string, params?: unknown): Promise<R> } }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }} onClick={props.onClose}>
       <div
@@ -56,7 +56,7 @@ export function SettingsPanel(props: { registry: CommandRegistry; theme: "light"
           </tbody>
         </table>
         <h4 style={{ marginTop: 16 }}>Completions</h4>
-        <Settings />
+        <Settings client={props.client} />
         <h4 style={{ marginTop: 16 }}>Graphify</h4>
         <p style={{ fontSize: 13, opacity: 0.8, lineHeight: 1.5, margin: 0 }}>
           Structural code graph for completions. Default languages: TypeScript, JavaScript.

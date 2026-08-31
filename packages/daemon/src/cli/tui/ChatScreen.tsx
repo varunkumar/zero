@@ -5,6 +5,7 @@ import type { AgentRuntime, ChatToolCall } from "@zero/core";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { Banner } from "./Banner";
 import { CodeBlockView, TextBlockView } from "./MessageBlock";
+import { ModelPicker } from "./ModelPicker";
 import { Spinner } from "./Spinner";
 import { useTheme } from "./theme";
 import { estimateBlockRows, estimateTextRows, parseBlocks } from "./markdown";
@@ -20,6 +21,9 @@ export interface ChatScreenProps {
    * freshly-created (or empty resumed) session a meaningful title instead
    * of the generic default. */
   onFirstMessage?: (text: string) => void;
+  models?: string[];
+  activeModel?: string | null;
+  onSelectModel?: (name: string) => void | Promise<void>;
 }
 
 interface PendingApproval { call: ChatToolCall; preview: string }
@@ -37,6 +41,7 @@ function nextLineId(): string { return `line-${++lineSeq}`; }
 
 const SLASH_COMMANDS = [
   { name: "/help", description: "list available commands" },
+  { name: "/model", description: "switch Ollama model" },
   { name: "/theme", description: "toggle light/dark theme" },
   { name: "/exit", description: "exit zero" },
   { name: "/quit", description: "exit zero (alias for /exit)" },
@@ -67,7 +72,7 @@ function summarizeArgs(args: unknown): string {
 // than the first and was empirically unreliable here.
 const HEADER_HEIGHT = 16;
 
-export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onFirstMessage }: ChatScreenProps) {
+export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onFirstMessage, models = [], activeModel = null, onSelectModel }: ChatScreenProps) {
   const { exit } = useApp();
   const { theme, toggle: toggleTheme } = useTheme();
   const { stdout } = useStdout();
@@ -110,6 +115,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   // currently scrolled out of view below the visible window. 0 means
   // pinned to the live tail.
   const [scrollOffset, setScrollOffset] = useState(0);
+  const [pickingModel, setPickingModel] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
   const hasSentRef = useRef(false);
 
@@ -200,11 +206,18 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
       toggleTheme();
       return;
     }
+    if (trimmed === "/model" || trimmed.startsWith("/model ")) {
+      const arg = trimmed.slice("/model".length).trim();
+      if (!arg) { setPickingModel(true); return; }
+      void onSelectModel?.(arg);
+      pushLine(`model: ${arg}`);
+      return;
+    }
     // Sending a message is the user opting back into "live" view - jump
     // back to the tail even if they'd scrolled up to reread history.
     setScrollOffset(0);
     void runTurn(trimmed);
-  }, [busy, runTurn, exit, pushLine, toggleTheme]);
+  }, [busy, runTurn, exit, pushLine, toggleTheme, onSelectModel]);
 
   // The onChange TextInput calls for actual typed keystrokes. History
   // recall (below) sets `input` directly instead of through this, so
@@ -219,6 +232,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   const activeSuggestion = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
 
   useInput((_input, key) => {
+    if (pickingModel) return;
     if (key.escape) {
       if (!pending && suggestions.length > 0) setInput("");
       else if (!pending) exit();
@@ -288,7 +302,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
   // must never render partially, see below - meant a message taller than
   // one full page could never be shown at all).
   const entries: Array<{ id: string; rows: number; atomic: boolean; render: () => React.ReactNode }> = [
-    { id: "banner", rows: HEADER_HEIGHT, atomic: true, render: () => <Banner key="banner" cwd={cwd} version={version} subtitle="/exit to quit · esc cancels a turn · / for commands" /> },
+    { id: "banner", rows: HEADER_HEIGHT, atomic: true, render: () => <Banner key="banner" cwd={cwd} version={version} subtitle={`${activeModel ?? "no model"} · /model to switch · /exit to quit`} /> },
   ];
   for (const line of lines) {
     const blocks = parseBlocks(line.text);
@@ -350,6 +364,23 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     if (usedRows >= scrollAreaHeight) break;
   }
 
+  if (pickingModel) {
+    return (
+      <ModelPicker
+        models={models}
+        active={activeModel}
+        cwd={cwd}
+        version={version}
+        onCancel={() => setPickingModel(false)}
+        onSelect={(name) => {
+          setPickingModel(false);
+          void onSelectModel?.(name);
+          pushLine(`model: ${name}`);
+        }}
+      />
+    );
+  }
+
   return (
     <Box flexDirection="column" height={totalHeight} overflow="hidden">
       {/* overflow="hidden" only clips painting - Yoga still sizes a
@@ -381,7 +412,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
               ))}
             </Box>
           ) : (
-            <Text dimColor>{busy ? "working..." : "/exit to quit · / for commands"}</Text>
+            <Text dimColor>{busy ? "working..." : `${activeModel ?? "no model"} · /model to switch · / for commands`}</Text>
           )}
         </Box>
       )}

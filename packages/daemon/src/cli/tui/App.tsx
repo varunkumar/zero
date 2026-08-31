@@ -17,6 +17,9 @@ export interface AppProps {
   createRuntime: (sessionId: string) => AgentRuntime;
   cwd: string;
   version: string;
+  models?: string[];
+  activeModel?: string | null;
+  onSelectModel?: (name: string) => Promise<void>;
 }
 
 type ViewState =
@@ -31,8 +34,9 @@ function linesFromMessages(messages: ChatMessage[]): string[] {
     .map((m) => (m.role === "user" ? `> ${m.content}` : m.content));
 }
 
-export function App({ sessions, start, newSessionTitle, createRuntime, cwd, version }: AppProps) {
+export function App({ sessions, start, newSessionTitle, createRuntime, cwd, version, models = [], activeModel = null, onSelectModel }: AppProps) {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
+  const [currentModel, setCurrentModel] = useState<string | null>(activeModel);
   const { exit } = useApp();
 
   // Resuming an unknown/deleted session id (or a fresh-session lookup
@@ -123,6 +127,15 @@ export function App({ sessions, start, newSessionTitle, createRuntime, cwd, vers
       cwd={cwd}
       version={version}
       onFirstMessage={onFirstMessage}
+      models={models}
+      activeModel={currentModel}
+      onSelectModel={async (name) => {
+        await onSelectModel?.(name);
+        setCurrentModel(name);
+        setState((s) => s.kind === "chat"
+          ? { ...s, runtime: createRuntime(s.sessionId) }
+          : s);
+      }}
     />
   );
 }
