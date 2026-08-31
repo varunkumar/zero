@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.claude/worktrees/
 .zero/
 *.tsbuildinfo
 graphify-out/

@@ -4,14 +4,28 @@
 # this automates (and what to do if a step here fails partway through).
 set -euo pipefail
 
-if [ $# -ne 1 ]; then
-  echo "usage: $0 <version>   (e.g. $0 0.9.0)" >&2
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+  echo "usage: $0 <version> [changelog-file]   (e.g. $0 0.9.0)" >&2
+  echo "  changelog-file: optional markdown file whose content is spliced" >&2
+  echo "  into the release notes under a '### Changelog' heading. See the" >&2
+  echo "  /release skill (.claude/skills/release/SKILL.md), which generates" >&2
+  echo "  one from git history and is the recommended way to invoke this." >&2
   exit 1
 fi
 VERSION="$1"
+CHANGELOG_FILE="${2:-}"
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "error: version must be X.Y.Z (got: $VERSION)" >&2
   exit 1
+fi
+if [ -n "$CHANGELOG_FILE" ]; then
+  if [ ! -f "$CHANGELOG_FILE" ]; then
+    echo "error: changelog file not found: $CHANGELOG_FILE" >&2
+    exit 1
+  fi
+  # Resolve to an absolute path before the cd below, so a path relative
+  # to the caller's cwd (not the repo root) still works.
+  CHANGELOG_FILE="$(cd "$(dirname "$CHANGELOG_FILE")" && pwd)/$(basename "$CHANGELOG_FILE")"
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -139,6 +153,11 @@ cat > "$NOTES" <<EOF
   \`\`\`
   curl -fsSL https://raw.githubusercontent.com/varunkumar/zero/main/scripts/get-zero.sh | sh
   \`\`\`
+EOF
+if [ -n "$CHANGELOG_FILE" ]; then
+  { echo ""; echo "### Changelog"; echo ""; cat "$CHANGELOG_FILE"; } >> "$NOTES"
+fi
+cat >> "$NOTES" <<EOF
 
 See [\`docs/releasing.md\`](https://github.com/varunkumar/zero/blob/main/docs/releasing.md) for how this release was built.
 EOF

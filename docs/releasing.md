@@ -6,16 +6,36 @@ extension (`packages/vscode`), and Zero IDE (`packages/desktop`). This doc
 is the standard process for cutting a new version of all three and
 publishing them as a GitHub release.
 
+## Recommended: the `/release` skill
+
+```
+/release
+```
+
+Walks through cutting a release interactively: finds the last released tag,
+drafts a changelog from the commits since then (grouped into Features /
+Fixes / Docs / Chores / Other by conventional-commit prefix), suggests a
+version bump from that changelog's content, and pauses for your
+confirmation before handing off to `scripts/release.sh` below with the
+changelog attached. See `.claude/skills/release/SKILL.md`.
+
 ## Automated: `scripts/release.sh`
 
 ```
 ./scripts/release.sh 0.9.0
+./scripts/release.sh 0.9.0 /path/to/changelog.md   # optional: splice a
+                                                    # pre-written changelog
+                                                    # into the release notes
 ```
 
 Run this from a clean `main` checkout. It does everything by hand described
 below: bumps the version everywhere, runs tests and typecheck, builds all
 three artifacts, commits, tags, pushes, and publishes the GitHub release
-with the `.dmg`, `.vsix`, and the three `zero` CLI tarballs attached.
+with the `.dmg`, `.vsix`, and the three `zero` CLI tarballs attached. The
+optional second argument is a markdown file whose content is spliced into
+the release notes under a `### Changelog` heading - the `/release` skill
+above generates one automatically; write your own by hand if you're running
+this script directly instead.
 
 If it fails partway through, the earlier steps' changes stay in place - fix
 the problem and either re-run the script (the version-bump edits are
@@ -106,6 +126,11 @@ idempotent) or finish the remaining steps by hand from the section below.
      --title "Zero v<version>" \
      --notes "..."
    ```
+
+   The `--notes` content is what `scripts/release.sh` builds from its
+   `NOTES` heredoc, plus the changelog (if any) spliced in under a
+   `### Changelog` heading - see the `/release` skill above for how that's
+   generated automatically.
 
 ## Known limitation: unsigned macOS build
 
