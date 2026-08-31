@@ -29,7 +29,7 @@ automatically on the next app launch.
 
 - **Offline completions are Ollama-only.** The Chrome-only Nano API
   (`window.LanguageModel`) doesn't exist in WKWebView (Safari's engine).
-  Point `zero.ollamaUrl`/`zero.ollamaChatModel` at a running Ollama
+  Point `zero.ollamaUrl`/`zero.ollamaModel` at a running Ollama
   instance for completions inside the desktop app.
 
 `window.prompt()`/`window.confirm()` don't work in Tauri's WKWebView

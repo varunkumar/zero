@@ -14,7 +14,9 @@ export function createCompletion(client: RpcClient, getView: () => EditorView | 
   const buffers = new BufferContext();
 
   const lite = opts?.lite === true;
-  const model = opts?.model ?? (typeof localStorage !== "undefined" ? localStorage.getItem("zero.ollamaModel") : null);
+  const model = opts?.model ?? (typeof localStorage !== "undefined"
+    ? (localStorage.getItem("zero.ollamaModel") ?? localStorage.getItem("zero.ollamaChatModel"))
+    : null);
   const baseUrl = opts?.baseUrl
     ?? (typeof localStorage !== "undefined" ? localStorage.getItem("zero.ollamaUrl") : null)
     ?? DEFAULT_OLLAMA_BASE_URL;

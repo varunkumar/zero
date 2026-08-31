@@ -44,6 +44,7 @@ test("provideLanguageModelChatInformation advertises toolCalling from /health", 
   ));
   const [info] = await provider.provideLanguageModelChatInformation({ silent: true }, fakeToken());
   expect(info.id).toBe("zero");
+  expect(info.name).toBe("Zero (ollama)");
   expect(info.capabilities).toEqual({ toolCalling: true });
 });
 
@@ -52,7 +53,16 @@ test("provideLanguageModelChatInformation reports toolCalling false when the bac
     new Response(JSON.stringify({ nanoHostConnected: true, provider: "nano-bridge", supportsTools: false }), { status: 200 })
   ));
   const [info] = await provider.provideLanguageModelChatInformation({ silent: true }, fakeToken());
+  expect(info.name).toBe("Zero (Nano)");
   expect(info.capabilities).toEqual({ toolCalling: false });
+});
+
+test("provideLanguageModelChatInformation shows the Ollama model id, not a hardcoded name", async () => {
+  const provider = createChatModelProvider(opts(async () =>
+    new Response(JSON.stringify({ nanoHostConnected: false, provider: "openai:qwen3.8:27b-mlx", supportsTools: true }), { status: 200 })
+  ));
+  const [info] = await provider.provideLanguageModelChatInformation({ silent: true }, fakeToken());
+  expect(info.name).toBe("Zero (qwen3.8:27b-mlx)");
 });
 
 test("provideLanguageModelChatResponse streams text parts", async () => {

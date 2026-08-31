@@ -176,7 +176,10 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
       .then((r) => {
         if (cancelled) return;
         setCatalog(r);
-        if (r.active) localStorage.setItem("zero.ollamaModel", r.active);
+        if (r.active) {
+          localStorage.setItem("zero.ollamaModel", r.active);
+          localStorage.removeItem("zero.ollamaChatModel");
+        }
       })
       .catch(() => undefined);
     return () => { cancelled = true; };

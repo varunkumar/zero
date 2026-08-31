@@ -42,6 +42,41 @@ test("loadOllamaCatalog does not send a saved model that is no longer installed"
   expect(catalog.active).toBe("llama3.2:latest");
 });
 
+test("loadOllamaCatalog rewrites a stale saved model to the resolved active one", async () => {
+  const ws = new Workspace(mkdtempSync(join(tmpdir(), "zero-ollama-")));
+  await ws.writeSetting(OLLAMA_MODEL_KEY, "qwen2.5-coder:7b");
+  await loadOllamaCatalog(ws, fakeOllama({
+    models: ["qwen3.8:27b-mlx"],
+    running: ["qwen3.8:27b-mlx"],
+  }));
+  expect(await ws.readSetting(OLLAMA_MODEL_KEY)).toBe("qwen3.8:27b-mlx");
+});
+
+test("loadOllamaCatalog copies the legacy chat-model key onto zero.ollamaModel", async () => {
+  const ws = new Workspace(mkdtempSync(join(tmpdir(), "zero-ollama-")));
+  await ws.writeSetting(OLLAMA_CHAT_MODEL_KEY, "mistral:latest");
+  await loadOllamaCatalog(ws, fakeOllama({ models: ["mistral:latest", "llama3.2:latest"] }));
+  expect(await ws.readSetting(OLLAMA_MODEL_KEY)).toBe("mistral:latest");
+  expect(await ws.readSetting(OLLAMA_CHAT_MODEL_KEY)).toBe("mistral:latest");
+});
+
+test("loadOllamaCatalog persists an auto-picked model so later processes share it", async () => {
+  const ws = new Workspace(mkdtempSync(join(tmpdir(), "zero-ollama-")));
+  await loadOllamaCatalog(ws, fakeOllama({ models: ["qwen3.8:27b-mlx"] }));
+  expect(await ws.readSetting(OLLAMA_MODEL_KEY)).toBe("qwen3.8:27b-mlx");
+});
+
+test("a --model override does not rewrite persisted settings", async () => {
+  const ws = new Workspace(mkdtempSync(join(tmpdir(), "zero-ollama-")));
+  await ws.writeSetting(OLLAMA_MODEL_KEY, "llama3.2:latest");
+  await loadOllamaCatalog(
+    ws,
+    fakeOllama({ models: ["llama3.2:latest", "mistral:latest"] }),
+    "mistral:latest",
+  );
+  expect(await ws.readSetting(OLLAMA_MODEL_KEY)).toBe("llama3.2:latest");
+});
+
 test("loadOllamaCatalog honors a still-installed saved model", async () => {
   const ws = new Workspace(mkdtempSync(join(tmpdir(), "zero-ollama-")));
   await ws.writeSetting(OLLAMA_MODEL_KEY, "mistral:latest");

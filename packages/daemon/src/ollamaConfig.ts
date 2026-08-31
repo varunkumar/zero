@@ -56,6 +56,12 @@ export async function loadOllamaCatalog(
   ]);
   const preferred = preferredOverride ?? saved;
   const active = resolveCompatModel({ preferred, available: models, running }) ?? null;
+  if (!preferredOverride && active) {
+    const primary = asString(await ws.readSetting(OLLAMA_MODEL_KEY));
+    const legacy = asString(await ws.readSetting(OLLAMA_CHAT_MODEL_KEY));
+    if (primary !== active) await writeOllamaModel(ws, active);
+    if (legacy !== undefined && legacy !== active) await ws.writeSetting(OLLAMA_CHAT_MODEL_KEY, active);
+  }
   return { url, models, running, active };
 }
 

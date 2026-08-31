@@ -76,6 +76,11 @@ export async function startZero(opts: DaemonOptions) {
     return providersFromCatalog(catalog);
   }
 
+  // Assigned once the optional model gateway starts. Chat/agent runtimes
+  // rebuild on their own via the pool; the gateway is a long-lived
+  // ProviderGateway used by `zero claude` and the VS Code extension.
+  let modelGateway: ProviderGateway | undefined;
+
   const pty = new PtyService(
     opts.root,
     (sessionId, data) => daemon.broadcast("pty/output", { sessionId, data }),
@@ -117,6 +122,9 @@ export async function startZero(opts: DaemonOptions) {
       await ws.writeSetting(p.key, p.value);
       if (p.key === OLLAMA_URL_KEY || p.key === OLLAMA_MODEL_KEY || p.key === OLLAMA_CHAT_MODEL_KEY) {
         runtimeFor.evictAll();
+        if (modelGateway) {
+          modelGateway.replace([new NanoBridgeProvider(nanoHost), ...await buildProviders()]);
+        }
         daemon.broadcast("models/changed", await loadOllamaCatalog(ws));
       }
       return {};
@@ -141,6 +149,9 @@ export async function startZero(opts: DaemonOptions) {
     async (p) => {
       await writeOllamaModel(ws, p.model);
       runtimeFor.evictAll();
+      if (modelGateway) {
+        modelGateway.replace([new NanoBridgeProvider(nanoHost), ...await buildProviders()]);
+      }
       const catalog = await loadOllamaCatalog(ws);
       daemon.broadcast("models/changed", catalog);
       return catalog;
@@ -314,10 +325,10 @@ export async function startZero(opts: DaemonOptions) {
   let gatewayInfo: { port: number; apiKey: string } | undefined;
   let stopGateway: (() => void) | undefined;
   if (opts.gatewayPort !== undefined) {
-    const providers = await buildProviders();
+    modelGateway = new ProviderGateway([new NanoBridgeProvider(nanoHost), ...await buildProviders()]);
     const gw = startModelGateway({
       port: opts.gatewayPort,
-      gateway: new ProviderGateway([new NanoBridgeProvider(nanoHost), ...providers]),
+      gateway: modelGateway,
     });
     gatewayInfo = { port: gw.port, apiKey: gw.apiKey };
     stopGateway = gw.stop;

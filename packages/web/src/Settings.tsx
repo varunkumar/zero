@@ -4,13 +4,14 @@ import type { ModelsListResult } from "@zero/protocol";
 
 const URL_KEY = "zero.ollamaUrl";
 const MODEL_KEY = "zero.ollamaModel";
+const LEGACY_MODEL_KEY = "zero.ollamaChatModel";
 
 interface RpcLike { request<R>(method: string, params?: unknown): Promise<R> }
 
 export function Settings(props: { client?: RpcLike }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState(() => localStorage.getItem(URL_KEY) ?? DEFAULT_OLLAMA_BASE_URL);
-  const [model, setModel] = useState(() => localStorage.getItem(MODEL_KEY) ?? "");
+  const [model, setModel] = useState(() => localStorage.getItem(MODEL_KEY) ?? localStorage.getItem(LEGACY_MODEL_KEY) ?? "");
   const [models, setModels] = useState<string[]>([]);
 
   useEffect(() => {
@@ -22,6 +23,7 @@ export function Settings(props: { client?: RpcLike }) {
       if (r.active) {
         setModel(r.active);
         localStorage.setItem(MODEL_KEY, r.active);
+        localStorage.removeItem(LEGACY_MODEL_KEY);
       }
       if (r.url) {
         setUrl(r.url);
@@ -40,6 +42,7 @@ export function Settings(props: { client?: RpcLike }) {
   function persistModel(v: string) {
     setModel(v);
     localStorage.setItem(MODEL_KEY, v);
+    localStorage.removeItem(LEGACY_MODEL_KEY);
     void props.client?.request("models/set", { model: v }).catch(() => undefined);
   }
 
