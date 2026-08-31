@@ -71,10 +71,6 @@ bun -e '
   require("node:fs").writeFileSync(abs, updated);
 ' packages/desktop/src-tauri/Cargo.toml "$VERSION"
 
-echo "==> Running tests and typecheck"
-bun test
-bun run typecheck
-
 echo "==> Building packages/web (needed by the sidecar and the Cargo.lock sync build below)"
 bun run --cwd packages/web build
 
@@ -84,6 +80,10 @@ bun run --cwd packages/daemon build:sidecar
 echo "==> Syncing Cargo.lock to the new version"
 (cd packages/desktop/src-tauri && \
   env CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_DEV_SPLIT_DEBUGINFO=off cargo check)
+
+echo "==> Running tests and typecheck"
+bun test
+bun run typecheck
 
 echo "==> Building the VS Code extension .vsix"
 (cd packages/vscode && bun run package)
