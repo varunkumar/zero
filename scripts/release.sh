@@ -27,7 +27,7 @@ if [ -n "$(git status --porcelain)" ]; then
   git status --short
   exit 1
 fi
-for cmd in bun cargo gh; do
+for cmd in bun cargo gh docker; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "error: '$cmd' is required but wasn't found on PATH" >&2
     exit 1
@@ -72,6 +72,28 @@ if [ ! -f "$VSIX" ]; then
   exit 1
 fi
 
+echo "==> Packaging the zero CLI for macOS arm64 (reusing the sidecar build above)"
+bash scripts/package-cli.sh darwin arm64 "$VERSION" packages/daemon/dist
+CLI_MACOS="dist-packages/zero-$VERSION-darwin-arm64.tar.gz"
+if [ ! -f "$CLI_MACOS" ]; then
+  echo "error: expected $CLI_MACOS after package-cli.sh, not found" >&2
+  exit 1
+fi
+
+echo "==> Building and packaging the zero CLI for Linux x64 + arm64 (Docker/QEMU - this is slow)"
+bash scripts/build-linux-sidecar.sh x64
+bash scripts/package-cli.sh linux x64 "$VERSION" packages/daemon/dist-linux-x64
+bash scripts/build-linux-sidecar.sh arm64
+bash scripts/package-cli.sh linux arm64 "$VERSION" packages/daemon/dist-linux-arm64
+CLI_LINUX_X64="dist-packages/zero-$VERSION-linux-x64.tar.gz"
+CLI_LINUX_ARM64="dist-packages/zero-$VERSION-linux-arm64.tar.gz"
+for f in "$CLI_LINUX_X64" "$CLI_LINUX_ARM64"; do
+  if [ ! -f "$f" ]; then
+    echo "error: expected $f after package-cli.sh, not found" >&2
+    exit 1
+  fi
+done
+
 echo "==> Building the desktop app (release profile - this is the slow step)"
 # -j1 and no debug symbols: this repo's Tauri/wry dependency tree has caused
 # severe rustc memory pressure on at least one dev machine at higher
@@ -112,10 +134,15 @@ cat > "$NOTES" <<EOF
   \`\`\`
   code --install-extension zero-vscode-${VERSION}.vsix
   \`\`\`
+- **Zero / Zero Agents / Zero Claude (CLI, macOS arm64 + Linux x64/arm64)** -
+  install with:
+  \`\`\`
+  curl -fsSL https://raw.githubusercontent.com/varunkumar/zero/main/scripts/get-zero.sh | sh
+  \`\`\`
 
 See [\`docs/releasing.md\`](https://github.com/varunkumar/zero/blob/main/docs/releasing.md) for how this release was built.
 EOF
-gh release create "v$VERSION" "$DMG" "$VSIX" \
+gh release create "v$VERSION" "$DMG" "$VSIX" "$CLI_MACOS" "$CLI_LINUX_X64" "$CLI_LINUX_ARM64" \
   --title "Zero v$VERSION" \
   --notes-file "$NOTES"
 rm -f "$NOTES"
