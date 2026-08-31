@@ -153,7 +153,7 @@ export type ChatTurnEvent =
   | { type: "toolCall"; call: ChatToolCall }
   | { type: "toolResult"; call: ChatToolCall; result: string }
   | { type: "approvalRequest"; call: ChatToolCall; preview: string }
-  | { type: "done"; message: ChatMessage }
+  | { type: "done"; message: ChatMessage; tokensUsed: number }
   | { type: "error"; message: string };
 
 export interface ChatTurnParams { sessionId: string; userText: string }

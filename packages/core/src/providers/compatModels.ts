@@ -44,6 +44,35 @@ export async function listRunningOllamaModels(baseUrl: string, fetchImpl: FetchL
   }
 }
 
+/** Ollama native `POST {origin}/api/show` — reads the model's real context
+ * window from `model_info["<arch>.context_length"]` (the field name is
+ * arch-prefixed, e.g. `llama.context_length`, `qwen2.context_length`).
+ * Returns undefined for non-Ollama hosts or if the field isn't present, so
+ * callers can fall back to a default rather than reporting 0. */
+export async function getOllamaContextWindow(
+  baseUrl: string, model: string, fetchImpl: FetchLike = fetch,
+): Promise<number | undefined> {
+  try {
+    const origin = baseUrl.replace(/\/v1\/?$/, "");
+    const res = await fetchImpl(`${origin}/api/show`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: model }),
+      signal: AbortSignal.timeout(1000),
+    });
+    if (!res.ok) return undefined;
+    const body = await res.json() as { model_info?: Record<string, unknown> };
+    const info = body.model_info;
+    if (!info) return undefined;
+    for (const [key, value] of Object.entries(info)) {
+      if (key.endsWith(".context_length") && typeof value === "number") return value;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function matchesPreferred(preferred: string, available: string[]): string | undefined {
   if (available.includes(preferred)) return preferred;
   const latest = `${preferred}:latest`;

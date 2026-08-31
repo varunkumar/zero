@@ -10,7 +10,7 @@ export type TurnEvent =
   | { type: "toolCall"; call: ChatToolCall }
   | { type: "toolResult"; call: ChatToolCall; result: string }
   | { type: "approvalRequest"; call: ChatToolCall; preview: string }
-  | { type: "done"; message: ChatMessage }
+  | { type: "done"; message: ChatMessage; tokensUsed: number }
   | { type: "error"; message: string };
 
 export interface AgentRuntimeClient {
@@ -111,10 +111,11 @@ export class AgentRuntime {
     }
     if (signal.aborted) return;
 
+    const preTurnTokens = estimateMessagesTokens(history);
     this.#setStatus({
       activeModel: provider.id,
       reason: null,
-      usedTokens: estimateMessagesTokens(history),
+      usedTokens: preTurnTokens,
       contextWindowTokens: provider.capabilities().contextWindowTokens,
     });
 
@@ -158,7 +159,12 @@ export class AgentRuntime {
           yield { type: "error", message: `failed to save turn: ${e instanceof Error ? e.message : String(e)}` };
           return;
         }
-        yield { type: "done", message: assistantMsg };
+        const finalTokens = estimateMessagesTokens(history);
+        this.#setStatus({
+          activeModel: provider.id, reason: null,
+          usedTokens: finalTokens, contextWindowTokens: provider.capabilities().contextWindowTokens,
+        });
+        yield { type: "done", message: assistantMsg, tokensUsed: finalTokens - preTurnTokens };
         return;
       }
 
@@ -197,7 +203,16 @@ export class AgentRuntime {
       yield { type: "error", message: `failed to save turn: ${e instanceof Error ? e.message : String(e)}` };
       return;
     }
-    yield { type: "done", message: { role: "assistant", content: "(tool round limit reached)", createdAt: Date.now() } };
+    const finalTokens = estimateMessagesTokens(history);
+    this.#setStatus({
+      activeModel: provider.id, reason: null,
+      usedTokens: finalTokens, contextWindowTokens: provider.capabilities().contextWindowTokens,
+    });
+    yield {
+      type: "done",
+      message: { role: "assistant", content: "(tool round limit reached)", createdAt: Date.now() },
+      tokensUsed: finalTokens - preTurnTokens,
+    };
   }
 
   async #compact(

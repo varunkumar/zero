@@ -33,6 +33,7 @@ test("isActive is false before any event, true after a text delta, false after d
   store.handleEvent("t1", {
     type: "done",
     message: { role: "assistant", content: "hi", createdAt: 0 },
+    tokensUsed: 0,
   });
   expect(store.isActive("t1")).toBe(false);
 });

@@ -68,7 +68,7 @@ test("a long, unbroken assistant reply does not corrupt the header or footer lay
   const longText = "This is a very long assistant reply that wraps across several terminal rows because it exceeds the terminal width easily and keeps going on and on. ".repeat(3);
   const runtime = fakeRuntime([
     { type: "text", delta: longText },
-    { type: "done", message: { role: "assistant", content: longText, createdAt: 0 } },
+    { type: "done", message: { role: "assistant", content: longText, createdAt: 0 }, tokensUsed: 0 },
   ]);
   const { stdin, lastFrame } = render(
     <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
@@ -125,7 +125,7 @@ test("scrolling with Page Up/Down never leaks keystrokes into the message input 
 
 test("Up/Down arrows cycle through submitted message history in the input bar", async () => {
   const runtime = fakeRuntime([
-    { type: "done", message: { role: "assistant", content: "ok", createdAt: 0 } },
+    { type: "done", message: { role: "assistant", content: "ok", createdAt: 0 }, tokensUsed: 0 },
   ]);
   const { stdin, lastFrame } = render(
     <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
@@ -192,7 +192,7 @@ test("a fenced code block renders as a bordered block with its language tag, not
   const reply = "Here you go:\n```ts\nfunction add(a, b) {\n  return a + b;\n}\n```\nDone.";
   const runtime = fakeRuntime([
     { type: "text", delta: reply },
-    { type: "done", message: { role: "assistant", content: reply, createdAt: 0 } },
+    { type: "done", message: { role: "assistant", content: reply, createdAt: 0 }, tokensUsed: 0 },
   ]);
   const { stdin, stdout, lastFrame } = render(
     <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
@@ -222,7 +222,7 @@ test("a reply with two code blocks separated by prose renders both, splitting ac
   ].join("\n");
   const runtime = fakeRuntime([
     { type: "text", delta: reply },
-    { type: "done", message: { role: "assistant", content: reply, createdAt: 0 } },
+    { type: "done", message: { role: "assistant", content: reply, createdAt: 0 }, tokensUsed: 0 },
   ]);
   const { stdin, lastFrame } = render(
     <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
@@ -263,7 +263,7 @@ test("submitting input streams assistant text into the transcript", async () => 
   const runtime = fakeRuntime([
     { type: "text", delta: "hi " },
     { type: "text", delta: "there" },
-    { type: "done", message: { role: "assistant", content: "hi there", createdAt: 0 } },
+    { type: "done", message: { role: "assistant", content: "hi there", createdAt: 0 }, tokensUsed: 0 },
   ]);
   const { stdin, lastFrame } = render(<ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />);
   await tick();
@@ -277,7 +277,7 @@ test("submitting input streams assistant text into the transcript", async () => 
 test("an approvalRequest renders the prompt, and 'y' resolves it via runtime.resolveApproval", async () => {
   const runtime = fakeRuntime([
     { type: "approvalRequest", call: { id: "c1", name: "fs_write", args: {} }, preview: "+x" },
-    { type: "done", message: { role: "assistant", content: "", createdAt: 0 } },
+    { type: "done", message: { role: "assistant", content: "", createdAt: 0 }, tokensUsed: 0 },
   ]);
   const { stdin, lastFrame } = render(<ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />);
   await tick();
@@ -291,7 +291,7 @@ test("an approvalRequest renders the prompt, and 'y' resolves it via runtime.res
 
 test("onFirstMessage fires exactly once, with the first submitted text", async () => {
   const runtime = fakeRuntime([
-    { type: "done", message: { role: "assistant", content: "ok", createdAt: 0 } },
+    { type: "done", message: { role: "assistant", content: "ok", createdAt: 0 }, tokensUsed: 0 },
   ]);
   const calls: string[] = [];
   const { stdin } = render(
@@ -426,7 +426,7 @@ test("a completed tool call collapses into a single summary line, not raw call/r
   const runtime = fakeRuntime([
     { type: "toolCall", call: { id: "c1", name: "run_command", args: { command: "echo hi" } } },
     { type: "toolResult", call: { id: "c1", name: "run_command", args: { command: "echo hi" } }, result: "hi" },
-    { type: "done", message: { role: "assistant", content: "", createdAt: 0 } },
+    { type: "done", message: { role: "assistant", content: "", createdAt: 0 }, tokensUsed: 0 },
   ]);
   const { stdin, lastFrame } = render(
     <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,

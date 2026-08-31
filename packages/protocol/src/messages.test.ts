@@ -132,7 +132,7 @@ test("chat turn/approval wire shapes are plain JSON-serializable", () => {
     { type: "toolCall", call: { id: "c1", name: "fs_write", args: { path: "a.ts" } } },
     { type: "toolResult", call: { id: "c1", name: "fs_write", args: {} }, result: "wrote a.ts" },
     { type: "approvalRequest", call: { id: "c1", name: "fs_write", args: {} }, preview: "+hello" },
-    { type: "done", message: { role: "assistant", content: "done", createdAt: 1 } },
+    { type: "done", message: { role: "assistant", content: "done", createdAt: 1 }, tokensUsed: 12 },
     { type: "error", message: "boom" },
   ];
   for (const event of events) expect(JSON.parse(JSON.stringify(event))).toEqual(event);

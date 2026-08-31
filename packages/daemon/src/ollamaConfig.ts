@@ -1,11 +1,16 @@
 import {
   DEFAULT_OLLAMA_BASE_URL,
   OpenAICompatProvider,
+  getOllamaContextWindow,
   listCompatModels,
   listRunningOllamaModels,
   resolveCompatModel,
   type ChatCapableProvider,
 } from "@zero/core";
+
+/** Fallback when the active model's real context window can't be read from
+ * Ollama (host down, older Ollama without `model_info`, etc). */
+const DEFAULT_CONTEXT_WINDOW_TOKENS = 8192;
 
 export const OLLAMA_URL_KEY = "zero.ollamaUrl";
 export const OLLAMA_MODEL_KEY = "zero.ollamaModel";
@@ -24,6 +29,7 @@ export interface OllamaCatalog {
   models: string[];
   running: string[];
   active: string | null;
+  contextWindowTokens: number;
 }
 
 function asString(value: unknown): string | undefined {
@@ -62,14 +68,23 @@ export async function loadOllamaCatalog(
     if (primary !== active) await writeOllamaModel(ws, active);
     if (legacy !== undefined && legacy !== active) await ws.writeSetting(OLLAMA_CHAT_MODEL_KEY, active);
   }
-  return { url, models, running, active };
+  const contextWindowTokens = active
+    ? await getOllamaContextWindow(url, active, fetchImpl) ?? DEFAULT_CONTEXT_WINDOW_TOKENS
+    : DEFAULT_CONTEXT_WINDOW_TOKENS;
+  return { url, models, running, active, contextWindowTokens };
 }
 
-export function providerForModel(url: string, model: string, fetchImpl?: FetchLike): ChatCapableProvider {
-  return new OpenAICompatProvider({ baseUrl: url, model, ...(fetchImpl ? { fetchImpl } : {}) });
+export function providerForModel(
+  url: string, model: string, contextWindowTokens?: number, fetchImpl?: FetchLike,
+): ChatCapableProvider {
+  return new OpenAICompatProvider({
+    baseUrl: url, model,
+    ...(contextWindowTokens ? { contextWindowTokens } : {}),
+    ...(fetchImpl ? { fetchImpl } : {}),
+  });
 }
 
 export function providersFromCatalog(catalog: OllamaCatalog, fetchImpl?: FetchLike): ChatCapableProvider[] {
   if (!catalog.active) return [];
-  return [providerForModel(catalog.url, catalog.active, fetchImpl)];
+  return [providerForModel(catalog.url, catalog.active, catalog.contextWindowTokens, fetchImpl)];
 }

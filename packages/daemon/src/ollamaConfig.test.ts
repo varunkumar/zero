@@ -8,7 +8,7 @@ import { loadOllamaCatalog, writeOllamaModel, OLLAMA_MODEL_KEY, OLLAMA_CHAT_MODE
 
 useTempZeroHome();
 
-function fakeOllama(opts: { models: string[]; running?: string[] }): typeof fetch {
+function fakeOllama(opts: { models: string[]; running?: string[]; contextLength?: number }): typeof fetch {
   return (async (input) => {
     const url = String(input);
     if (url.endsWith("/api/ps")) {
@@ -18,6 +18,12 @@ function fakeOllama(opts: { models: string[]; running?: string[] }): typeof fetc
     }
     if (url.endsWith("/models")) {
       return new Response(JSON.stringify({ data: opts.models.map((id) => ({ id })) }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.endsWith("/api/show")) {
+      if (opts.contextLength === undefined) return new Response("nope", { status: 404 });
+      return new Response(JSON.stringify({ model_info: { "llama.context_length": opts.contextLength } }), {
         headers: { "content-type": "application/json" },
       });
     }
@@ -89,6 +95,18 @@ test("loadOllamaCatalog falls back to the legacy chat-model setting key", async 
   await ws.writeSetting(OLLAMA_CHAT_MODEL_KEY, "mistral:latest");
   const catalog = await loadOllamaCatalog(ws, fakeOllama({ models: ["mistral:latest"] }));
   expect(catalog.active).toBe("mistral:latest");
+});
+
+test("loadOllamaCatalog reports the active model's real context window", async () => {
+  const ws = new Workspace(mkdtempSync(join(tmpdir(), "zero-ollama-")));
+  const catalog = await loadOllamaCatalog(ws, fakeOllama({ models: ["llama3.2:latest"], contextLength: 131072 }));
+  expect(catalog.contextWindowTokens).toBe(131072);
+});
+
+test("loadOllamaCatalog falls back to a default context window when /api/show has no answer", async () => {
+  const ws = new Workspace(mkdtempSync(join(tmpdir(), "zero-ollama-")));
+  const catalog = await loadOllamaCatalog(ws, fakeOllama({ models: ["llama3.2:latest"] }));
+  expect(catalog.contextWindowTokens).toBe(8192);
 });
 
 test("writeOllamaModel persists zero.ollamaModel", async () => {

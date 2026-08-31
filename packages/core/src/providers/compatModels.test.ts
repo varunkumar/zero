@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { listCompatModels, listRunningOllamaModels, resolveCompatModel } from "./compatModels";
+import { getOllamaContextWindow, listCompatModels, listRunningOllamaModels, resolveCompatModel } from "./compatModels";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -81,4 +81,23 @@ test("resolveCompatModel matches a preferred name to a :latest tag", () => {
     preferred: "llama3.2",
     available: ["llama3.2:latest"],
   })).toBe("llama3.2:latest");
+});
+
+test("getOllamaContextWindow reads the arch-specific context_length from /api/show", async () => {
+  const fetchImpl = async (input: string, init?: RequestInit) => {
+    expect(String(input)).toBe("http://127.0.0.1:11434/api/show");
+    expect(JSON.parse(String(init?.body))).toEqual({ name: "llama3.2:latest" });
+    return jsonResponse({
+      model_info: { "general.architecture": "llama", "llama.context_length": 131072 },
+    });
+  };
+  expect(await getOllamaContextWindow("http://127.0.0.1:11434/v1", "llama3.2:latest", fetchImpl)).toBe(131072);
+});
+
+test("getOllamaContextWindow falls back when the host is down or the field is missing", async () => {
+  const down = async () => { throw new Error("refused"); };
+  expect(await getOllamaContextWindow("http://x/v1", "m", down)).toBeUndefined();
+
+  const noField = async () => jsonResponse({ model_info: {} });
+  expect(await getOllamaContextWindow("http://x/v1", "m", noField)).toBeUndefined();
 });
