@@ -51,9 +51,22 @@ idempotent) or finish the remaining steps by hand from the section below.
    ```
    bun run --cwd packages/web build              # web UI (needed by both the sidecar and the vsix bundle indirectly)
    bun run --cwd packages/daemon build:sidecar    # daemon sidecar + portable node runtime, into packages/daemon/dist/
+   ./scripts/package-cli.sh darwin arm64 <version> packages/daemon/dist   # -> dist-packages/zero-<version>-darwin-arm64.tar.gz
+   ./scripts/build-linux-sidecar.sh x64           # Docker/QEMU build -> packages/daemon/dist-linux-x64/
+   ./scripts/package-cli.sh linux x64 <version> packages/daemon/dist-linux-x64      # -> dist-packages/zero-<version>-linux-x64.tar.gz
+   ./scripts/build-linux-sidecar.sh arm64         # Docker/QEMU build -> packages/daemon/dist-linux-arm64/
+   ./scripts/package-cli.sh linux arm64 <version> packages/daemon/dist-linux-arm64  # -> dist-packages/zero-<version>-linux-arm64.tar.gz
    (cd packages/vscode && bun run package)        # -> packages/vscode/zero-vscode-<version>.vsix
    bun run --cwd packages/desktop tauri build     # -> packages/desktop/src-tauri/target/release/bundle/{macos/Zero.app, dmg/Zero_<version>_aarch64.dmg}
    ```
+
+   The two Linux builds run inside Docker containers of the matching
+   architecture (`docker/linux-build.Dockerfile`), since node-pty's native
+   addon and the bundled `node` binary are architecture-specific and can't
+   be cross-compiled from macOS. `linux/arm64` runs natively under Docker
+   Desktop's VM on an Apple Silicon machine; `linux/amd64` runs under QEMU
+   emulation and is the slow step in a release - budget tens of minutes
+   for it.
 
    **Memory note:** the Tauri/wry dependency tree has caused severe `rustc`
    memory pressure (OOM-adjacent, single processes observed past 20-30GB
@@ -83,6 +96,9 @@ idempotent) or finish the remaining steps by hand from the section below.
    gh release create v<version> \
      packages/desktop/src-tauri/target/release/bundle/dmg/Zero_<version>_aarch64.dmg \
      packages/vscode/zero-vscode-<version>.vsix \
+     dist-packages/zero-<version>-darwin-arm64.tar.gz \
+     dist-packages/zero-<version>-linux-x64.tar.gz \
+     dist-packages/zero-<version>-linux-arm64.tar.gz \
      --title "Zero v<version>" \
      --notes "..."
    ```
@@ -100,6 +116,13 @@ section 9).
 
 ## Platform scope
 
-Builds today are macOS (Apple Silicon) only, matching Zero IDE's current
-scope. Cross-platform packaging is a deferred follow-up, not something this
-process handles yet.
+- **Zero IDE** (`.dmg`) and the **VS Code extension** (`.vsix`) are macOS
+  (Apple Silicon) and cross-platform respectively, unchanged by this
+  section.
+- **The `zero` CLI** (Zero / Zero Agents / Zero Claude Plugin) ships as
+  tarballs for macOS arm64, Linux x64, and Linux arm64 - see
+  `docs/superpowers/specs/2026-08-31-cli-packaging-design.md` for the full
+  design. Windows and macOS x64 (Intel) aren't built yet.
+- All builds remain manual/local from one dev machine - there's no CI in
+  this repo. The Linux builds' Docker/QEMU step is the main added release
+  cost (see step 3 above).
