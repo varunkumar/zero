@@ -53,7 +53,18 @@ or starts a daemon for whichever folder you open.
 
 ### Zero, Zero Agents (CLI/daemon)
 
-No prebuilt binary yet - build from source:
+```
+curl -fsSL https://raw.githubusercontent.com/varunkumar/zero/main/scripts/get-zero.sh | sh
+```
+
+Downloads the right prebuilt tarball for your platform (macOS arm64, or
+Linux x64/arm64) from the
+[latest release](https://github.com/varunkumar/zero/releases/latest) and
+installs a `zero` wrapper on `~/.local/bin/zero`. No Bun and no repo
+checkout required.
+
+**Building from source instead** (for contributors, or platforms without a
+prebuilt tarball yet):
 
 ```
 git clone https://github.com/varunkumar/zero.git

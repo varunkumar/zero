@@ -1,7 +1,11 @@
 node_modules/
 dist/
+.claude/worktrees/
 .zero/
 *.tsbuildinfo
 graphify-out/
 .DS_STORE
 *.vsix
+dist-packages/
+packages/daemon/dist-linux-x64/
+packages/daemon/dist-linux-arm64/

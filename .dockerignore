@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+dist
+**/dist
+dist-packages
+packages/daemon/dist-linux-x64
+packages/daemon/dist-linux-arm64
+**/src-tauri/target
+.git
+.zero
+.claude
+.superpowers
+graphify-out
+*.tsbuildinfo
+.DS_Store
