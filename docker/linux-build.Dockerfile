@@ -5,7 +5,7 @@
 # real (or QEMU-emulated) container of that architecture, not be
 # cross-compiled from macOS - see
 # docs/superpowers/specs/2026-08-31-cli-packaging-design.md section 2.
-FROM node:20-bookworm
+FROM node:22-bookworm
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends python3 make g++ ca-certificates curl && \
