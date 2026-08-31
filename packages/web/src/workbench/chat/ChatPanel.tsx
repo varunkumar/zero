@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RpcClient, ChatSessionSummary, ChatMessage, ChatToolCall, WhoamiResult, ModelsListResult } from "@zero/protocol";
 import type { ChatStore } from "./store";
 import type { TurnStore } from "./turnStore";
-import { highlightCode, highlightDiff } from "./codeHighlight";
+import { CODE_FONT, ToolAvatar, renderFormattedMessage } from "./messageFormatting";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -29,79 +29,97 @@ function roleLabel(role: ChatMessage["role"], toolName: string | undefined, user
   return "Zero";
 }
 
-const CODE_FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+/** Whether to show the "Zero is thinking…" indicator. Pulled out as a pure
+ * function (rather than an inline JSX condition) so its logic - show as soon
+ * as a turn is in flight and nothing has rendered for it yet, not only once
+ * the first streamed event (e.g. a tool call) arrives - is directly
+ * testable without needing to drive ChatPanel's full DOM/RPC stack. */
+export function shouldShowThinkingIndicator(state: {
+  busy: boolean; streaming: string; pendingApproval: unknown;
+}): boolean {
+  return state.busy && !state.streaming && !state.pendingApproval;
+}
 
-/** Renders inline `` `code` `` spans within a plain-text segment (already
- * known to contain no fenced code blocks - those are split out by
- * `renderMessageContent` before this runs). */
-function renderInlineCode(text: string, keyPrefix: string): React.ReactNode[] {
-  const segments = text.split(/`([^`\n]+)`/g);
-  return segments.map((seg, i) =>
-    i % 2 === 1 ? (
-      <code key={`${keyPrefix}-${i}`} style={{
-        background: "var(--zero-sidebar-bg)", border: "1px solid var(--zero-border)",
-        color: "var(--zero-editor-fg)", borderRadius: 3, padding: "1px 4px", fontFamily: CODE_FONT, fontSize: "0.9em",
+/** One tool-result row's content: an unstyled `<pre>` block, the same
+ * treatment tool output has always had (it's already structured/verbatim
+ * data, not prose to format-detect). Factored out so both the flat message
+ * list and `ToolGroup`'s expanded rows render it identically. */
+function ToolMessageRow(props: { message: ChatMessage; username: string }) {
+  const { message: m, username } = props;
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 8 }}>
+      <div style={{
+        maxWidth: "80%", padding: "6px 10px", borderRadius: 12,
+        background: "var(--zero-editor-bg)", color: "var(--zero-editor-fg)",
+        border: "1px solid var(--zero-border)",
       }}>
-        {seg}
-      </code>
-    ) : (
-      seg
-    ),
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+          <ToolAvatar />
+          <strong>{roleLabel(m.role, m.toolName, username)}</strong>
+          <span
+            style={{ marginLeft: "auto", fontSize: 11, opacity: 0.7 }}
+            title={m.createdAt ? new Date(m.createdAt).toLocaleString() : undefined}
+          >
+            {m.createdAt ? humanizeTimestamp(m.createdAt) : null}
+          </span>
+        </div>
+        <pre style={{
+          margin: 0, padding: 8, borderRadius: 4, overflowX: "auto", maxHeight: 320,
+          background: "var(--zero-sidebar-bg)", border: "1px solid var(--zero-border)",
+          color: "var(--zero-editor-fg)", fontFamily: CODE_FONT, fontSize: 12,
+        }}>
+          {m.content}
+        </pre>
+      </div>
+    </div>
   );
 }
 
-/** A fenced code block, syntax-highlighted when `lang` is recognized
- * (`highlightCode` returns null for anything it doesn't have a grammar
- * for), diff-colored for "diff"/"patch", or left as plain monospace text
- * otherwise - always themed and horizontally scrollable either way. */
-function CodeBlock(props: { lang: string; code: string }) {
-  const body = props.code.replace(/\n$/, ""); // trailing newline before the closing ``` renders as a blank last line otherwise
-  const isDiff = props.lang === "diff" || props.lang === "patch";
-  const highlighted = isDiff ? null : highlightCode(body, props.lang);
+/** A run of consecutive tool-result messages within a turn, collapsed by
+ * default (even a single call) into one muted summary line - a wall of raw
+ * tool output previously pushed the actual conversation out of view. */
+function ToolGroup(props: { messages: ChatMessage[]; username: string }) {
+  const [open, setOpen] = useState(false);
+  const { messages, username } = props;
   return (
-    <pre style={{
-      margin: "6px 0", padding: 8, borderRadius: 4, overflowX: "auto",
-      background: "var(--zero-sidebar-bg)", border: "1px solid var(--zero-border)",
-      color: "var(--zero-editor-fg)", fontFamily: CODE_FONT, fontSize: 12,
-    }}>
-      {isDiff ? <code>{highlightDiff(body)}</code> : <code>{highlighted ?? body}</code>}
-    </pre>
+    <div style={{ marginBottom: 8 }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "flex", alignItems: "center", gap: 6, opacity: 0.55, fontSize: 12,
+          background: "transparent", border: "none", color: "inherit", cursor: "pointer", padding: "2px 4px",
+        }}
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        <ToolAvatar />
+        <span>{messages.length} tool call{messages.length === 1 ? "" : "s"}</span>
+      </button>
+      {open && messages.map((m, i) => <ToolMessageRow key={i} message={m} username={username} />)}
+    </div>
   );
 }
 
-/** Renders a chat message body with fenced ```lang code blocks (syntax- or
- * diff-highlighted, see `CodeBlock`) and inline `code` spans styled as code
- * rather than as flat pre-wrap text - tool output and code snippets were
- * previously indistinguishable from prose. */
-function renderMessageContent(text: string): React.ReactNode {
-  const parts = text.split(/```(\w*)\n([\s\S]*?)```/g);
-  // With two capture groups, split() interleaves [text, lang, code, text,
-  // lang, code, ..., text]: index%3===0 is surrounding prose, %3===1 is the
-  // fence's language tag, %3===2 is the code body (consumed alongside its
-  // language tag, so it's skipped when encountered on its own below).
-  return parts.map((part, i) => {
-    const mod = i % 3;
-    if (mod === 2) return null;
-    if (mod === 1) return <CodeBlock key={i} lang={part} code={parts[i + 1] ?? ""} />;
-    if (!part) return null;
-    return <span key={i} style={{ whiteSpace: "pre-wrap" }}>{renderInlineCode(part, String(i))}</span>;
-  });
-}
-
-/** Small "T" badge preceding a tool-result row. User and assistant rows
- * carry no icon at all - role is already conveyed by which side of the
- * panel the bubble sits on (see the message-row alignment below) and by
- * the role label itself. */
-function ToolAvatar() {
-  return (
-    <span aria-hidden style={{
-      width: 18, height: 18, borderRadius: "50%", display: "inline-flex",
-      alignItems: "center", justifyContent: "center", fontSize: 11, flexShrink: 0,
-      background: "var(--zero-status-ok)", color: "#fff",
-    }}>
-      T
-    </span>
-  );
+/** Groups a flat message list into renderable items, collapsing runs of
+ * consecutive tool-result messages (see `ToolGroup`) - everything else
+ * renders one-for-one as before. */
+export function groupForDisplay<M extends ChatMessage>(messages: M[]): ({ kind: "message"; message: M } | { kind: "toolGroup"; messages: M[] })[] {
+  const items: ({ kind: "message"; message: M } | { kind: "toolGroup"; messages: M[] })[] = [];
+  let i = 0;
+  while (i < messages.length) {
+    const m = messages[i]!;
+    if (m.role === "tool") {
+      const group: M[] = [];
+      while (i < messages.length && messages[i]!.role === "tool") {
+        group.push(messages[i]!);
+        i++;
+      }
+      items.push({ kind: "toolGroup", messages: group });
+    } else {
+      items.push({ kind: "message", message: m });
+      i++;
+    }
+  }
+  return items;
 }
 
 export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chatStore: ChatStore }) {
@@ -115,7 +133,10 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
   const [, setVersion] = useState(0);
   useEffect(() => chatStore.subscribe(() => setVersion((v) => v + 1)), [chatStore]);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // `tokensUsed` is a client-only annotation (from the turn's "done" event,
+  // never persisted/round-tripped) shown under an assistant reply so a user
+  // can see roughly how much of the context budget that turn cost.
+  const [messages, setMessages] = useState<(ChatMessage & { tokensUsed?: number })[]>([]);
   const [streaming, setStreaming] = useState("");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -301,7 +322,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
             setMessages((m) => [...m, { role: "tool", content: event.message, toolName: "error", createdAt: Date.now() }]);
             finish();
           } else if (event.type === "done") {
-            setMessages((m) => [...m, event.message]);
+            setMessages((m) => [...m, { ...event.message, tokensUsed: event.tokensUsed }]);
             setStreaming("");
             const current = chatStore.getSessions().find((s) => s.id === sessionId);
             if (isFirstExchange && current?.title === "New chat") {
@@ -418,7 +439,9 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
             <div style={{ padding: 16, opacity: 0.6 }}>No chat open</div>
           ) : (
             <>
-              {messages.filter((m) => m.role !== "system").map((m, i) => {
+              {groupForDisplay(messages.filter((m) => m.role !== "system")).map((item, i) => {
+                if (item.kind === "toolGroup") return <ToolGroup key={i} messages={item.messages} username={username} />;
+                const m = item.message;
                 const isUser = m.role === "user";
                 return (
                   <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 8 }}>
@@ -429,7 +452,6 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
                       border: isUser ? "none" : "1px solid var(--zero-border)",
                     }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                        {m.role === "tool" && <ToolAvatar />}
                         <strong>{roleLabel(m.role, m.toolName, username)}</strong>
                         <span
                           style={{ marginLeft: "auto", fontSize: 11, opacity: 0.7 }}
@@ -438,19 +460,12 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
                           {m.createdAt ? humanizeTimestamp(m.createdAt) : null}
                         </span>
                       </div>
-                      <div>
-                        {m.role === "tool" ? (
-                          <pre style={{
-                            margin: 0, padding: 8, borderRadius: 4, overflowX: "auto", maxHeight: 320,
-                            background: "var(--zero-sidebar-bg)", border: "1px solid var(--zero-border)",
-                            color: "var(--zero-editor-fg)", fontFamily: CODE_FONT, fontSize: 12,
-                          }}>
-                            {m.content}
-                          </pre>
-                        ) : (
-                          renderMessageContent(m.content)
-                        )}
-                      </div>
+                      <div>{renderFormattedMessage(m.content)}</div>
+                      {m.tokensUsed != null && (
+                        <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4 }}>
+                          ~{m.tokensUsed.toLocaleString()} tokens this turn
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -468,7 +483,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
                         {humanizeTimestamp(Date.now())}
                       </span>
                     </div>
-                    <div>{renderMessageContent(streaming)}</div>
+                    <div>{renderFormattedMessage(streaming)}</div>
                   </div>
                 </div>
               )}
@@ -507,7 +522,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
           </button>
         )}
       </div>
-      {turnId && turnStore.isActive(turnId) && (
+      {shouldShowThinkingIndicator({ busy, streaming, pendingApproval }) && (
         <div role="status" style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--zero-statusbar-fg)", opacity: 0.8, padding: "4px 10px", borderTop: "1px solid var(--zero-border)", background: "var(--zero-editor-bg)" }}>
           <span className="zero-typing-dot" />
           <span className="zero-typing-dot" />

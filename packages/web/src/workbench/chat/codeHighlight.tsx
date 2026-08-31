@@ -85,6 +85,48 @@ export function highlightCode(code: string, lang: string): React.ReactNode[] | n
   }
 }
 
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (ch) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[ch] as string
+  ));
+}
+
+/** Same tokenization as `highlightCode`, but emitting an HTML string (`<span
+ * class="zero-tok-*">`) instead of React nodes - for content that has to
+ * pass through `dangerouslySetInnerHTML` (e.g. a marked-rendered Markdown
+ * message), where code fences still need to match `CodeBlock`'s coloring. */
+export function highlightCodeHtml(code: string, lang: string): string | null {
+  const language = LANGUAGES[lang.toLowerCase()];
+  if (!language) return null;
+  try {
+    const tree = language.parser.parse(code);
+    let html = "";
+    let pos = 0;
+    highlightTree(tree, highlighter, (from, to, classes) => {
+      if (from > pos) html += escapeHtml(code.slice(pos, from));
+      html += `<span class="${classes}">${escapeHtml(code.slice(from, to))}</span>`;
+      pos = to;
+    });
+    if (pos < code.length) html += escapeHtml(code.slice(pos));
+    return html;
+  } catch {
+    return null;
+  }
+}
+
+/** HTML-string counterpart to `highlightDiff`, for the same reason as
+ * `highlightCodeHtml`. */
+export function highlightDiffHtml(text: string): string {
+  return text.split("\n").map((line) => {
+    let className = "zero-diff-context";
+    if (line.startsWith("+++") || line.startsWith("---")) className = "zero-diff-file";
+    else if (line.startsWith("@@")) className = "zero-diff-hunk";
+    else if (line.startsWith("+")) className = "zero-diff-add";
+    else if (line.startsWith("-")) className = "zero-diff-del";
+    return `<div class="${className}" style="white-space:pre">${escapeHtml(line.length ? line : " ")}</div>`;
+  }).join("");
+}
+
 /** Line-based coloring for unified-diff/patch text: +/- lines and hunk
  * headers get a background tint, matching the GitHub-style diff convention
  * users actually expect - a token grammar isn't the right tool here, diffs
