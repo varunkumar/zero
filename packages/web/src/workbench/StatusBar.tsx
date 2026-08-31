@@ -4,6 +4,17 @@ import { StatusPill } from "../StatusPill";
 import { PluginSlot } from "./plugins/PluginSlot";
 import { Logomark } from "./theme/Logomark";
 
+/** Compact token count for the status bar pill (6853 -> "6K", 262144 ->
+ * "262K", 1_200_000 -> "1.2M") - the exact comma-formatted count stays
+ * available via the pill's `title` tooltip. Truncates rather than rounds so
+ * a count doesn't visually cross a full unit it hasn't actually reached
+ * (e.g. 999,900 reads as "999K", not "1M"). */
+export function formatCompactTokens(n: number): string {
+  if (n < 1_000) return String(n);
+  if (n < 1_000_000) return `${Math.floor(n / 1_000)}K`;
+  return `${Math.floor(n / 100_000) / 10}M`;
+}
+
 export type GraphStatus = {
   ready: boolean;
   indexing: boolean;
@@ -80,8 +91,8 @@ export function StatusBar(props: {
           </span>
         )}
         {props.tokenStatus?.usedTokens != null && props.tokenStatus.contextWindowTokens != null && (
-          <span title="Chat context window usage">
-            {props.tokenStatus.usedTokens.toLocaleString()} / {props.tokenStatus.contextWindowTokens.toLocaleString()} tokens
+          <span title={`${props.tokenStatus.usedTokens.toLocaleString()} / ${props.tokenStatus.contextWindowTokens.toLocaleString()} tokens`}>
+            {formatCompactTokens(props.tokenStatus.usedTokens)} / {formatCompactTokens(props.tokenStatus.contextWindowTokens)} tokens
           </span>
         )}
         {props.statusBarItems?.map((item) => (
