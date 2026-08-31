@@ -7,7 +7,7 @@ export type AgentCliOpts = CliOpts;
 // Flags that take a following value - that value must not be mistaken for a
 // positional argument (e.g. `zero --gateway-port 4000` must not treat "4000"
 // as the workspace path).
-const FLAGS_WITH_VALUE = new Set(["-p", "--session", "--gateway-port", "--port"]);
+const FLAGS_WITH_VALUE = new Set(["-p", "--session", "--gateway-port", "--port", "--model"]);
 
 /** Parses a `<flag> <value>` pair out of argv. Returns `undefined` if the
  * flag is absent, `"invalid"` if present but its value isn't a number (e.g.
@@ -40,6 +40,34 @@ export function positionalArgs(argv: string[]): string[] {
   return out;
 }
 
+/** Parses `--model <name>`. Returns `undefined` if absent, `"invalid"` if
+ * present without a following non-flag value. */
+export function parseModel(argv: string[]): string | "invalid" | undefined {
+  const idx = argv.indexOf("--model");
+  if (idx < 0) return undefined;
+  const value = argv[idx + 1];
+  if (!value || value.startsWith("-")) return "invalid";
+  return value;
+}
+
+export async function runListModelsCli(root: string, opts: AgentCliOpts = {}): Promise<number> {
+  try {
+    const ctx = await createCliContext(root, opts);
+    if (ctx.models.length === 0) {
+      console.error("no Ollama models found. is ollama running? try: ollama pull <name>");
+      return 1;
+    }
+    for (const name of ctx.models) {
+      const mark = name === ctx.activeModel ? "*" : " ";
+      console.log(`${mark} ${name}`);
+    }
+    return 0;
+  } catch (err) {
+    console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 export async function runAgentCli(argv: string[], root: string, opts: AgentCliOpts = {}): Promise<number> {
   const yes = argv.includes("--yes");
   const forceNonTty = argv.includes("--no-tty-for-test"); // test-only, see agent.test.ts
@@ -47,10 +75,21 @@ export async function runAgentCli(argv: string[], root: string, opts: AgentCliOp
   const sessionArg = sessionIdx >= 0 ? argv[sessionIdx + 1] : undefined;
   const pIdx = argv.indexOf("-p");
   const task = pIdx >= 0 ? argv[pIdx + 1] : undefined;
-  if (!task) { console.error('usage: zero -p "task description" [--yes] [--session <id>] [path]'); return 1; }
+  if (!task) { console.error('usage: zero -p "task description" [--yes] [--session <id>] [--model <name>] [path]'); return 1; }
+
+  const parsedModel = parseModel(argv);
+  if (parsedModel === "invalid") {
+    console.error("error: --model requires a model name (see zero --list-models)");
+    return 1;
+  }
 
   try {
-    const ctx = createCliContext(root, opts);
+    const ctx = await createCliContext(root, { ...opts, model: parsedModel ?? opts.model });
+    if (parsedModel && ctx.activeModel !== parsedModel && !(ctx.activeModel?.startsWith(`${parsedModel}:`))) {
+      const installed = ctx.models.length ? ctx.models.join(", ") : "(none — is Ollama running?)";
+      console.error(`error: model ${parsedModel} is not installed. available: ${installed}`);
+      return 1;
+    }
     const sessionId = sessionArg ?? (await ctx.sessions.create(task.slice(0, 40)));
     const runtime = createRuntimeForSession(ctx, sessionId);
 

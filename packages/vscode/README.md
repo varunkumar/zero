@@ -32,7 +32,9 @@ model available).
 
 Zero also registers as a selectable model in VS Code's chat (including
 GitHub Copilot Chat), backed by the same daemon and model gateway as
-completions. VS Code requires a one-time manual step to enable any
+completions. The Ollama model itself is not hardcoded here: the gateway
+picks whatever is currently installed (and saved in `~/.zero/settings.json`
+as `zero.ollamaModel`). VS Code requires a one-time manual step to enable any
 third-party model provider:
 
 1. Open the chat view, click the model picker, choose **Manage Models...**

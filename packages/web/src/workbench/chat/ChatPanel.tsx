@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { RpcClient, ChatSessionSummary, ChatMessage, ChatToolCall, WhoamiResult } from "@zero/protocol";
+import type { RpcClient, ChatSessionSummary, ChatMessage, ChatToolCall, WhoamiResult, ModelsListResult } from "@zero/protocol";
 import type { ChatStore } from "./store";
 import type { TurnStore } from "./turnStore";
 import { highlightCode, highlightDiff } from "./codeHighlight";
@@ -122,6 +122,7 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
   const [banner, setBanner] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ turnId: string; call: ChatToolCall; preview: string } | null>(null);
   const [status, setStatus] = useState<{ activeModel: string | null; reason: string | null }>({ activeModel: null, reason: null });
+  const [catalog, setCatalog] = useState<ModelsListResult>({ url: "", models: [], running: [], active: null });
   const [turnId, setTurnId] = useState<string | null>(null);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
   // Settles the in-flight `send()` promise (unsubscribes from TurnStore,
@@ -168,6 +169,21 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
       .then((r) => chatStore.setSessions(r.sessions))
       .catch((e) => reportError(`failed to load chats: ${e instanceof Error ? e.message : String(e)}`));
   }, [client, chatStore]);
+
+  useEffect(() => {
+    let cancelled = false;
+    client.request<ModelsListResult>("models/list")
+      .then((r) => {
+        if (cancelled) return;
+        setCatalog(r);
+        if (r.active) {
+          localStorage.setItem("zero.ollamaModel", r.active);
+          localStorage.removeItem("zero.ollamaChatModel");
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [client]);
 
   // Fix #1 & #2: Abort the previous session's in-flight turn (if any) and
   // clear streaming/approval state when switching sessions - otherwise a
@@ -353,9 +369,35 @@ export function ChatPanel(props: { client: RpcClient; turnStore: TurnStore; chat
               border: "1px solid var(--zero-border)", fontSize: 14, color: "var(--zero-statusbar-fg)",
             }}
           >
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: status.activeModel !== null ? "var(--zero-status-ok)" : "var(--zero-status-idle)", flexShrink: 0 }} />
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: (catalog.active ?? status.activeModel) !== null ? "var(--zero-status-ok)" : "var(--zero-status-idle)", flexShrink: 0 }} />
             <span style={{ opacity: 0.7, marginRight: 4 }}>Chat:</span>
-            {status.activeModel ?? "no chat model"}
+            {catalog.models.length > 0 ? (
+              <select
+                aria-label="Ollama model"
+                value={catalog.active ?? catalog.models[0]}
+                onChange={(e) => {
+                  const model = e.target.value;
+                  setCatalog((c) => ({ ...c, active: model }));
+                  localStorage.setItem("zero.ollamaModel", model);
+                  void client.request<ModelsListResult>("models/set", { model })
+                    .then(setCatalog)
+                    .catch((err) => reportError(`failed to set model: ${err instanceof Error ? err.message : String(err)}`));
+                }}
+                style={{
+                  background: "transparent",
+                  color: "inherit",
+                  border: "none",
+                  fontSize: 14,
+                  maxWidth: 220,
+                }}
+              >
+                {catalog.models.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            ) : (
+              <span>{status.activeModel ?? "no chat model"}</span>
+            )}
           </div>
         </div>
       </div>

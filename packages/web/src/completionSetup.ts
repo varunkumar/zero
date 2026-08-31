@@ -1,5 +1,5 @@
 import { CompletionEngine, CompletionScheduler, BufferContext, LspContext, GraphContext,
-  ChromeNanoProvider, OpenAICompatProvider, type NanoApi } from "@zero/core";
+  ChromeNanoProvider, OpenAICompatProvider, DEFAULT_OLLAMA_BASE_URL, type NanoApi } from "@zero/core";
 import type { EditorView } from "@codemirror/view";
 import type { RpcClient } from "@zero/protocol";
 import { setSuggestion } from "./ghostText";
@@ -9,19 +9,22 @@ export function buildCompletionStack(_client: RpcClient, opts?: { lite?: boolean
   return { providers: ["chrome-nano", "openai-compat"], context: ["buffer", "lsp", "graph"] };
 }
 
-export function createCompletion(client: RpcClient, getView: () => EditorView | undefined, path: () => string, opts?: { lite?: boolean }) {
+export function createCompletion(client: RpcClient, getView: () => EditorView | undefined, path: () => string, opts?: { lite?: boolean; model?: string; baseUrl?: string }) {
   const nanoApi = (globalThis as { LanguageModel?: NanoApi }).LanguageModel;
   const buffers = new BufferContext();
 
   const lite = opts?.lite === true;
+  const model = opts?.model ?? (typeof localStorage !== "undefined"
+    ? (localStorage.getItem("zero.ollamaModel") ?? localStorage.getItem("zero.ollamaChatModel"))
+    : null);
+  const baseUrl = opts?.baseUrl
+    ?? (typeof localStorage !== "undefined" ? localStorage.getItem("zero.ollamaUrl") : null)
+    ?? DEFAULT_OLLAMA_BASE_URL;
   const providers = lite
     ? [new ChromeNanoProvider(nanoApi)]
     : [
         new ChromeNanoProvider(nanoApi),
-        new OpenAICompatProvider({
-          baseUrl: localStorage.getItem("zero.ollamaUrl") ?? "http://127.0.0.1:11434/v1",
-          model: localStorage.getItem("zero.ollamaModel") ?? "qwen2.5-coder:1.5b",
-        }),
+        ...(model ? [new OpenAICompatProvider({ baseUrl, model })] : []),
       ];
   const context = lite
     ? [buffers]

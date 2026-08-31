@@ -132,6 +132,9 @@ export function createLocalSocket(opts: LocalRpcOpts): SocketLike & {
       case "settings/get":
       case "settings/set":
         return {};
+      case "models/list":
+      case "models/set":
+        return { url: "", models: [], running: [], active: null };
       case "system/whoami":
         return { username: "you" };
       default:

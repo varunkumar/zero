@@ -15,7 +15,7 @@ import { createGit } from "./plugins/git";
 import { createTodoScanner } from "./plugins/todos";
 import { SessionStore } from "./sessions";
 import type { ChatMessage } from "@zero/protocol";
-import { AgentRuntime, ProviderGateway, OpenAICompatProvider, type ChatDelta } from "@zero/core";
+import { AgentRuntime, ProviderGateway, type ChatDelta } from "@zero/core";
 import { createChatTools } from "./chatTools";
 import { createAgentRuntimeClient } from "./agentClient";
 import { createRuntimePool } from "./agentRuntimePool";
@@ -23,6 +23,10 @@ import { GitCheckpoint } from "./gitCheckpoint";
 import { execCommand } from "./execCommand";
 import { NanoHostRegistry } from "./nanoHost";
 import { NanoBridgeProvider } from "./nanoBridgeProvider";
+import {
+  loadOllamaCatalog, providersFromCatalog, writeOllamaModel,
+  OLLAMA_URL_KEY, OLLAMA_MODEL_KEY, OLLAMA_CHAT_MODEL_KEY,
+} from "./ollamaConfig";
 
 export async function startZero(opts: DaemonOptions) {
   const pluginsDir = new URL("./plugins", import.meta.url).pathname;
@@ -65,13 +69,17 @@ export async function startZero(opts: DaemonOptions) {
   });
 
   async function buildProviders() {
-    const baseUrl = (await ws.readSetting("zero.ollamaUrl")) as string | undefined ?? "http://127.0.0.1:11434/v1";
-    const model = (await ws.readSetting("zero.ollamaChatModel")) as string | undefined ?? "qwen2.5-coder:7b";
     // Nano is deliberately excluded here: it requires a browser's
     // window.LanguageModel global, which does not exist in the daemon
     // process. Nano-backed daemon-side runs are M7 (Nano bridge) scope.
-    return [new OpenAICompatProvider({ baseUrl, model })];
+    const catalog = await loadOllamaCatalog(ws);
+    return providersFromCatalog(catalog);
   }
+
+  // Assigned once the optional model gateway starts. Chat/agent runtimes
+  // rebuild on their own via the pool; the gateway is a long-lived
+  // ProviderGateway used by `zero claude` and the VS Code extension.
+  let modelGateway: ProviderGateway | undefined;
 
   const pty = new PtyService(
     opts.root,
@@ -110,7 +118,17 @@ export async function startZero(opts: DaemonOptions) {
   daemon.rpc.register("settings/get", z.object({ key: z.string() }),
     async (p) => ({ value: await ws.readSetting(p.key) }));
   daemon.rpc.register("settings/set", z.object({ key: z.string(), value: z.unknown() }),
-    async (p) => { await ws.writeSetting(p.key, p.value); return {}; });
+    async (p) => {
+      await ws.writeSetting(p.key, p.value);
+      if (p.key === OLLAMA_URL_KEY || p.key === OLLAMA_MODEL_KEY || p.key === OLLAMA_CHAT_MODEL_KEY) {
+        runtimeFor.evictAll();
+        if (modelGateway) {
+          modelGateway.replace([new NanoBridgeProvider(nanoHost), ...await buildProviders()]);
+        }
+        daemon.broadcast("models/changed", await loadOllamaCatalog(ws));
+      }
+      return {};
+    });
   daemon.rpc.register("session/hello", z.object({}).optional().transform(() => ({})),
     async () => ({
       capabilities: {
@@ -125,6 +143,19 @@ export async function startZero(opts: DaemonOptions) {
   // some minimal container images).
   daemon.rpc.register("system/whoami", z.object({}).optional().transform(() => ({})),
     async () => ({ username: (() => { try { return userInfo().username; } catch { return "you"; } })() }));
+  daemon.rpc.register("models/list", z.object({}).optional().transform(() => ({})),
+    async () => loadOllamaCatalog(ws));
+  daemon.rpc.register("models/set", z.object({ model: z.string().min(1) }),
+    async (p) => {
+      await writeOllamaModel(ws, p.model);
+      runtimeFor.evictAll();
+      if (modelGateway) {
+        modelGateway.replace([new NanoBridgeProvider(nanoHost), ...await buildProviders()]);
+      }
+      const catalog = await loadOllamaCatalog(ws);
+      daemon.broadcast("models/changed", catalog);
+      return catalog;
+    });
 
   daemon.rpc.register("pty/open", z.object({ shell: z.string().optional(), cols: z.number(), rows: z.number() }),
     async (p) => pty.open(p.shell, p.cols, p.rows));
@@ -294,10 +325,10 @@ export async function startZero(opts: DaemonOptions) {
   let gatewayInfo: { port: number; apiKey: string } | undefined;
   let stopGateway: (() => void) | undefined;
   if (opts.gatewayPort !== undefined) {
-    const providers = await buildProviders();
+    modelGateway = new ProviderGateway([new NanoBridgeProvider(nanoHost), ...await buildProviders()]);
     const gw = startModelGateway({
       port: opts.gatewayPort,
-      gateway: new ProviderGateway([new NanoBridgeProvider(nanoHost), ...providers]),
+      gateway: modelGateway,
     });
     gatewayInfo = { port: gw.port, apiKey: gw.apiKey };
     stopGateway = gw.stop;

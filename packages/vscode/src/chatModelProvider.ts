@@ -107,6 +107,12 @@ function toAnthropicTools(tools: readonly LanguageModelChatToolLike[]) {
   return tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema ?? {} }));
 }
 
+function displayName(provider: string): string {
+  if (provider === "nano-bridge") return "Zero (Nano)";
+  const model = provider.startsWith("openai:") ? provider.slice("openai:".length) : provider;
+  return `Zero (${model})`;
+}
+
 export function createChatModelProvider(opts: ChatModelProviderOpts): ChatModelProvider {
   const fetchImpl = opts.fetchImpl ?? fetch;
 
@@ -118,7 +124,7 @@ export function createChatModelProvider(opts: ChatModelProviderOpts): ChatModelP
         const health = (await res.json()) as HealthResponseLike;
         if (!health.provider) return [];
         return [{
-          id: "zero", name: "Zero", family: "zero", version: "1",
+          id: "zero", name: displayName(health.provider), family: "zero", version: "1",
           maxInputTokens: 8192, maxOutputTokens: 4096,
           capabilities: { toolCalling: health.supportsTools },
         }];

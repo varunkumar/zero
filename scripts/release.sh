@@ -61,8 +61,15 @@ for f in package.json packages/vscode/package.json packages/desktop/package.json
     require("node:fs").writeFileSync(abs, updated);
   ' "$f" "$VERSION"
 done
-sed -i '' -E "0,/^version = \"[0-9]+\.[0-9]+\.[0-9]+\"/s//version = \"$VERSION\"/" \
-  packages/desktop/src-tauri/Cargo.toml
+bun -e '
+  const [file, version] = process.argv.slice(1);
+  const path = require("node:path");
+  const abs = path.resolve(file);
+  const text = require("node:fs").readFileSync(abs, "utf8");
+  const updated = text.replace(/^version = "[0-9]+\.[0-9]+\.[0-9]+"/m, `version = "${version}"`);
+  if (updated === text) throw new Error(`no top-level version field found in ${file}`);
+  require("node:fs").writeFileSync(abs, updated);
+' packages/desktop/src-tauri/Cargo.toml "$VERSION"
 
 echo "==> Running tests and typecheck"
 bun test

@@ -220,6 +220,20 @@ export interface WhoamiResult {
   username: string;
 }
 
+export interface ModelsListResult {
+  url: string;
+  models: string[];
+  running: string[];
+  active: string | null;
+}
+
+export interface ModelsSetParams {
+  model: string;
+}
+
+export type ModelsSetResult = ModelsListResult;
+export type ModelsChangedEvent = ModelsListResult;
+
 export interface WorkspaceCapabilities {
   pty: boolean;
   lsp: boolean;

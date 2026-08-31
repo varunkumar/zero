@@ -354,6 +354,57 @@ test("/help lists commands instead of sending a message", async () => {
   expect(sent).toBe(false);
 });
 
+test("/model with no argument opens the model picker instead of sending a message", async () => {
+  const runtime = fakeRuntime([]);
+  let sent = false;
+  const originalSendMessage = runtime.sendMessage.bind(runtime);
+  runtime.sendMessage = (...args: Parameters<typeof originalSendMessage>) => {
+    sent = true;
+    return originalSendMessage(...args);
+  };
+  const { stdin, lastFrame } = render(
+    <ChatScreen
+      runtime={runtime}
+      sessionId="s1"
+      initialLines={[]}
+      cwd="/tmp/proj"
+      version="0.0.0-test"
+      models={["llama3.2:latest", "mistral:latest"]}
+      activeModel="llama3.2:latest"
+    />,
+  );
+  await tick();
+  await typeAndSubmit(stdin, "/model");
+  await tick();
+  const frame = lastFrame() ?? "";
+  expect(sent).toBe(false);
+  expect(frame).toContain("llama3.2:latest");
+  expect(frame).toContain("mistral:latest");
+  expect(frame).toContain("Pick an Ollama model");
+});
+
+test("/model <name> selects that model instead of sending a message", async () => {
+  const runtime = fakeRuntime([]);
+  let picked: string | undefined;
+  const { stdin, lastFrame } = render(
+    <ChatScreen
+      runtime={runtime}
+      sessionId="s1"
+      initialLines={[]}
+      cwd="/tmp/proj"
+      version="0.0.0-test"
+      models={["llama3.2:latest", "mistral:latest"]}
+      activeModel="llama3.2:latest"
+      onSelectModel={(name) => { picked = name; }}
+    />,
+  );
+  await tick();
+  await typeAndSubmit(stdin, "/model mistral:latest");
+  await tick();
+  expect(picked).toBe("mistral:latest");
+  expect(lastFrame() ?? "").toContain("model: mistral:latest");
+});
+
 test("/theme toggles the theme instead of sending a message", async () => {
   const runtime = fakeRuntime([]);
   let sent = false;
