@@ -331,7 +331,7 @@ export function EditorPanel(props: IDockviewPanelProps<{ groupId: string }>) {
               {editorEl}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <MarkdownPreview content={tab.content} />
+              <MarkdownPreview content={tab.content} path={tab.path} client={w.client} />
             </div>
           </div>
         ) : kind === "image" ? (
