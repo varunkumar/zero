@@ -54,7 +54,7 @@ cp -R "$DIST_DIR/node-runtime" "$PKG_DIR/node-runtime"
 cp -R "$DIST_DIR/web-dist" "$PKG_DIR/web-dist"
 cp -R "$DIST_DIR/plugins-ui" "$PKG_DIR/plugins-ui"
 
-cat > "$PKG_DIR/bin/zero" <<'WRAPPER'
+cat > "$PKG_DIR/bin/zero" <<'WRAPPER_HEAD'
 #!/bin/sh
 # Wrapper for the compiled zero-daemon-sidecar binary: points it at the
 # node-runtime/web-dist/plugins-ui bundled alongside it in this package -
@@ -63,6 +63,15 @@ cat > "$PKG_DIR/bin/zero" <<'WRAPPER'
 # readlink doesn't support) since scripts/get-zero.sh installs this via a
 # symlink in ~/.local/bin.
 set -eu
+WRAPPER_HEAD
+cat >> "$PKG_DIR/bin/zero" <<EOF
+# Baked in at package time: import.meta.url-relative version resolution
+# (packages/daemon/src/version.ts) breaks inside a bun build --compile
+# binary the same way ZERO_WEB_DIST's default lookup does - see that
+# file's ZERO_VERSION override.
+export ZERO_VERSION="$VERSION"
+EOF
+cat >> "$PKG_DIR/bin/zero" <<'WRAPPER_TAIL'
 SCRIPT="$0"
 while [ -L "$SCRIPT" ]; do
   LINK="$(readlink "$SCRIPT")"
@@ -77,7 +86,7 @@ export ZERO_PTY_WORKER_DIR="$ROOT/node-runtime"
 export ZERO_WEB_DIST="$ROOT/web-dist"
 export ZERO_PLUGINS_DIR="$ROOT/plugins-ui"
 exec "$ROOT/zero-daemon-sidecar" "$@"
-WRAPPER
+WRAPPER_TAIL
 chmod +x "$PKG_DIR/bin/zero"
 chmod +x "$PKG_DIR/zero-daemon-sidecar"
 

@@ -15,7 +15,7 @@ publishing them as a GitHub release.
 Run this from a clean `main` checkout. It does everything by hand described
 below: bumps the version everywhere, runs tests and typecheck, builds all
 three artifacts, commits, tags, pushes, and publishes the GitHub release
-with the `.dmg` and `.vsix` attached.
+with the `.dmg`, `.vsix`, and the three `zero` CLI tarballs attached.
 
 If it fails partway through, the earlier steps' changes stay in place - fix
 the problem and either re-run the script (the version-bump edits are
@@ -59,6 +59,10 @@ idempotent) or finish the remaining steps by hand from the section below.
    (cd packages/vscode && bun run package)        # -> packages/vscode/zero-vscode-<version>.vsix
    bun run --cwd packages/desktop tauri build     # -> packages/desktop/src-tauri/target/release/bundle/{macos/Zero.app, dmg/Zero_<version>_aarch64.dmg}
    ```
+
+   `scripts/get-zero.sh` isn't a build step - it's the `curl | sh` installer
+   end users run to fetch and install these published tarballs, so it only
+   needs to keep matching the asset names produced above.
 
    The two Linux builds run inside Docker containers of the matching
    architecture (`docker/linux-build.Dockerfile`), since node-pty's native

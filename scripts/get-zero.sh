@@ -44,6 +44,10 @@ if [ -z "$TAG" ]; then
   exit 1
 fi
 VERSION="$(printf '%s' "$TAG" | sed -E 's/^v//')"
+if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "error: couldn't parse a valid version from release tag '$TAG'" >&2
+  exit 1
+fi
 
 ASSET_NAME="zero-$VERSION-$PLATFORM.tar.gz"
 DOWNLOAD_URL="$(printf '%s' "$RELEASE_JSON" | grep -o "\"browser_download_url\": *\"[^\"]*$ASSET_NAME\"" | sed -E 's/.*"(https?:[^"]+)"/\1/')"
@@ -53,19 +57,18 @@ if [ -z "$DOWNLOAD_URL" ]; then
 fi
 
 VERSION_DIR="$INSTALL_ROOT/$VERSION"
-if [ -d "$VERSION_DIR" ]; then
-  echo "zero $VERSION already installed at $VERSION_DIR - reinstalling"
-  rm -rf "$VERSION_DIR"
-fi
-mkdir -p "$VERSION_DIR"
-
+STAGING_DIR="$INSTALL_ROOT/.zero-install-$VERSION.$$"
 TMP_TAR="$(mktemp)"
-trap 'rm -f "$TMP_TAR"' EXIT
+trap 'rm -f "$TMP_TAR"; rm -rf "$STAGING_DIR"' EXIT
+
 echo "Downloading $ASSET_NAME..."
 curl -fsSL "$DOWNLOAD_URL" -o "$TMP_TAR"
 
+mkdir -p "$STAGING_DIR"
 echo "Installing to $VERSION_DIR..."
-tar -C "$VERSION_DIR" --strip-components=1 -xzf "$TMP_TAR"
+tar -C "$STAGING_DIR" --strip-components=1 -xzf "$TMP_TAR"
+rm -rf "$VERSION_DIR"
+mv "$STAGING_DIR" "$VERSION_DIR"
 
 mkdir -p "$BIN_DIR"
 LINK="$BIN_DIR/zero"
@@ -73,7 +76,7 @@ if [ -e "$LINK" ] && [ ! -L "$LINK" ]; then
   echo "error: $LINK exists and isn't a symlink - remove it, or set GET_ZERO_HOME to install elsewhere" >&2
   exit 1
 fi
-ln -sf "$VERSION_DIR/bin/zero" "$LINK"
+ln -sfn "$VERSION_DIR/bin/zero" "$LINK"
 
 echo "Installed zero $VERSION -> $LINK"
 case ":$PATH:" in

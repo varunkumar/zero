@@ -86,4 +86,66 @@ if [ ! -d "$VERSION_DIR" ]; then
   exit 1
 fi
 
+echo "OK: happy path install"
+
+# Case 2: an existing regular (non-symlink) file at $BIN_DIR/zero must make
+# the script bail out without touching it.
+CLOBBER_HOME="$WORK/home-clobber"
+mkdir -p "$CLOBBER_HOME/.local/bin"
+CLOBBER_FILE="$CLOBBER_HOME/.local/bin/zero"
+echo "do-not-touch-me" > "$CLOBBER_FILE"
+if GET_ZERO_HOME="$CLOBBER_HOME" \
+  GET_ZERO_API_BASE="http://127.0.0.1:$PORT" \
+  GET_ZERO_PLATFORM="test-platform" \
+  sh "$REPO_ROOT/scripts/get-zero.sh" >/dev/null 2>"$WORK/clobber.err"; then
+  echo "FAIL: expected nonzero exit when $CLOBBER_FILE is a regular file" >&2
+  exit 1
+fi
+if [ ! -f "$CLOBBER_FILE" ] || [ -L "$CLOBBER_FILE" ]; then
+  echo "FAIL: the pre-existing regular file was replaced" >&2
+  exit 1
+fi
+if [ "$(cat "$CLOBBER_FILE")" != "do-not-touch-me" ]; then
+  echo "FAIL: the pre-existing regular file's content was modified" >&2
+  exit 1
+fi
+echo "OK: refuses to clobber a pre-existing regular file at the link path"
+
+# Case 3: re-running over an existing install replaces the symlink silently
+# (exercises the `ln -sfn` / staged-extract path).
+GET_ZERO_HOME="$WORK/home" \
+GET_ZERO_API_BASE="http://127.0.0.1:$PORT" \
+GET_ZERO_PLATFORM="test-platform" \
+sh "$REPO_ROOT/scripts/get-zero.sh"
+
+if [ ! -L "$LINK" ]; then
+  echo "FAIL: reinstall did not leave a symlink at $LINK" >&2
+  exit 1
+fi
+REINSTALL_OUTPUT="$("$LINK")"
+if [ "$REINSTALL_OUTPUT" != "fake-zero-ok" ]; then
+  echo "FAIL: symlink broken after reinstall: $REINSTALL_OUTPUT" >&2
+  exit 1
+fi
+echo "OK: reinstall over an existing symlink succeeds and still resolves"
+
+# Case 4: no asset matching the requested platform -> clear error, nonzero exit.
+if GET_ZERO_HOME="$WORK/home-noasset" \
+  GET_ZERO_API_BASE="http://127.0.0.1:$PORT" \
+  GET_ZERO_PLATFORM="nonexistent-platform" \
+  sh "$REPO_ROOT/scripts/get-zero.sh" >/dev/null 2>"$WORK/noasset.err"; then
+  echo "FAIL: expected nonzero exit for an unmatched platform" >&2
+  exit 1
+fi
+if ! grep -q "zero-9.9.9-nonexistent-platform.tar.gz" "$WORK/noasset.err"; then
+  echo "FAIL: expected a missing-asset error, got:" >&2
+  cat "$WORK/noasset.err" >&2
+  exit 1
+fi
+if [ -d "$WORK/home-noasset/.local/share/zero/9.9.9" ]; then
+  echo "FAIL: an install dir was created despite the missing asset" >&2
+  exit 1
+fi
+echo "OK: errors out when no asset matches the platform"
+
 echo "OK: scripts/get-zero.sh smoke test passed"

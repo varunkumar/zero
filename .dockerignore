@@ -5,9 +5,11 @@ dist
 dist-packages
 packages/daemon/dist-linux-x64
 packages/daemon/dist-linux-arm64
-packages/desktop/src-tauri/target
+**/src-tauri/target
 .git
 .zero
+.claude
+.superpowers
 graphify-out
 *.tsbuildinfo
 .DS_Store

@@ -19,6 +19,7 @@ echo "ZERO_PTY_NODE_BIN=$ZERO_PTY_NODE_BIN"
 echo "ZERO_PTY_WORKER_DIR=$ZERO_PTY_WORKER_DIR"
 echo "ZERO_WEB_DIST=$ZERO_WEB_DIST"
 echo "ZERO_PLUGINS_DIR=$ZERO_PLUGINS_DIR"
+echo "ZERO_VERSION=$ZERO_VERSION"
 echo "args=$*"
 EOF
 chmod +x "$DIST_DIR/zero-daemon-sidecar"
@@ -60,6 +61,7 @@ echo "$OUTPUT" | grep -q "ZERO_PTY_NODE_BIN=$RELOCATED/node-runtime/node" || { e
 echo "$OUTPUT" | grep -q "ZERO_PTY_WORKER_DIR=$RELOCATED/node-runtime" || { echo "FAIL: ZERO_PTY_WORKER_DIR wrong"; echo "$OUTPUT" >&2; exit 1; }
 echo "$OUTPUT" | grep -q "ZERO_WEB_DIST=$RELOCATED/web-dist" || { echo "FAIL: ZERO_WEB_DIST wrong"; echo "$OUTPUT" >&2; exit 1; }
 echo "$OUTPUT" | grep -q "ZERO_PLUGINS_DIR=$RELOCATED/plugins-ui" || { echo "FAIL: ZERO_PLUGINS_DIR wrong"; echo "$OUTPUT" >&2; exit 1; }
+echo "$OUTPUT" | grep -q "ZERO_VERSION=9.9.9" || { echo "FAIL: ZERO_VERSION not baked into the wrapper"; echo "$OUTPUT" >&2; exit 1; }
 echo "$OUTPUT" | grep -q "args=--some-arg" || { echo "FAIL: args not forwarded"; echo "$OUTPUT" >&2; exit 1; }
 
 # Also verify through a symlink, mirroring scripts/get-zero.sh.
