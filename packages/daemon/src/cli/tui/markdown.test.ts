@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { estimateBlockRows, estimateTextRows, parseBlocks } from "./markdown";
+import { detectMessageFormat, estimateBlockRows, estimateTextRows, parseBlocks, prepareMessageForTranscript } from "./markdown";
 
 describe("parseBlocks", () => {
   test("plain text with no fences is a single text block", () => {
@@ -57,5 +57,40 @@ describe("estimateBlockRows / estimateTextRows", () => {
     // "explain:\n" -> 2 rows (the line, then the trailing empty line) +
     // code block (2 lines + 2 borders + 1 label) = 5
     expect(estimateTextRows(text, 80)).toBe(2 + 5);
+  });
+});
+
+describe("detectMessageFormat", () => {
+  test("recognizes JSON, XML, HTML, YAML, CSV, and Markdown, falling back to plain", () => {
+    expect(detectMessageFormat('{"a": 1}')).toBe("json");
+    expect(detectMessageFormat("<note><to>you</to></note>")).toBe("xml");
+    expect(detectMessageFormat("<div><p>hi</p></div>")).toBe("html");
+    expect(detectMessageFormat("name: zero\nversion: 1\nfeatures:\n  - chat\n  - tui")).toBe("yaml");
+    expect(detectMessageFormat("a,b,c\n1,2,3")).toBe("csv");
+    expect(detectMessageFormat("# Title\n\nSome text")).toBe("markdown");
+    expect(detectMessageFormat("just a normal sentence")).toBe("plain");
+  });
+});
+
+describe("prepareMessageForTranscript", () => {
+  test("fences and pretty-prints JSON so it renders as a code block", () => {
+    const { text, format } = prepareMessageForTranscript('{"a":1,"b":2}');
+    expect(format).toBe("json");
+    expect(text).toBe("```json\n{\n  \"a\": 1,\n  \"b\": 2\n}\n```");
+  });
+
+  test("fences XML/YAML/CSV without altering their content", () => {
+    expect(prepareMessageForTranscript("a,b\n1,2").text).toBe("```csv\na,b\n1,2\n```");
+  });
+
+  test("leaves Markdown and plain text untouched, reporting their format", () => {
+    expect(prepareMessageForTranscript("# Title\n\ntext")).toEqual({ text: "# Title\n\ntext", format: "markdown" });
+    expect(prepareMessageForTranscript("just prose")).toEqual({ text: "just prose", format: "plain" });
+  });
+
+  test("leaves HTML as plain text (a terminal can't render markup)", () => {
+    const { text, format } = prepareMessageForTranscript("<div><p>hi</p></div>");
+    expect(format).toBe("html");
+    expect(text).toBe("<div><p>hi</p></div>");
   });
 });

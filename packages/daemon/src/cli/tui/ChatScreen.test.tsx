@@ -42,6 +42,21 @@ test("renders resumed transcript lines on mount", () => {
   expect(frame).toContain("hello there");
 });
 
+test("a live turn's user and assistant lines each get a wall-clock timestamp", async () => {
+  const { lastFrame, stdin } = render(
+    <ChatScreen
+      runtime={fakeRuntime([{ type: "text", delta: "hello there" }, { type: "done", message: { role: "assistant", content: "hello there", createdAt: 0 }, tokensUsed: 0 }])}
+      sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test"
+    />,
+  );
+  await typeAndSubmit(stdin, "hi");
+  await tick();
+  const frame = lastFrame() ?? "";
+  const timestamps = frame.match(/\d{2}:\d{2}:\d{2}/g) ?? [];
+  // One for the user's "> hi" line, one for the assistant's reply.
+  expect(timestamps.length).toBeGreaterThanOrEqual(2);
+});
+
 test("the newest lines stay in view (header scrolled out) when the transcript overflows the terminal height, and scrolling all the way up brings the header back", async () => {
   const manyLines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
   const { stdin, lastFrame } = render(
@@ -380,7 +395,7 @@ test("/model with no argument opens the model picker instead of sending a messag
   expect(sent).toBe(false);
   expect(frame).toContain("llama3.2:latest");
   expect(frame).toContain("mistral:latest");
-  expect(frame).toContain("Pick an Ollama model");
+  expect(frame).toContain("Pick a model");
 });
 
 test("/model <name> selects that model instead of sending a message", async () => {
@@ -403,6 +418,28 @@ test("/model <name> selects that model instead of sending a message", async () =
   await tick();
   expect(picked).toBe("mistral:latest");
   expect(lastFrame() ?? "").toContain("model: mistral:latest");
+});
+
+test("a JSON reply renders as a bordered, pretty-printed code block instead of a raw one-line string", async () => {
+  const reply = '{"a":1,"b":2}';
+  const runtime = fakeRuntime([
+    { type: "text", delta: reply },
+    { type: "done", message: { role: "assistant", content: reply, createdAt: 0 }, tokensUsed: 0 },
+  ]);
+  const { stdin, stdout, lastFrame } = render(
+    <ChatScreen runtime={runtime} sessionId="s1" initialLines={[]} cwd="/tmp/proj" version="0.0.0-test" />,
+  );
+  await tick();
+  Object.defineProperty(stdout, "rows", { value: 45, configurable: true });
+  stdout.emit("resize");
+  await tick();
+  await typeAndSubmit(stdin, "give me json");
+  await tick();
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("json");
+  expect(frame).toContain('"a": 1');
+  expect(frame).toContain('"b": 2');
+  expect(frame).not.toContain('{"a":1,"b":2}');
 });
 
 test("/theme toggles the theme instead of sending a message", async () => {

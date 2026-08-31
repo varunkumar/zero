@@ -8,7 +8,7 @@ import { CodeBlockView, TextBlockView } from "./MessageBlock";
 import { ModelPicker } from "./ModelPicker";
 import { Spinner } from "./Spinner";
 import { useTheme } from "./theme";
-import { estimateBlockRows, estimateTextRows, parseBlocks } from "./markdown";
+import { estimateBlockRows, estimateTextRows, parseBlocks, prepareMessageForTranscript } from "./markdown";
 
 export interface ChatScreenProps {
   runtime: Pick<AgentRuntime, "sendMessage" | "resolveApproval">;
@@ -27,7 +27,7 @@ export interface ChatScreenProps {
 }
 
 interface PendingApproval { call: ChatToolCall; preview: string }
-interface Line { id: string; text: string; bold?: boolean; dim?: boolean; color?: string; spacer?: boolean }
+interface Line { id: string; text: string; bold?: boolean; dim?: boolean; color?: string; spacer?: boolean; timestamp?: string; markdown?: boolean }
 
 // How many transcript entries (each entry being one block: a text
 // paragraph, a whole code block, or the header) a scroll step moves.
@@ -41,7 +41,7 @@ function nextLineId(): string { return `line-${++lineSeq}`; }
 
 const SLASH_COMMANDS = [
   { name: "/help", description: "list available commands" },
-  { name: "/model", description: "switch Ollama model" },
+  { name: "/model", description: "switch model" },
   { name: "/theme", description: "toggle light/dark theme" },
   { name: "/exit", description: "exit zero" },
   { name: "/quit", description: "exit zero (alias for /exit)" },
@@ -54,6 +54,15 @@ function matchingCommands(value: string) {
 function truncate(text: string, max: number): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
   return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
+/** Wall-clock `HH:MM:SS`, prefixed onto each live turn's user/assistant
+ * lines below so a resumed-later reader can tell when things happened -
+ * resumed-session lines (seeded via `initialLines`) predate this and are
+ * left as-is rather than backfilled with a guessed time. */
+function formatClock(d: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function summarizeArgs(args: unknown): string {
@@ -128,7 +137,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     return () => { stdout.off("resize", onResize); };
   }, [stdout]);
 
-  const pushLine = useCallback((text: string, style?: { dim?: boolean; bold?: boolean; color?: string; spacer?: boolean }) => {
+  const pushLine = useCallback((text: string, style?: { dim?: boolean; bold?: boolean; color?: string; spacer?: boolean; timestamp?: string; markdown?: boolean }) => {
     setLines((prev) => [...prev, { id: nextLineId(), text, ...style }]);
   }, []);
 
@@ -144,7 +153,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     // slicing and scroll offset below can never split a message from
     // its own leading gap - which is what made the spacing look
     // inconsistent once the transcript needed trimming or scrolling.
-    pushLine(`> ${userText}`, { color: theme.userColor, bold: true, spacer: true });
+    pushLine(`> ${userText}`, { color: theme.userColor, bold: true, spacer: true, timestamp: formatClock() });
     const controller = new AbortController();
     controllerRef.current = controller;
     let assistantText = "";
@@ -172,7 +181,10 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
         } else if (event.type === "error") {
           pushLine(`[error] ${event.message}`, { color: "red" });
         } else if (event.type === "done") {
-          if (assistantText) pushLine(assistantText, { color: theme.assistantColor });
+          if (assistantText) {
+            const { text, format } = prepareMessageForTranscript(assistantText);
+            pushLine(text, { color: theme.assistantColor, timestamp: formatClock(), markdown: format === "markdown" });
+          }
         }
       }
     } finally {
@@ -308,13 +320,15 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
     const blocks = parseBlocks(line.text);
     blocks.forEach((block, i) => {
       const spacerHere = i === 0 && line.spacer;
-      const rows = estimateBlockRows(block, columns) + (spacerHere ? 1 : 0);
+      const timestampHere = i === 0 ? line.timestamp : undefined;
+      const rows = estimateBlockRows(block, columns) + (spacerHere ? 1 : 0) + (timestampHere ? 1 : 0);
       const id = `${line.id}-b${i}`;
       if (block.kind === "code") {
         entries.push({
           id, rows, atomic: true,
           render: () => (
             <Box key={id} flexDirection="column" flexShrink={0} marginTop={spacerHere ? 1 : 0}>
+              {timestampHere ? <Text dimColor>{timestampHere}</Text> : null}
               <CodeBlockView block={block} borderColor={theme.toolLine} />
             </Box>
           ),
@@ -323,7 +337,8 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
         entries.push({
           id, rows, atomic: false,
           render: () => (
-            <Box key={id} flexShrink={0} marginTop={spacerHere ? 1 : 0}>
+            <Box key={id} flexDirection="column" flexShrink={0} marginTop={spacerHere ? 1 : 0}>
+              {timestampHere ? <Text dimColor>{timestampHere}</Text> : null}
               <TextBlockView content={block.content} line={line} />
             </Box>
           ),

@@ -27,9 +27,9 @@ export function ModelPicker({ models, active, onSelect, onCancel, cwd, version }
 
   return (
     <Box flexDirection="column">
-      <Banner cwd={cwd} version={version} subtitle="Pick an Ollama model — up/down, enter · esc to cancel" />
+      <Banner cwd={cwd} version={version} subtitle="Pick a model — up/down, enter · esc to cancel" />
       {models.length === 0 ? (
-        <Text color="red">no Ollama models found. is ollama running? try: ollama pull &lt;name&gt;</Text>
+        <Text color="red">no models found. is your model server running?</Text>
       ) : models.map((name, i) => (
         <Text key={name} color={i === index ? theme.accent : undefined}>
           {i === index ? "> " : "  "}{name}{name === active ? " *" : ""}
