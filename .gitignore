@@ -5,3 +5,4 @@ dist/
 graphify-out/
 .DS_STORE
 *.vsix
+dist-packages/
