@@ -1,6 +1,7 @@
 // packages/daemon/src/cli/agent.ts
 import { createInterface } from "node:readline/promises";
 import { createCliContext, createRuntimeForSession, type CliOpts } from "./runtimeFactory";
+import { formatToolResultLine } from "./toolLine";
 
 export type AgentCliOpts = CliOpts;
 
@@ -102,8 +103,6 @@ export async function runAgentCli(argv: string[], root: string, opts: AgentCliOp
       for await (const event of runtime.sendMessage(sessionId, task, controller.signal)) {
         if (event.type === "text") {
           process.stdout.write(event.delta);
-        } else if (event.type === "toolCall") {
-          console.log(`\n[tool] ${event.call.name} ${JSON.stringify(event.call.args)}`);
         } else if (event.type === "approvalRequest") {
           console.log(`\n[approval] ${event.call.name}\n${event.preview}`);
           if (yes) {
@@ -117,7 +116,10 @@ export async function runAgentCli(argv: string[], root: string, opts: AgentCliOp
             runtime.resolveApproval(event.call.id, answer === "y");
           }
         } else if (event.type === "toolResult") {
-          console.log(`[result] ${event.result}`);
+          // Collapsed into one line, same as the TUI transcript - the raw
+          // call args + raw result used to print as two separate, often
+          // very long lines (full JSON args, untruncated result).
+          console.log(`\n${formatToolResultLine(event.call, event.result)}`);
         } else if (event.type === "error") {
           console.error(`[error] ${event.message}`);
           exitCode = 1;

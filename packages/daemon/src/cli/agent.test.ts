@@ -40,6 +40,33 @@ test("fails fast when approval is required, stdin is not a TTY, and --yes is abs
   expect(exitCode).not.toBe(0);
 });
 
+test("a finished tool call prints as one collapsed line, not a raw JSON dump", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "zero-agent-cli-"));
+  const toolProvider: ChatCapableProvider = {
+    ...stubProvider(""),
+    async *chat(messages) {
+      if (!messages.some((m) => m.role === "tool")) {
+        yield { toolCalls: [{ id: "c1", name: "fs_read", args: { path: "a.ts" } }] };
+      } else {
+        yield { text: "done" };
+      }
+    },
+  };
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (...args: unknown[]) => { logs.push(args.join(" ")); };
+  try {
+    await runAgentCli(["-p", "read a.ts", "--yes"], dir, { providers: [toolProvider] });
+  } finally {
+    console.log = originalLog;
+  }
+  const toolLine = logs.find((l) => l.includes("fs_read"));
+  expect(toolLine).toContain("✓ fs_read");
+  expect(toolLine).toContain('{"path":"a.ts"}');
+  expect(logs.some((l) => l.includes("[tool]"))).toBe(false);
+  expect(logs.some((l) => l.includes("[result]"))).toBe(false);
+});
+
 test("positionalArgs skips -p and its value, leaving only the workspace path", () => {
   expect(positionalArgs(["-p", "some task text", "/some/project/path", "--yes"])).toEqual(["/some/project/path"]);
   expect(positionalArgs(["-p", "some task text"])).toEqual([]);

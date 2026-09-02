@@ -9,6 +9,7 @@ import { ModelPicker } from "./ModelPicker";
 import { Spinner } from "./Spinner";
 import { useTheme } from "./theme";
 import { estimateBlockRows, estimateTextRows, parseBlocks, prepareMessageForTranscript } from "./markdown";
+import { formatToolResultLine } from "../toolLine";
 
 export interface ChatScreenProps {
   runtime: Pick<AgentRuntime, "sendMessage" | "resolveApproval">;
@@ -51,11 +52,6 @@ function matchingCommands(value: string) {
   return value.startsWith("/") ? SLASH_COMMANDS.filter((c) => c.name.startsWith(value)) : [];
 }
 
-function truncate(text: string, max: number): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
-}
-
 /** Wall-clock `HH:MM:SS`, prefixed onto each live turn's user/assistant
  * lines below so a resumed-later reader can tell when things happened -
  * resumed-session lines (seeded via `initialLines`) predate this and are
@@ -63,14 +59,6 @@ function truncate(text: string, max: number): string {
 function formatClock(d: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-function summarizeArgs(args: unknown): string {
-  try {
-    return truncate(JSON.stringify(args), 60);
-  } catch {
-    return "";
-  }
 }
 
 // Banner is fixed content (11 logo rows + 2 border rows + version/cwd line
@@ -174,7 +162,7 @@ export function ChatScreen({ runtime, sessionId, initialLines, cwd, version, onF
           // the transcript itself never shows the raw call + raw result
           // as two separate noisy lines.
           pushLine(
-            `✓ ${event.call.name} ${summarizeArgs(event.call.args)} → ${truncate(event.result, 60)}`,
+            formatToolResultLine(event.call, event.result),
             { color: theme.toolLine, dim: true },
           );
           setStatus("Thinking");
